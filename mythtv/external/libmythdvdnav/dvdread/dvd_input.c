@@ -27,7 +27,7 @@
 
 #include "dvdread/dvd_reader.h"      /* DVD_VIDEO_LB_LEN */
 #include "dvd_input.h"
-#include "io/mythiowrapper.h"
+#include "libmythtv/io/mythiowrapper.h"
 #include "mythdvdreadexp.h"
 
 /* The function pointers that is the exported interface of this file. */
@@ -54,7 +54,8 @@ int         (*dvdinput_read)  (dvd_input_t, void *, int, int);
 # else
 #   if defined(WIN32)
 /* Only needed on MINGW at the moment */
-#    include "../msvc/contrib/dlfcn.c"
+/*#    include "../msvc/contrib/dlfcn.c"*/
+#    include "libmythbase/compat.h"
 #   endif
 # endif
 
@@ -175,7 +176,7 @@ static dvd_input_t file_open(const char *target,
   }
 
   /* Open the device */
-#if !defined(WIN32) && !defined(__OS2__)
+#if !defined(__OS2__)
   dev->fd = MythFileOpen(target, O_RDONLY);
 #else
   dev->fd = mythfile_open(target, O_RDONLY | O_BINARY);

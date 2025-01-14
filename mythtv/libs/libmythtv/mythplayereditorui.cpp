@@ -1,6 +1,8 @@
+#include <algorithm>
+
 // MythTV
-#include "mythlogging.h"
-#include "mythuiactions.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythuiactions.h"
 #include "tv_actions.h"
 #include "tv_play.h"
 #include "mythplayereditorui.h"
@@ -136,7 +138,7 @@ void MythPlayerEditorUI::HandleArbSeek(bool Direction)
     }
 }
 
-bool MythPlayerEditorUI::HandleProgramEditorActions(QStringList& Actions)
+bool MythPlayerEditorUI::HandleProgramEditorActions(const QStringList& Actions)
 {
     bool handled = false;
     bool refresh = true;
@@ -144,7 +146,8 @@ bool MythPlayerEditorUI::HandleProgramEditorActions(QStringList& Actions)
 
     for (int i = 0; i < Actions.size() && !handled; i++)
     {
-        QString action = Actions[i];
+        static constexpr float FFREW_MULTICOUNT { 10.0F };
+        const QString& action = Actions[i];
         handled = true;
         float seekamount = m_deleteMap.GetSeekAmount();
         bool  seekzero   = qFuzzyCompare(seekamount + 1.0F, 1.0F);
@@ -205,7 +208,6 @@ bool MythPlayerEditorUI::HandleProgramEditorActions(QStringList& Actions)
             HandleArbSeek(true);
             m_deleteMap.SetSeekAmount(old_seekamount);
         }
-#define FFREW_MULTICOUNT 10.0F
         else if (action == ACTION_BIGJUMPREW)
         {
             if (seekzero)
@@ -288,7 +290,7 @@ bool MythPlayerEditorUI::DoFastForwardSecs(float Seconds, double Inaccuracy, boo
 
 bool MythPlayerEditorUI::DoRewindSecs(float Seconds, double Inaccuracy, bool UseCutlist)
 {
-    float target = qMax(0.0F, ComputeSecs(m_framesPlayed, UseCutlist) - Seconds);
+    float target = std::max(0.0F, ComputeSecs(m_framesPlayed, UseCutlist) - Seconds);
     uint64_t targetFrame = FindFrame(target, UseCutlist);
     return DoRewind(m_framesPlayed - targetFrame, Inaccuracy);
 }

@@ -1,10 +1,8 @@
-// ANSI C headers
-#include <cstdlib>
-
 // C++ headers
 #include <algorithm>
+#include <cstdlib>
 
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
 
 // avlib/ffmpeg headers
 extern "C" {
@@ -12,12 +10,12 @@ extern "C" {
 }
 
 // MythTV headers
-#include "mythframe.h"          // VideoFrame
-#include "mythplayer.h"
+#include "libmythtv/mythframe.h"       // VideoFrame
+#include "libmythtv/mythplayer.h"
 
 // Commercial Flagging headers
-#include "FrameAnalyzer.h"
 #include "EdgeDetector.h"
+#include "FrameAnalyzer.h"
 
 namespace edgeDetector {
 
@@ -34,7 +32,7 @@ sgm_init_exclude(unsigned int *sgm, const AVFrame *src, int srcheight,
      * Intuitively, the SGM of a pixel is a measure of the "edge intensity" of
      * that pixel: how much it differs from its neighbors.
      */
-    const int       srcwidth = src->linesize[0];
+    const size_t    srcwidth = src->linesize[0];
 
     memset(sgm, 0, srcwidth * srcheight * sizeof(*sgm));
     int rr2 = srcheight - 1;
@@ -46,11 +44,11 @@ sgm_init_exclude(unsigned int *sgm, const AVFrame *src, int srcheight,
             if (!rrccinrect(rr, cc, excluderow, excludecol,
                         excludewidth, excludeheight))
             {
-                uchar *rr0 = &src->data[0][rr * srcwidth + cc];
-                uchar *rr1 = &src->data[0][(rr + 1) * srcwidth + cc];
+                uchar *rr0 = &src->data[0][(rr * srcwidth) + cc];
+                uchar *rr1 = &src->data[0][((rr + 1) * srcwidth) + cc];
                 int dx = rr1[1] - rr0[0];   /* southeast - northwest */
                 int dy = rr1[0] - rr0[1];   /* southwest - northeast */
-                sgm[rr * srcwidth + cc] = dx * dx + dy * dy;
+                sgm[(rr * srcwidth) + cc] = dx * dx + dy * dy;
             }
         }
     }
@@ -72,7 +70,9 @@ static int sort_ascending(const void *aa, const void *bb)
 
 static int
 edge_mark(AVFrame *dst, int dstheight,
-        int extratop, int extraright, int extrabottom, int extraleft,
+        int extratop, int extraright,
+        [[maybe_unused]] int extrabottom,
+        int extraleft,
         const unsigned int *sgm, unsigned int *sgmsorted, int percentile,
         int excluderow, int excludecol, int excludewidth, int excludeheight)
 {
@@ -89,8 +89,6 @@ edge_mark(AVFrame *dst, int dstheight,
     const int           dstwidth = dst->linesize[0];
     const int           padded_width = extraleft + dstwidth + extraright;
 
-    (void)extrabottom;  /* gcc */
-
     /*
      * sgm: SGM values of padded (convolved) image
      *
@@ -105,7 +103,7 @@ edge_mark(AVFrame *dst, int dstheight,
             if (!rrccinrect(rr, cc, excluderow, excludecol,
                         excludewidth, excludeheight))
             {
-                sgmsorted[nn++] = sgm[(extratop + rr) * padded_width +
+                sgmsorted[nn++] = sgm[((extratop + rr) * padded_width) +
                     extraleft + cc];
             }
         }
@@ -166,9 +164,9 @@ edge_mark(AVFrame *dst, int dstheight,
         {
             if (!rrccinrect(rr, cc, excluderow, excludecol,
                         excludewidth, excludeheight) &&
-                    sgm[(extratop + rr) * padded_width + extraleft + cc] >=
+                    sgm[((extratop + rr) * padded_width) + extraleft + cc] >=
                         thresholdval)
-                dst->data[0][rr * dstwidth + cc] = UCHAR_MAX;
+                dst->data[0][(rr * dstwidth) + cc] = UCHAR_MAX;
         }
     }
     return 0;
@@ -198,12 +196,11 @@ int edge_mark_uniform_exclude(AVFrame *dst, int dstheight, int extramargin,
 };  /* namespace */
 
 int
-EdgeDetector::setExcludeArea(int row, int col, int width, int height)
+EdgeDetector::setExcludeArea([[maybe_unused]] int row,
+                             [[maybe_unused]] int col,
+                             [[maybe_unused]] int width,
+                             [[maybe_unused]] int height)
 {
-    (void)row;  /* gcc */
-    (void)col;  /* gcc */
-    (void)width;    /* gcc */
-    (void)height;   /* gcc */
     return 0;
 }
 

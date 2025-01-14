@@ -6,13 +6,14 @@
 //                                                                            
 // Copyright (c) 2012 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 /////////////////////////////////////////////////////////////////////////////
 
 #include <QCoreApplication>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+
 #include "xsd.h"
 
 #include "servicehost.h"
@@ -39,7 +40,7 @@ bool Xsd::GetEnumXSD( HTTPRequest *pRequest, const QString& sEnumName )
     // Create Parent object so we can get to its metaObject
     // ----------------------------------------------------------------------
 
-    QString sParentFQN = lstTypeParts[0];
+    const QString& sParentFQN = lstTypeParts[0];
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     int nParentId = QMetaType::type( sParentFQN.toUtf8() );
 
@@ -413,7 +414,7 @@ bool Xsd::RenderXSD( HTTPRequest *pRequest, QObject *pClass )
                                                      sPropName, 
                                                      "type" );
 
-                if (sContentType.at(0) == 'Q')
+                if (sContentType.startsWith('Q'))
                     sContentType = sContentType.mid( 1 );
 
                 sContentType.remove( "DTC::"    );
@@ -431,7 +432,9 @@ bool Xsd::RenderXSD( HTTPRequest *pRequest, QObject *pClass )
                     sType = "MapOfString" + sContentName;
                 }
                 else
+                {
                     sType = "ArrayOf" + sContentType;
+                }
 
                 bCustomType = true;
 
@@ -905,7 +908,7 @@ QString Xsd::ConvertTypeToXSD( const QString &sType, bool bCustomType )
     if (sType == "QFileInfo" )
         return "string";        // temp solution
 
-    if (sType.at(0) == 'Q')
+    if (sType.startsWith('Q'))
         return sType.mid( 1 ).toLower();
 
     return sType.toLower();
@@ -931,12 +934,12 @@ QString Xsd::ReadPropertyMetadata( QObject *pObject, const QString& sPropName, c
 
         QString     sFullKey  = sKey + "=";
 
-        for (const QString& option : qAsConst(sOptions))
+        for (const QString& option : std::as_const(sOptions))
         {
             if (option.startsWith( sFullKey ))
                 return option.mid( sFullKey.length() );
         }
     }
 
-    return QString();
+    return {};
 }

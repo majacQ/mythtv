@@ -14,13 +14,13 @@
 #include <QSet>
 
 // MythTV headers
-#include "filesysteminfo.h"
-#include "recordinginfo.h"
-#include "remoteutil.h"
-#include "mythdeque.h"
-#include "mythscheduler.h"
-#include "mthread.h"
-#include "scheduledrecording.h"
+#include "libmythbase/filesysteminfo.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythdeque.h"
+#include "libmythbase/mythscheduler.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/scheduledrecording.h"
 
 class EncoderLink;
 class MainServer;
@@ -37,8 +37,8 @@ class SchedInputInfo
     uint          m_inputId      {0};
     uint          m_sgroupId     {0};
     bool          m_schedGroup   {false};
-    vector<uint>  m_groupInputs;
-    vector<uint>  m_conflictingInputs;
+    std::vector<unsigned int>  m_groupInputs;
+    std::vector<unsigned int>  m_conflictingInputs;
     RecList      *m_conflictList {nullptr};
 };
 
@@ -53,6 +53,7 @@ class Scheduler : public MThread, public MythScheduler
     void Wait(void) { MThread::wait(); }
 
     void SetExpirer(AutoExpire *autoExpirer) { m_expirer = autoExpirer; }
+    AutoExpire * GetExpirer() { return m_expirer; }
 
     void Reschedule(const QStringList &request);
     void RescheduleMatch(uint recordid, uint sourceid, uint mplexid,
@@ -80,8 +81,10 @@ class Scheduler : public MThread, public MythScheduler
     bool GetAllPending(ProgramList &retList, int recRuleId = 0) const;
     void GetAllPending(QStringList &strList) const override; // MythScheduler
     QMap<QString,ProgramInfo*> GetRecording(void) const override; // MythScheduler
+    virtual RecordingInfo* GetRecording(uint recordedid) const;
 
-    enum SchedSortColumn { kSortTitle, kSortLastRecorded, kSortNextRecording,
+    enum SchedSortColumn : std::uint8_t
+                         { kSortTitle, kSortLastRecorded, kSortNextRecording,
                            kSortPriority, kSortType };
     static void GetAllScheduled(QStringList &strList,
                                 SchedSortColumn sortBy = kSortTitle,
@@ -99,12 +102,14 @@ class Scheduler : public MThread, public MythScheduler
     static void PrintRec(const RecordingInfo *p, const QString &prefix = "");
 
     void SetMainServer(MainServer *ms);
+    MainServer * GetMainServer() {return m_mainServer; };
 
     void SlaveConnected(const RecordingList &slavelist);
     void SlaveDisconnected(uint cardid);
 
     void DisableScheduling(void) { m_schedulingEnabled = false; }
     void EnableScheduling(void) { m_schedulingEnabled = true; }
+    bool QueryScheduling(void) const { return m_schedulingEnabled; }
     void GetNextLiveTVDir(uint cardid);
     void ResetIdleTime(void);
 
@@ -114,14 +119,14 @@ class Scheduler : public MThread, public MythScheduler
 
     int GetError(void) const { return m_error; }
 
-    void AddChildInput(uint parentid, uint inputid);
+    void AddChildInput(uint parentid, uint childid);
     void DelayShutdown();
 
   protected:
     void run(void) override; // MThread
 
   private:
-    enum OpenEndType {
+    enum OpenEndType : std::uint8_t {
         openEndNever = 0,
         openEndDiffChannel = 1,
         openEndAlways = 2
@@ -242,14 +247,14 @@ class Scheduler : public MThread, public MythScheduler
     RecList                m_workList;
     RecList                m_livetvList;
     QMap<uint, SchedInputInfo> m_sinputInfoMap;
-    vector<RecList *>      m_conflictLists;
+    std::vector<RecList *> m_conflictLists;
     QMap<uint, RecList>    m_recordIdListMap;
     QMap<QString, RecList> m_titleListMap;
 
     QDateTime m_schedTime;
     bool m_recListChanged              {false};
 
-    bool m_specSched;
+    bool m_specSched                   {false};
     bool m_schedulingEnabled           {true};
     QMap<int, bool> m_schedAfterStartMap;
 
@@ -258,7 +263,7 @@ class Scheduler : public MThread, public MythScheduler
 
     QSet<uint> m_schedOrderWarned;
 
-    bool m_doRun;
+    bool m_doRun                       {false};
 
     MainServer *m_mainServer           {nullptr};
 
@@ -281,7 +286,7 @@ class Scheduler : public MThread, public MythScheduler
     // Delay shutdown util this time (ms since epoch);
     std::chrono::milliseconds m_delayShutdownTime        {0ms};
 
-    OpenEndType m_openEnd;
+    OpenEndType m_openEnd { openEndNever };
 
     // cache IsSameProgram()
     using IsSameKey = std::pair<const RecordingInfo*,const RecordingInfo*>;

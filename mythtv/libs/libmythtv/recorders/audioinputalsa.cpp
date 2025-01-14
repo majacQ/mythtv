@@ -19,7 +19,7 @@
  * 02110-1301, USA.
  */
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "audioinputalsa.h"
 
 #define LOC     QString("AudioInALSA: ")
@@ -93,11 +93,11 @@ int AudioInputALSA::GetSamples(void* buf, uint nbytes)
             if (!recov)
                 break;
         }
-        [[clang::fallthrough]];
+        [[fallthrough]];
         case SND_PCM_STATE_PREPARED:
             if (AlsaBad(snd_pcm_start(m_pcmHandle), "pcm start failed"))
                  break;
-            [[clang::fallthrough]];
+            [[fallthrough]];
         case SND_PCM_STATE_RUNNING:
             bytes_read = PcmRead(buf, nbytes);
             break;
@@ -121,7 +121,8 @@ int AudioInputALSA::GetNumReadyBytes(void)
         {
             case SND_PCM_STATE_PREPARED:
             case SND_PCM_STATE_RUNNING:
-                if (!AlsaBad((frames_avail = snd_pcm_avail_update(m_pcmHandle)),
+                frames_avail = snd_pcm_avail_update(m_pcmHandle);
+                if (!AlsaBad(frames_avail,
                              "GetNumReadyBytes, available update failed"))
                     bytes_avail = snd_pcm_frames_to_bytes(m_pcmHandle,
                                                           frames_avail);
@@ -247,8 +248,8 @@ int AudioInputALSA::PcmRead(void* buf, uint nbytes)
     int retries = 0;
     while (nframes > 0 && retries < 3)
     {
-        if (AlsaBad((avail = snd_pcm_avail_update(m_pcmHandle)),
-                    "available update failed"))
+        avail = snd_pcm_avail_update(m_pcmHandle);
+        if (AlsaBad(avail, "available update failed"))
         {
             if (!Recovery(avail))
             {
@@ -256,7 +257,8 @@ int AudioInputALSA::PcmRead(void* buf, uint nbytes)
                 continue;
             }
         }
-        if ((nread = snd_pcm_readi(m_pcmHandle, bufptr, nframes)) < 0)
+        nread = snd_pcm_readi(m_pcmHandle, bufptr, nframes);
+        if (nread < 0)
         {
             switch (nread)
             {
@@ -311,7 +313,7 @@ bool AudioInputALSA::Recovery(int err)
 #if ESTRPIPE != EPIPE
         case -ESTRPIPE:
             suspense = true;
-            [[clang::fallthrough]];
+            [[fallthrough]];
 #endif
         case -EPIPE:
         {

@@ -1,6 +1,8 @@
 #include <chrono>
 
 // MythTV
+#include "libmythbase/mythdate.h"
+
 #include "tv_play.h"
 #include "livetvchain.h"
 #include "mythplayeroverlayui.h"
@@ -18,7 +20,7 @@ MythPlayerOverlayUI::MythPlayerOverlayUI(MythMainWindow* MainWindow, TV* Tv, Pla
     m_positionUpdateTimer.setInterval(999ms);
     connect(&m_positionUpdateTimer, &QTimer::timeout, this, &MythPlayerOverlayUI::UpdateOSDPosition);
     connect(this, &MythPlayerOverlayUI::OverlayStateChanged, m_tv, &TV::OverlayStateChanged);
-    connect(m_tv, &TV::ChangeOSDMessage, this, QOverload<const QString&>::of(&MythPlayerOverlayUI::UpdateOSDMessage));
+    connect(m_tv, &TV::ChangeOSDMessage, this, qOverload<const QString&>(&MythPlayerOverlayUI::UpdateOSDMessage));
 
     // Signalled directly from TV to OSD
     connect(m_tv, &TV::DialogQuit,    &m_osd, &OSD::DialogQuit);
@@ -208,20 +210,20 @@ void MythPlayerOverlayUI::UpdateSliderInfo(osdInfo &Info, bool PaddedFields)
         QString text3;
         if (PaddedFields)
         {
-            text1 = MythFormatTime(secsplayed, "HH:mm:ss");
-            text2 = MythFormatTime(playbackLen, "HH:mm:ss");
-            text3 = MythFormatTime(secsbehind, "HH:mm:ss");
+            text1 = MythDate::formatTime(secsplayed, "HH:mm:ss");
+            text2 = MythDate::formatTime(playbackLen, "HH:mm:ss");
+            text3 = MythDate::formatTime(secsbehind, "HH:mm:ss");
         }
         else
         {
             QString fmt = (playbackLen >= 1h) ? "H:mm:ss" : "m:ss";
-            text1 = MythFormatTime(secsplayed, fmt);
-            text2 = MythFormatTime(playbackLen, fmt);
+            text1 = MythDate::formatTime(secsplayed, fmt);
+            text2 = MythDate::formatTime(playbackLen, fmt);
 
             if (secsbehind >= 1h)
-                text3 = MythFormatTime(secsbehind, "H:mm:ss");
+                text3 = MythDate::formatTime(secsbehind, "H:mm:ss");
             else if (secsbehind >= 1min)
-                text3 = MythFormatTime(secsbehind, "m:ss");
+                text3 = MythDate::formatTime(secsbehind, "m:ss");
             else
                 text3 = tr("%n second(s)", "", static_cast<int>(secsbehind.count()));
         }
@@ -232,6 +234,22 @@ void MythPlayerOverlayUI::UpdateSliderInfo(osdInfo &Info, bool PaddedFields)
         Info.text[relPrefix + "totaltime"] = text2;
         Info.text[relPrefix + "remainingtime"] = islive ? QString() : text3;
         Info.text[relPrefix + "behindtime"] = islive ? text3 : QString();
+        QString dtformat = gCoreContext->GetSetting("DateFormat", "ddd MMMM d yyyy")
+            + ", " + gCoreContext->GetSetting("TimeFormat", "hh:mm");
+
+        if (m_playerCtx->GetState() == kState_WatchingPreRecorded )
+        {
+            QDateTime recordedtime =
+                m_playerCtx->m_playingRecStart.addSecs(static_cast<qint64>(secsplayed.count()));
+            Info.text[relPrefix + "recordedtime"] = recordedtime.toLocalTime().toString(dtformat);
+        }
+
+        if (i == 0)
+        {
+            LOG(VB_OSD, LOG_INFO, LOC +
+                QString(" playbackLen:%1").arg(playbackLen.count()) +
+                QString(" secsplayed:%1").arg(secsplayed.count()));
+        }
     }
 }
 

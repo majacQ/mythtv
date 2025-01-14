@@ -7,15 +7,11 @@
 #include <QDomDocument>
 
 // mythtv
-#include "mythchrono.h"
-#include "mythcontext.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythchrono.h"
 
 // libmythmetadata
 #include "lyricsdata.h"
-
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
 
 static const QRegularExpression kTimeCode { R"(^(\[(\d\d):(\d\d)(?:\.(\d\d))?\])(.*))" };
 
@@ -186,7 +182,7 @@ QString LyricsData::createLyricsXML(void)
 
 void LyricsData::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent*>(event);
         if (!me)
@@ -234,6 +230,7 @@ void LyricsData::customEvent(QEvent *event)
 void LyricsData::loadLyrics(const QString &xmlData)
 {
     QDomDocument domDoc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
@@ -246,6 +243,19 @@ void LyricsData::loadLyrics(const QString &xmlData)
         m_status = STATUS_NOTFOUND;
         return;
     }
+#else
+    auto parseResult = domDoc.setContent(xmlData);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+            QString("LyricsData:: Could not parse lyrics from %1").arg(xmlData) +
+            QString("\n\t\t\tError at line: %1  column: %2 msg: %3")
+            .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+            .arg(parseResult.errorMessage));
+        m_status = STATUS_NOTFOUND;
+        return;
+    }
+#endif
 
     QDomNodeList itemList = domDoc.elementsByTagName("lyrics");
     QDomNode itemNode = itemList.item(0);
@@ -280,7 +290,7 @@ void LyricsData::loadLyrics(const QString &xmlData)
                     lyric.remove(0,match.capturedLength(1));
                     match = kTimeCode.match(lyric);
                 }
-                for (const auto &time : qAsConst(times))
+                for (const auto &time : std::as_const(times))
                     lyrics.append(time + lyric);
             }
             else
@@ -329,7 +339,7 @@ void LyricsData::setLyrics(const QStringList &lyrics)
                     int seconds    = match.capturedView(3).toInt();
                     int hundredths = match.capturedView(4).toInt();
 
-                    line->m_lyric  = match.captured(5).trimmed();
+                    line->m_lyric  = match.captured(5);
                     line->m_time   = millisecondsFromParts(0, minutes, seconds, hundredths * 10);
                     line->m_time   = std::max(0ms, line->m_time - offset);
                     lastTime       = line->m_time;
@@ -337,7 +347,7 @@ void LyricsData::setLyrics(const QStringList &lyrics)
                 else
                 {
                     line->m_time = ++lastTime;
-                    line->m_lyric = lyric.trimmed();
+                    line->m_lyric = lyric;
                 }
             }
         }
@@ -347,13 +357,13 @@ void LyricsData::setLyrics(const QStringList &lyrics)
             if (m_parent && !m_parent->isRadio())
             {
                 line->m_time = std::chrono::milliseconds((m_parent->Length() / lyrics.count()) * x);
-                line->m_lyric = lyric.trimmed();
+                line->m_lyric = lyric;
                 lastTime = line->m_time;
             }
             else
             {
                 line->m_time = ++lastTime;
-                line->m_lyric = lyric.trimmed();
+                line->m_lyric = lyric;
             }
         }
 

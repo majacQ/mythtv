@@ -6,10 +6,9 @@ win32-msvc* {
 
 # Libraries without dependencies
 
-!using_exiv2_external: SUBDIRS += libexiv2
-!using_libbluray_external: SUBDIRS += libmythbluray
+!using_system_libexiv2: SUBDIRS += libexiv2
+!using_system_libbluray: SUBDIRS += libmythbluray
 SUBDIRS += libmythdvdnav
-SUBDIRS += libudfread
-SUBDIRS += libmythsoundtouch
+!using_system_libudfread: SUBDIRS += libudfread
 
 }

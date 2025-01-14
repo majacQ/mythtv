@@ -1,5 +1,5 @@
 // MythTV
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
 #include "mythvideocolourspace.h"
 #include "fourcc.h"
 #include "opengl/mythvaapidrminterop.h"
@@ -69,7 +69,7 @@ void MythVAAPIInteropDRM::DeleteTextures()
         int count = 0;
         for (auto it = m_openglTextures.constBegin() ; it != m_openglTextures.constEnd(); ++it)
         {
-            vector<MythVideoTextureOpenGL*> textures = it.value();
+            std::vector<MythVideoTextureOpenGL*> textures = it.value();
             for (auto & texture : textures)
             {
                 if (texture->m_data)
@@ -138,9 +138,9 @@ void MythVAAPIInteropDRM::RotateReferenceFrames(AVBufferRef* Buffer)
     }
 }
 
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::GetReferenceFrames()
+std::vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::GetReferenceFrames()
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
     int size = m_referenceFrames.size();
     if (size < 1)
         return result;
@@ -162,12 +162,13 @@ vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::GetReferenceFrames()
     return result;
 }
 
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::Acquire(MythRenderOpenGL* Context,
-                                                             MythVideoColourSpace* ColourSpace,
-                                                             MythVideoFrame* Frame,
-                                                             FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythVAAPIInteropDRM::Acquire(MythRenderOpenGL* Context,
+                             MythVideoColourSpace* ColourSpace,
+                             MythVideoFrame* Frame,
+                             FrameScanType Scan)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
     if (!Frame)
         return result;
 
@@ -281,11 +282,12 @@ vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::Acquire(MythRenderOpenGL* C
 #define DRM_FORMAT_GR1616   MKTAG2('G', 'R', '3', '2')
 #endif
 
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::AcquireVAAPI(VASurfaceID Id,
-                                                            MythRenderOpenGL* Context,
-                                                            MythVideoFrame* Frame)
+std::vector<MythVideoTextureOpenGL*>
+MythVAAPIInteropDRM::AcquireVAAPI(VASurfaceID Id,
+                                  MythRenderOpenGL* Context,
+                                  MythVideoFrame* Frame)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
 
     VAImage vaimage;
     memset(&vaimage, 0, sizeof(vaimage));
@@ -404,11 +406,12 @@ static inline void VADRMtoPRIME(VADRMPRIMESurfaceDescriptor* VaDRM, AVDRMFrameDe
  * This is funcionally equivalent to the 'regular' VAAPI version but is useful
  * for testing DRM PRIME functionality on desktops.
 */
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::AcquirePrime(VASurfaceID Id,
-                                                                  MythRenderOpenGL* Context,
-                                                                  MythVideoFrame* Frame)
+std::vector<MythVideoTextureOpenGL*>
+MythVAAPIInteropDRM::AcquirePrime([[maybe_unused]] VASurfaceID Id,
+                                  [[maybe_unused]] MythRenderOpenGL* Context,
+                                  [[maybe_unused]] MythVideoFrame* Frame)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
 
 #if VA_CHECK_VERSION(1, 1, 0)
     if (!m_drmFrames.contains(Id))
@@ -416,15 +419,11 @@ vector<MythVideoTextureOpenGL*> MythVAAPIInteropDRM::AcquirePrime(VASurfaceID Id
     if (!m_drmFrames.contains(Id))
         return result;
     result = CreateTextures(m_drmFrames[Id], Context, Frame, false);
-#else
-    (void)Id;
-    (void)Context;
-    (void)Frame;
 #endif
     return result;
 }
 
-AVDRMFrameDescriptor* MythVAAPIInteropDRM::GetDRMFrameDescriptor(VASurfaceID Id)
+AVDRMFrameDescriptor* MythVAAPIInteropDRM::GetDRMFrameDescriptor([[maybe_unused]] VASurfaceID Id)
 {
 #if VA_CHECK_VERSION(1, 1, 0)
     INIT_ST;
@@ -439,7 +438,6 @@ AVDRMFrameDescriptor* MythVAAPIInteropDRM::GetDRMFrameDescriptor(VASurfaceID Id)
     VADRMtoPRIME(&vadesc, drmdesc);
     return drmdesc;
 #else
-    (void)Id;
     return nullptr;
 #endif
 }
@@ -450,11 +448,11 @@ void MythVAAPIInteropDRM::CleanupDRMPRIME()
         return;
 
     LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("Releasing %1 DRM descriptors").arg(m_drmFrames.size()));
-    for (auto * frame : qAsConst(m_drmFrames))
+    for (auto * frame : std::as_const(m_drmFrames))
     {
         for (int i = 0; i < frame->nb_objects; i++)
             close(frame->objects[i].fd);
-        av_freep(&frame);
+        av_freep(reinterpret_cast<void*>(&frame));
     }
     m_drmFrames.clear();
 }
@@ -493,8 +491,8 @@ bool MythVAAPIInteropDRM::TestPrimeInterop()
             AVDRMFrameDescriptor drmdesc;
             memset(&drmdesc, 0, sizeof(drmdesc));
             VADRMtoPRIME(&vadesc, &drmdesc);
-            vector<MythVideoTextureOpenGL*> textures =
-                    CreateTextures(&drmdesc, m_openglContext, &frame, false);
+            std::vector<MythVideoTextureOpenGL*> textures =
+                CreateTextures(&drmdesc, m_openglContext, &frame, false);
 
             if (!textures.empty())
             {

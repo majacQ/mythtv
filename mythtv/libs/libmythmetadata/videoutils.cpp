@@ -4,20 +4,16 @@
 #include <QDir>
 #include <QCoreApplication>
 
-// libmythbase
-#include "mythdirs.h"
-#include "mythsystemlegacy.h"
-#include "storagegroup.h"
-
-// libmyth
-#include "mythcontext.h"
-
-// libmythui
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-#include "mythuistatetype.h"
-#include "mythuiimage.h"
-#include "mythuitext.h"
+// mythtv
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
 
 // libmythmetadata
 #include "globals.h"
@@ -82,7 +78,7 @@ QStringList GetVideoDirsByHost(const QString& host)
     QStringList tmp;
 
     QStringList tmp2 = StorageGroup::getGroupDirs("Videos", host);
-    for (const auto& dir : qAsConst(tmp2))
+    for (const auto& dir : std::as_const(tmp2))
         tmp.append(dir);
 
     if (host.isEmpty())
@@ -92,21 +88,16 @@ QStringList GetVideoDirsByHost(const QString& host)
 #else
         QString seperator = ":";
 #endif
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tmp3 = gCoreContext->GetSetting("VideoStartupDir",
-                    DEFAULT_VIDEOSTARTUP_DIR).split(seperator, QString::SkipEmptyParts);
-#else
         QStringList tmp3 = gCoreContext->GetSetting("VideoStartupDir",
                     DEFAULT_VIDEOSTARTUP_DIR).split(seperator, Qt::SkipEmptyParts);
-#endif
-        for (const auto& dir : qAsConst(tmp3))
+        for (const auto& dir : std::as_const(tmp3))
         {
             bool matches = false;
             QString newpath = dir;
             if (!newpath.endsWith("/"))
                 newpath.append("/");
 
-            for (const auto& comp : qAsConst(tmp2))
+            for (const auto& comp : std::as_const(tmp2))
             {
                 if (comp.endsWith(newpath))
                 {

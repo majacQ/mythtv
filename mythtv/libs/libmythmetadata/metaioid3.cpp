@@ -7,8 +7,8 @@
 #include <QBuffer>
 
 // Libmythbase
-#include <mythlogging.h>
-#include <mythcorecontext.h>
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
 
 // Taglib
 #include <flacfile.h>
@@ -187,7 +187,9 @@ bool MetaIOID3::write(const QString &filename, MusicMetadata* mdata)
         musicbrainz->setText(MYTH_MUSICBRAINZ_ALBUMARTIST_UUID);
     }
     else if (musicbrainz)
+    {
         tag->removeFrame(musicbrainz);
+    }
 
     // Compilation Artist Frame (TPE4/2)
     if (!mdata->CompilationArtist().isEmpty())
@@ -558,18 +560,18 @@ AlbumArtList MetaIOID3::readAlbumArt(TagLib::ID3v2::Tag *tag)
 QString MetaIOID3::getExtFromMimeType(const QString &mimeType)
 {
     if (mimeType == "image/png")
-        return QString(".png");
+        return {".png"};
     if (mimeType == "image/jpeg" || mimeType == "image/jpg")
-        return QString(".jpg");
+        return {".jpg"};
     if (mimeType == "image/gif")
-        return QString(".gif");
+        return {".gif"};
     if (mimeType == "image/bmp")
-        return QString(".bmp");
+        return {".bmp"};
 
     LOG(VB_GENERAL, LOG_ERR,
         "Music Scanner - Unknown image mimetype found - " + mimeType);
 
-    return QString();
+    return {};
 }
 
 /*!
@@ -946,7 +948,11 @@ bool MetaIOID3::writeLastPlay(TagLib::ID3v2::Tag *tag, QDateTime lastPlay)
         tag->addFrame(txxx);
         txxx->setDescription("MythTVLastPlayed");
     }
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     lastPlay.setTimeSpec(Qt::UTC);
+#else
+    lastPlay.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
     txxx->setText(QStringToTString(lastPlay.toString(Qt::ISODate)));
 
     return true;

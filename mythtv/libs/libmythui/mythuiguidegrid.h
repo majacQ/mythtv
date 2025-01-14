@@ -1,6 +1,7 @@
 #ifndef MYTHUIGUIDEGRID_H_
 #define MYTHUIGUIDEGRID_H_
 
+#include <array>
 #include <utility>
 
 // QT
@@ -15,19 +16,20 @@
 #include "mythuitype.h"
 #include "mythuiimage.h"
 
-#define ARROWIMAGESIZE 4
-#define RECSTATUSSIZE  8
+static constexpr size_t ARROWIMAGESIZE { 4 };
+static constexpr size_t RECSTATUSSIZE  { 8 };
 
 
 // max number of channels to display in the guide grid
-#define MAX_DISPLAY_CHANS 40
+static constexpr int MAX_DISPLAY_CHANS { 40 };
 
 // max number of 5 minute time slots to show in guide grid (48 = 4hrs)
-#define MAX_DISPLAY_TIMES 48
+static constexpr int MAX_DISPLAY_TIMES { 48 };
 
-#define GridTimeNormal       0
-#define GridTimeStartsBefore 1
-#define GridTimeEndsAfter    2
+// bitmask
+static constexpr uint8_t GridTimeNormal       { 0 };
+static constexpr uint8_t GridTimeStartsBefore { 1 };
+static constexpr uint8_t GridTimeEndsAfter    { 2 };
 
 class MythFontProperties;
 
@@ -48,7 +50,7 @@ class MUI_PUBLIC MythUIGuideGrid : public MythUIType
     void DrawSelf(MythPainter *p, int xoffset, int yoffset,
                   int alphaMod, QRect clipRect) override; // MythUIType
 
-    enum FillType { Alpha = 10, Dense, Eco, Solid };
+    enum FillType : std::uint8_t { Alpha = 10, Dense, Eco, Solid };
 
     bool isVerticalLayout(void) const { return m_verticalLayout; }
     int  getChannelCount(void) const { return m_channelCount; }
@@ -83,7 +85,7 @@ class MUI_PUBLIC MythUIGuideGrid : public MythUIType
     class UIGTCon
     {
       public:
-        UIGTCon() { m_arrow = GridTimeNormal; m_recType = m_recStat = 0; };
+        UIGTCon() : m_arrow(GridTimeNormal) { };
         UIGTCon(const QRect drawArea, QString title,
                 const QString &category, int arrow, int recType, int recStat) :
                 m_drawArea(drawArea),               m_title(std::move(title)),
@@ -98,9 +100,9 @@ class MUI_PUBLIC MythUIGuideGrid : public MythUIType
         QString m_title;
         QString m_category;
         QColor m_categoryColor;
-        int m_arrow;
-        int m_recType;
-        int m_recStat;
+        int m_arrow   { GridTimeNormal };
+        int m_recType { 0 };
+        int m_recStat { 0 };
     };
 
     void drawBackground(MythPainter *p, int xoffset, int yoffset,

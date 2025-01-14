@@ -1,20 +1,17 @@
-// myth
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "remoteutil.h"
-#include "recordinginfo.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/scheduledrecording.h"
+#include "libmythtv/tv.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
 
-//mythui
-#include "mythuitext.h"
-#include "mythuibuttonlist.h"
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-
-//mythtv
-#include "scheduledrecording.h"
-#include "tv.h"
-
-//mythfrontend
+// MythFrontend
 #include "viewschedulediff.h"
 
 bool ViewScheduleDiff::Create()
@@ -85,43 +82,54 @@ void ViewScheduleDiff::showStatus(MythUIButtonListItem */*item*/)
 
     QString timeFormat = gCoreContext->GetSetting("TimeFormat", "h:mm AP");
 
-    QString message = pi->toString(ProgramInfo::kTitleSubtitle, " - ");
-    message += "\n\n";
-    message += RecStatus::toDescription(pi->GetRecordingStatus(),
-                             pi->GetRecordingRuleType(),
-                             pi->GetRecordingStartTime());
+    QString message = QString("%1 - %2  %3\n")
+        .arg(pi->GetRecordingStartTime().toLocalTime().toString(timeFormat),
+             pi->GetRecordingEndTime().toLocalTime().toString(timeFormat),
+             pi->toString(ProgramInfo::kTitleSubtitle, " - "));
 
+    message += "\n";
+    message += RecStatus::toDescription(pi->GetRecordingStatus(),
+                                        pi->GetRecordingRuleType(),
+                                        pi->GetRecordingStartTime());
+
+    QString messageConflict;
     if (pi->GetRecordingStatus() == RecStatus::Conflict ||
         pi->GetRecordingStatus() == RecStatus::LaterShowing)
     {
-        message += " " + QObject::tr("The following programs will be recorded "
-                                     "instead:") + "\n\n";
+        uint pi_chanid = pi->GetChanID();
+        uint pi_sourceid = ChannelUtil::GetSourceIDForChannel(pi_chanid);
 
         for (auto *pa : m_recListAfter)
         {
-            if (pa->GetRecordingStartTime() >= pi->GetRecordingEndTime())
-                break;
-            if (pa->GetRecordingEndTime() > pi->GetRecordingStartTime() &&
-                (pa->GetRecordingStatus() == RecStatus::WillRecord ||
-                 pa->GetRecordingStatus() == RecStatus::Pending ||
-                 pa->GetRecordingStatus() == RecStatus::Recording ||
-                 pa->GetRecordingStatus() == RecStatus::Tuning ||
-                 pa->GetRecordingStatus() == RecStatus::Failing))
+            if ((pa->GetRecordingStartTime() < pi->GetRecordingEndTime()  ) &&
+                (pa->GetRecordingEndTime()   > pi->GetRecordingStartTime()) &&
+                (pa->GetSourceID()          == pi_sourceid                ) &&
+                (pa->GetRecordingStatus()   == RecStatus::WillRecord ||
+                 pa->GetRecordingStatus()   == RecStatus::Pending    ||
+                 pa->GetRecordingStatus()   == RecStatus::Recording  ||
+                 pa->GetRecordingStatus()   == RecStatus::Tuning     ||
+                 pa->GetRecordingStatus()   == RecStatus::Failing))
             {
-                message += QString("%1 - %2  %3\n")
-                    .arg(pa->GetRecordingStartTime()
-                         .toLocalTime().toString(timeFormat),
-                         pa->GetRecordingEndTime()
-                         .toLocalTime().toString(timeFormat),
+                messageConflict += QString("%1 - %2  %3\n")
+                    .arg(pa->GetRecordingStartTime().toLocalTime().toString(timeFormat),
+                         pa->GetRecordingEndTime().toLocalTime().toString(timeFormat),
                          pa->toString(ProgramInfo::kTitleSubtitle, " - "));
             }
         }
     }
 
+    if (!messageConflict.isEmpty())
+    {
+        message += " ";
+        message += tr("The following programs will be recorded instead:");
+        message += "\n";
+        message += messageConflict;
+        message += "\n";
+    }
+
     QString title = QObject::tr("Program Status");
     MythScreenStack *mainStack = GetMythMainWindow()->GetStack("main stack");
-    auto   *dlg = new MythDialogBox(title, message, mainStack,
-                                    "statusdialog", true);
+    auto *dlg = new MythDialogBox(title, message, mainStack, "statusdialog", true);
 
     if (dlg->Create())
     {
@@ -129,7 +137,9 @@ void ViewScheduleDiff::showStatus(MythUIButtonListItem */*item*/)
         mainStack->AddScreen(dlg);
     }
     else
+    {
         delete dlg;
+    }
 }
 
 static int comp_recstart(const ProgramInfo *a, const ProgramInfo *b)
@@ -266,7 +276,7 @@ void ViewScheduleDiff::fillList(void)
 
 void ViewScheduleDiff::updateUIList(void)
 {
-    for (auto s : m_recList)
+    for (const auto& s : m_recList)
     {
         class ProgramInfo *pginfo = s.m_after;
         if (!pginfo)

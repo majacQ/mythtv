@@ -9,12 +9,10 @@
 #include <QRunnable>
 #include <QMutex>
 #include <QEvent>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 
-#include "mthread.h"
-#include "serverpool.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/serverpool.h"
 
 class MainServer;
 class QTextStream;
@@ -85,7 +83,7 @@ class NetworkControlCloseEvent : public QEvent
 
     NetworkControlClient *getClient() { return m_networkControlClient; }
 
-    static Type kEventType;
+    static const Type kEventType;
 
   private:
     NetworkControlClient *m_networkControlClient {nullptr};
@@ -123,7 +121,7 @@ class NetworkControl : public ServerPool, public QRunnable
     QString processHelp(NetworkCommand *nc);
 
     void notifyDataAvailable(void);
-    void sendReplyToClient(NetworkControlClient *ncc, QString &reply);
+    void sendReplyToClient(NetworkControlClient *ncc, const QString &reply);
     void customEvent(QEvent *e) override; // QObject
 
     static QString listRecordings(const QString& chanid = "", const QString& starttime = "");
@@ -144,11 +142,7 @@ class NetworkControl : public ServerPool, public QRunnable
     QMap <QString, int>     m_keyMap;
     QMap <int, QString>     m_keyTextMap;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex  m_clientLock {QMutex::Recursive};
-#else
     mutable QRecursiveMutex  m_clientLock;
-#endif
     QList<NetworkControlClient*> m_clients;
 
     QList<NetworkCommand*> m_networkControlCommands; // protected by ncLock

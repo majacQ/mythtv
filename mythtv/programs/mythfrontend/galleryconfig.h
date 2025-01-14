@@ -4,7 +4,7 @@
 #ifndef GALLERYCONFIG_H
 #define GALLERYCONFIG_H
 
-#include "standardsettings.h"
+#include "libmythui/standardsettings.h"
 
 class GallerySettings : public GroupSetting
 {
@@ -12,6 +12,7 @@ class GallerySettings : public GroupSetting
 
     StandardSetting *DirOrder() const;
     StandardSetting *ImageOrder() const;
+    StandardSetting *ImageMaximumSize() const;
     StandardSetting *DateFormat() const;
     StandardSetting *Exclusions (bool enabled) const;
     StandardSetting *ClearDb    (bool enabled) const;
@@ -22,6 +23,11 @@ signals:
     void DateChanged();
     void OrderChanged();
     void ExclusionsChanged();
+
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+private slots:
+    static void ImageSizeChanged();
+#endif
 
 public:
     explicit GallerySettings(bool enable);

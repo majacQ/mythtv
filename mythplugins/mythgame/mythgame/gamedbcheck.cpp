@@ -1,12 +1,16 @@
+// C++
 #include <iostream>
 
+// Qt
 #include <QString>
 #include <QSqlError>
 
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <mythdbcheck.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdbcheck.h>
 
+// MythGame
 #include "gamedbcheck.h"
 #include "gamesettings.h"
 
@@ -245,7 +249,7 @@ bool UpgradeGameDatabaseSchema(void)
     {
         DBUpdates updates {
 qPrintable(QString("ALTER DATABASE %1 DEFAULT CHARACTER SET latin1;")
-        .arg(gContext->GetDatabaseParams().m_dbName)),
+        .arg(GetMythDB()->GetDatabaseName())),
 "ALTER TABLE gamemetadata"
 "  MODIFY `system` varbinary(128) NOT NULL default '',"
 "  MODIFY romname varbinary(128) NOT NULL default '',"
@@ -291,7 +295,7 @@ qPrintable(QString("ALTER DATABASE %1 DEFAULT CHARACTER SET latin1;")
     {
         DBUpdates updates {
 qPrintable(QString("ALTER DATABASE %1 DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;")
-        .arg(gContext->GetDatabaseParams().m_dbName)),
+        .arg(GetMythDB()->GetDatabaseName())),
 "ALTER TABLE gamemetadata"
 "  DEFAULT CHARACTER SET utf8,"
 "  MODIFY `system` varchar(128) CHARACTER SET utf8 NOT NULL default '',"

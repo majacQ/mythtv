@@ -1,6 +1,6 @@
 // MythTV
-#include "mythcorecontext.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 #include "platforms/mythdisplaymutter.h"
 
 #ifdef USING_DRM
@@ -40,6 +40,16 @@ Q_DECLARE_METATYPE(MythMutterCRTCOutList);
 using MythMutterOutputOutList = QList<MythMutterOutputOut>;
 Q_DECLARE_METATYPE(MythMutterOutputOut);
 Q_DECLARE_METATYPE(MythMutterOutputOutList);
+
+// NOLINTBEGIN(bugprone-return-const-ref-from-parameter)
+//
+// Detects return statements that return a constant reference
+// parameter as constant reference. This may cause use-after-free
+// errors if the caller uses xvalues as arguments.
+//
+// In these functions, if a temporary object is supplied to Argument
+// the application could crash.  This shouldn't be a problem, but is
+// something to be aware of.
 
 static QDBusArgument &operator<<(QDBusArgument& Argument, const MythMutterOutputOut& Output)
 {
@@ -182,6 +192,8 @@ static const QDBusArgument &operator>>(const QDBusArgument& Argument, MythMutter
     Argument.endArray();
     return Argument;
 }
+
+// NOLINTEND(bugprone-return-const-ref-from-parameter)
 
 /*! \brief Create a valid instance
  *
@@ -334,8 +346,8 @@ const MythDisplayModes& MythDisplayMutter::GetVideoModes()
         m_modeMap.insert(MythDisplayMode::CalcKey(resolution, rate), mmode.id);
     }
 
-    for (auto it = screenmap.begin(); screenmap.end() != it; ++it)
-        m_videoModes.push_back(it->second);
+    for (auto & it : screenmap)
+        m_videoModes.push_back(it.second);
 
     DebugModes();
     return m_videoModes;
@@ -491,13 +503,13 @@ void MythDisplayMutter::UpdateResources()
     for (auto & output : m_outputs)
     {
         QStringList possiblecrtcs;
-        for (auto poss : qAsConst(output.possible_crtcs))
+        for (auto poss : std::as_const(output.possible_crtcs))
             possiblecrtcs.append(QString::number(poss));
         QStringList modes;
-        for (auto mode : qAsConst(output.modes))
+        for (auto mode : std::as_const(output.modes))
             modes.append(QString::number(mode));
         QStringList props;
-        for (const auto& prop : qAsConst(output.properties))
+        for (const auto& prop : std::as_const(output.properties))
             props.append(QString("%1:%2").arg(prop.first, prop.second.variant().toString()));
         LOG(VB_GENERAL, LOG_DEBUG, LOC +
             QString("Output %1/%2: CRTC: %3 Possible CRTCs: %4 Name: '%5'")

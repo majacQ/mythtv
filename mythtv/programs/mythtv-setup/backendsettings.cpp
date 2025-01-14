@@ -1,13 +1,17 @@
+// C/C++
 #include <cstdio>
-
-#include "backendsettings.h"
-#include "frequencies.h"
-#include "mythcorecontext.h"
-#include "channelsettings.h" // for ChannelTVFormat::GetFormats()
 #include <unistd.h>
 
+// Qt
 #include <QNetworkInterface>
 
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythtv/channelsettings.h" // for ChannelTVFormat::GetFormats()
+#include "libmythtv/frequencies.h"
+
+// MythTV Setup
+#include "backendsettings.h"
 
 static TransMythUICheckBoxSetting *IsMasterBackend()
 {
@@ -125,7 +129,9 @@ class IpAddressSettings : public HostCheckBoxSetting
      HostComboBoxSetting *m_localServerIP;
      HostComboBoxSetting *m_localServerIP6;
      explicit IpAddressSettings(/*Setting* trigger*/) :
-         HostCheckBoxSetting("ListenOnAllIps")
+         HostCheckBoxSetting("ListenOnAllIps"),
+         m_localServerIP(LocalServerIP()),
+         m_localServerIP6(LocalServerIP6())
      {
          setLabel(BackendSettings::tr("Listen on All IP Addresses"));
          setValue(true);
@@ -134,8 +140,6 @@ class IpAddressSettings : public HostCheckBoxSetting
                         "Recommended for most users for ease and "
                         "reliability."));
 
-         m_localServerIP = LocalServerIP();
-         m_localServerIP6 = LocalServerIP6();
          // show ip addresses if ListenOnAllIps is off
          addTargetedChild("0", m_localServerIP);
          addTargetedChild("0", m_localServerIP6);
@@ -144,14 +148,20 @@ class IpAddressSettings : public HostCheckBoxSetting
 };
 
 
+void BackendSettings::LocalServerPortChanged ()
+{
+    MythCoreContext::ClearBackendServerPortCache();
+}
 
-static HostTextEditSetting *LocalServerPort()
+HostTextEditSetting *BackendSettings::LocalServerPort() const
 {
     auto *gc = new HostTextEditSetting("BackendServerPort");
     gc->setLabel(QObject::tr("Port"));
     gc->setValue("6543");
     gc->setHelpText(QObject::tr("Unless you've got good reason, don't "
                     "change this."));
+    connect(gc,   &StandardSetting::ChangeSaved,
+            this, &BackendSettings::LocalServerPortChanged);
     return gc;
 };
 
@@ -218,7 +228,7 @@ static GlobalComboBoxSetting *TVFormat()
     gc->setLabel(QObject::tr("TV format"));
 
     QStringList list = ChannelTVFormat::GetFormats();
-    for (const QString& item : qAsConst(list))
+    for (const QString& item : std::as_const(list))
         gc->addSelection(item);
 
     gc->setHelpText(QObject::tr("The TV standard to use for viewing TV."));
@@ -289,7 +299,7 @@ static GlobalCheckBoxSetting *DeletesFollowLinks()
 static GlobalSpinBoxSetting *HDRingbufferSize()
 {
     auto *bs = new GlobalSpinBoxSetting(
-        "HDRingbufferSize", 25*188, 512*188, 25*188);
+        "HDRingbufferSize", 25*188, 500*188, 25*188);
     bs->setLabel(QObject::tr("HD ringbuffer size (kB)"));
     bs->setHelpText(QObject::tr("The HD device ringbuffer allows the "
                     "backend to weather moments of stress. "
@@ -389,6 +399,48 @@ static GlobalSpinBoxSetting *EITCrawIdleStart()
         "The minimum number of seconds after a recorder becomes idle "
         "to wait before MythTV begins collecting EIT listings data.");
     gc->setHelpText(help);
+    return gc;
+}
+
+static GlobalSpinBoxSetting *EITScanPeriod()
+{
+    auto *gc = new GlobalSpinBoxSetting("EITScanPeriod", 5, 60, 5);
+    gc->setLabel(QObject::tr("EIT scan period (mins)"));
+    gc->setValue(15);
+    QString helpText = QObject::tr(
+        "Time to do EIT scanning on one capture card before moving "
+        "to the next capture card in the same input group that is "
+        "configured for EIT scanning. This can happen with multiple "
+        "satellite LNBs connected via a DiSEqC switch.");
+    gc->setHelpText(helpText);
+    return gc;
+}
+
+static GlobalSpinBoxSetting *EITEventChunkSize()
+{
+    auto *gc = new GlobalSpinBoxSetting("EITEventChunkSize", 20, 1000, 20);
+    gc->setLabel(QObject::tr("EIT event chunk size"));
+    gc->setValue(20);
+    QString helpText = QObject::tr(
+        "Maximum number of DB inserts per ProcessEvents call. "
+        "This limits the rate at which EIT events are processed "
+        "in the backend so that there is always enough processing "
+        "capacity for the other backend tasks.");
+    gc->setHelpText(helpText);
+    return gc;
+}
+
+static GlobalCheckBoxSetting *EITCachePersistent()
+{
+    auto *gc = new GlobalCheckBoxSetting("EITCachePersistent");
+    gc->setLabel(QObject::tr("EIT cache persistent"));
+    gc->setValue(true);
+    QString helpText = QObject::tr(
+        "Save the content of the EIT cache in the database "
+        "and use that at the next start of the backend. "
+        "This reduces EIT event processing at a restart of the backend but at the "
+        "cost of updating the copy of the EIT cache in the database continuously.");
+    gc->setHelpText(helpText);
     return gc;
 }
 
@@ -876,22 +928,24 @@ class MythFillSettings : public GroupSetting
 };
 
 BackendSettings::BackendSettings()
-{
+  : m_isMasterBackend(IsMasterBackend()),
+    m_localServerPort(LocalServerPort()),
+    m_backendServerAddr(BackendServerAddr()),
+    m_masterServerName(MasterServerName()),
+    m_ipAddressSettings(new IpAddressSettings()),
     // These two are included for backward compatibility -
     // used by python bindings. They could be removed later
-    m_masterServerIP = MasterServerIP();
-    m_masterServerPort = MasterServerPort();
-
+    m_masterServerIP(MasterServerIP()),
+    m_masterServerPort(MasterServerPort())
+{
     //++ Host Address Backend Setup ++
     auto* server = new GroupSetting();
     server->setLabel(tr("Host Address Backend Setup"));
-    m_localServerPort = LocalServerPort();
     server->addChild(m_localServerPort);
     server->addChild(LocalStatusPort());
     server->addChild(LocalSecurityPin());
     server->addChild(AllowConnFromAll());
     //+++ IP Addresses +++
-    m_ipAddressSettings = new IpAddressSettings();
     server->addChild(m_ipAddressSettings);
     connect(m_ipAddressSettings, &HostCheckBoxSetting::valueChanged,
             this, &BackendSettings::listenChanged);
@@ -901,14 +955,11 @@ BackendSettings::BackendSettings()
     connect(m_ipAddressSettings->m_localServerIP6,
             static_cast<void (StandardSetting::*)(const QString&)>(&StandardSetting::valueChanged),
             this, &BackendSettings::listenChanged);
-    m_backendServerAddr = BackendServerAddr();
     server->addChild(m_backendServerAddr);
     //++ Master Backend ++
-    m_isMasterBackend = IsMasterBackend();
     connect(m_isMasterBackend, &TransMythUICheckBoxSetting::valueChanged,
             this, &BackendSettings::masterBackendChanged);
     server->addChild(m_isMasterBackend);
-    m_masterServerName = MasterServerName();
     server->addChild(m_masterServerName);
     addChild(server);
 
@@ -945,6 +996,9 @@ BackendSettings::BackendSettings()
     group2a1->setLabel(QObject::tr("EIT Scanner Options"));
     group2a1->addChild(EITTransportTimeout());
     group2a1->addChild(EITCrawIdleStart());
+    group2a1->addChild(EITScanPeriod());
+    group2a1->addChild(EITEventChunkSize());
+    group2a1->addChild(EITCachePersistent());
     addChild(group2a1);
 
     auto* group3 = new GroupSetting();
@@ -1085,7 +1139,9 @@ void BackendSettings::listenChanged()
         m_backendServerAddr->setValue(currentsetting);
     }
     else
+    {
         m_backendServerAddr->setValue(0);
+    }
     m_backendServerAddr->setChanged(addrChanged);
 }
 

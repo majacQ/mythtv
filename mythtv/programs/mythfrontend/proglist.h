@@ -6,26 +6,30 @@
 #include <QString>
 
 // MythTV headers
-#include "programinfo.h" // for ProgramList
-#include "schedulecommon.h"
-#include "proglist_helpers.h"
+#include "libmythbase/programinfo.h" // for ProgramList
 
-enum ProgListType {
+// MythFrontend
+#include "proglist_helpers.h"
+#include "schedulecommon.h"
+
+class TV;
+
+enum ProgListType : std::uint8_t {
     plUnknown = 0,
     plTitle = 1,
-    plTitleSearch,
-    plKeywordSearch,
-    plPeopleSearch,
-    plPowerSearch,
-    plSQLSearch,
-    plNewListings,
-    plMovies,
-    plCategory,
-    plChannel,
-    plTime,
-    plRecordid,
-    plStoredSearch,
-    plPreviouslyRecorded
+    plTitleSearch = 2,
+    plKeywordSearch = 3,
+    plPeopleSearch = 4,
+    plPowerSearch = 5,
+    plSQLSearch = 6,
+    plNewListings = 7,
+    plMovies = 8,
+    plCategory = 9,
+    plChannel = 10,
+    plTime = 11,
+    plRecordid = 12,
+    plStoredSearch = 13,
+    plPreviouslyRecorded = 14
 };
 
 class ProgLister : public ScheduleCommon
@@ -41,15 +45,22 @@ class ProgLister : public ScheduleCommon
     ProgLister(MythScreenStack *parent, ProgListType pltype,
                QString view, QString extraArg,
                QDateTime selectedTime = QDateTime());
+    ProgLister(MythScreenStack *parent, TV* player,
+               ProgListType pltype, const QString & extraArg);
     explicit ProgLister(MythScreenStack *parent, uint recid = 0,
                         QString title = QString());
-    ~ProgLister() override;
+    ~ProgLister(void) override;
+
+    static void * RunProgramList(void *player, ProgListType pltype,
+                                 const QString & extraArg);
 
     bool Create(void) override; // MythScreenType
     bool keyPressEvent(QKeyEvent *event) override; // MythScreenType
     void customEvent(QEvent *event) override; // ScheduleCommon
 
   protected slots:
+    void Close(void) override; // MythScreenType
+
     void HandleSelected(MythUIButtonListItem *item);
     void HandleVisible(MythUIButtonListItem *item);
 
@@ -83,7 +94,7 @@ class ProgLister : public ScheduleCommon
     void SwitchToPreviousView(void);
     void SwitchToNextView(void);
 
-    enum SortBy { kTimeSort, kPrevTitleSort, kTitleSort, };
+    enum SortBy : std::uint8_t { kTimeSort, kPrevTitleSort, kTitleSort, };
     SortBy GetSortBy(void) const;
     void SortList(SortBy sortby, bool reverseSort);
 
@@ -129,6 +140,8 @@ class ProgLister : public ScheduleCommon
     MythUIText       *m_messageText     {nullptr};
 
     bool              m_allowViewDialog {true};
+
+    TV               *m_player          {nullptr};
 };
 
 #endif

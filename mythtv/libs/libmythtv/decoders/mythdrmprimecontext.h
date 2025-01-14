@@ -3,11 +3,11 @@
 
 // MythTV
 #ifdef USING_EGL
-#include "mythdrmprimeinterop.h"
+#include "opengl/mythdrmprimeinterop.h"
 #else
-#include "mythopenglinterop.h"
+#include "opengl/mythopenglinterop.h"
 #endif
-#include "mythcodeccontext.h"
+#include "decoders/mythcodeccontext.h"
 
 class MythDRMPRIMEInterop;
 
@@ -18,7 +18,7 @@ class MythDRMPRIMEContext : public MythCodecContext
    ~MythDRMPRIMEContext() override;
 
     static MythCodecID GetSupportedCodec (AVCodecContext **Context,
-                                          AVCodec       **Codec,
+                                          const AVCodec **Codec,
                                           const QString  &Decoder,
                                           AVStream       *Stream,
                                           uint            StreamType);
@@ -32,17 +32,13 @@ class MythDRMPRIMEContext : public MythCodecContext
 
   protected:
     static MythCodecID GetPrimeCodec     (AVCodecContext **Context,
-                                          AVCodec       **Codec,
+                                          const AVCodec **Codec,
                                           AVStream       *Stream,
                                           MythCodecID     Successs, // Xlib conflict
                                           MythCodecID     Failure,
                                           const QString  &CodecName,
                                           AVPixelFormat   Format);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex        s_drmPrimeLock;
-#else
     static QRecursiveMutex s_drmPrimeLock;
-#endif
     static QStringList   s_drmPrimeDecoders;
     MythOpenGLInterop   *m_interop { nullptr };
 };

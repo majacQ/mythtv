@@ -51,30 +51,30 @@
 #include <QTemporaryDir>
 
 // MythTV headers
-#include "mythcorecontext.h"
-#include "storagegroup.h"
-#include "mythdirs.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/storagegroup.h"
 
 #include "imagescanner.h"
 #include "imagemetadata.h"
 
 
 // Builtin storage groups as per storagegroup.cpp
-#define IMAGE_STORAGE_GROUP         "Photographs"
-#define THUMBNAIL_STORAGE_GROUP     "Temp"
+static constexpr const char* IMAGE_STORAGE_GROUP      { "Photographs" };
+static constexpr const char* THUMBNAIL_STORAGE_GROUP  { "Temp" };
 
 // Filesystem dir within config dir used by TEMP SG
-#define TEMP_SUBDIR                 "tmp"
+static constexpr const char* TEMP_SUBDIR              { "tmp" };
 // Filesystem dir within tmp config dir where thumbnails reside
-#define THUMBNAIL_SUBDIR            "Images"
+static constexpr const char* THUMBNAIL_SUBDIR         { "Images" };
 
-#define DEVICE_INVALID (-1)
+static constexpr int DEVICE_INVALID { -1 };
 
 class MythMediaDevice;
 class MythMediaEvent;
 
 //! Display filter
-enum ImageDisplayType {
+enum ImageDisplayType : std::uint8_t {
     kPicAndVideo = 0, //!< Show Pictures & Videos
     kPicOnly     = 1, //!< Hide videos
     kVideoOnly   = 2  //!< Hide pictures
@@ -146,7 +146,10 @@ public:
 
     //! Get absolute filepath for thumbnail of an image
     static QString GetAbsThumbPath(const QString &devPath, const QString &path)
-    { return QString("%1/" TEMP_SUBDIR "/%2/%3").arg(GetConfDir(), devPath, path); }
+    {
+        QString dirFmt = QString("%1/") % TEMP_SUBDIR % "/%2/%3";
+        return dirFmt.arg(GetConfDir(), devPath, path);
+    }
 
     //! Thumbnails of videos are a JPEG snapshot with jpg suffix appended
     static QString ThumbPath(const ImageItem &im)
@@ -163,9 +166,13 @@ public:
 
     //! Determine file type from its extension
     ImageNodeType GetImageType(const QString &ext) const
-    { return m_imageFileExt.contains(ext)
-                ? kImageFile
-                : m_videoFileExt.contains(ext) ? kVideoFile : kUnknown; }
+    {
+        if (m_imageFileExt.contains(ext))
+            return kImageFile;
+        if (m_videoFileExt.contains(ext))
+            return kVideoFile;
+        return kUnknown;
+    }
 protected:
     ImageAdapterBase();
     virtual ~ImageAdapterBase() = default;

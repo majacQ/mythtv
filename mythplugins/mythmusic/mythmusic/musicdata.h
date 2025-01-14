@@ -1,14 +1,15 @@
 #ifndef MUSICDATA_H_
 #define MUSICDATA_H_
 
+// C++
 #include <utility>
 
 // qt
 #include <QRunnable>
 
 // myth
-#include <mythexp.h>
-#include <mythcorecontext.h>
+#include <libmythbase/mythcorecontext.h>
+#include <libmythbase/mythpluginexport.h>
 
 // mythmusic
 #include "playlistcontainer.h"
@@ -58,6 +59,6 @@ class MusicData : public QObject
 };
 
 // This global variable contains the MusicData instance for the application
-extern MPUBLIC MusicData *gMusicData;
+extern MPLUGIN_PUBLIC MusicData *gMusicData;
 
 #endif

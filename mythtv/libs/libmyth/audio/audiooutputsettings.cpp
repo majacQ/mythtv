@@ -9,14 +9,15 @@
 #include <algorithm>
 #include <vector>
 
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "audiooutputsettings.h"
-#include "mythlogging.h"
-#include "mythcorecontext.h"
+#include "eldutils.h"
 
 extern "C" {
 #include "libavutil/avutil.h"    // to check version of libavformat
 }
-#include "eldutils.h"
 
 #define LOC QString("AOS: ")
 
@@ -32,10 +33,10 @@ const format_array AudioOutputSettings::kStdFormats
 };
 
 AudioOutputSettings::AudioOutputSettings(bool invalid) :
-    m_invalid(invalid)
+    m_invalid(invalid),
+    m_srIt(kStdRates.begin()),
+    m_sfIt(kStdFormats.begin())
 {
-    m_srIt = kStdRates.begin();
-    m_sfIt = kStdFormats.begin();
 }
 
 AudioOutputSettings::~AudioOutputSettings()
@@ -254,6 +255,7 @@ int AudioOutputSettings::BestSupportedChannels()
 {
     if (m_channels.empty())
         return 2;
+    SortSupportedChannels(); // ensure last element is the best supported channel
     return m_channels.back();
 }
 
@@ -397,8 +399,7 @@ AudioOutputSettings* AudioOutputSettings::GetUsers(bool newcopy)
     if (max_channels == 2 && (bAC3 || bDTS))
         max_channels = 6;
 
-    if (cur_channels > max_channels)
-        cur_channels = max_channels;
+    cur_channels = std::min(cur_channels, max_channels);
 
     aosettings->SetBestSupportedChannels(cur_channels);
     aosettings->setFeature(bAC3, FEATURE_AC3);
@@ -443,6 +444,7 @@ static const std::array<featureStruct,7> feature {{
 QString AudioOutputSettings::FeaturesToString(DigitalFeature arg)
 {
     QStringList tmp;
+    // cppcheck-suppress unassignedVariable
     for (const auto & [flag, name] : feature)
     {
         if (arg & flag)

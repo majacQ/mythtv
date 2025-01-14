@@ -5,10 +5,10 @@
 #include <QList>
 
 // MythTV
-#include "mythconfig.h"
-#include "mythavutil.h"
-#include "io/mythmediawriter.h"
-#include "io/mythavformatbuffer.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythtv/io/mythavformatbuffer.h"
+#include "libmythtv/io/mythmediawriter.h"
+#include "libmythtv/mythavutil.h"
 
 #undef HAVE_AV_CONFIG_H
 extern "C" {
@@ -36,6 +36,7 @@ class MTV_PUBLIC MythAVFormatWriter : public MythMediaWriter
     bool ReOpen              (const QString& Filename);
 
   private:
+    bool      openFileHelper();
     AVStream* AddVideoStream (void);
     bool      OpenVideo      (void);
     AVStream* AddAudioStream (void);
@@ -43,7 +44,7 @@ class MTV_PUBLIC MythAVFormatWriter : public MythMediaWriter
     AVFrame*  AllocPicture   (enum AVPixelFormat PixFmt);
     void      Cleanup        (void);
     AVRational  GetCodecTimeBase (void);
-    static bool FindAudioFormat  (AVCodecContext *Ctx, AVCodec *Codec, AVSampleFormat Format);
+    static bool FindAudioFormat  (AVCodecContext *Ctx, const AVCodec *Codec, AVSampleFormat Format);
 
     MythAVFormatBuffer    *m_avfBuffer     { nullptr };
     MythMediaBuffer       *m_buffer        { nullptr };
@@ -51,9 +52,9 @@ class MTV_PUBLIC MythAVFormatWriter : public MythMediaWriter
     AVFormatContext       *m_ctx           { nullptr };
     MythCodecMap           m_codecMap;
     AVStream              *m_videoStream   { nullptr };
-    AVCodec               *m_avVideoCodec  { nullptr };
+    const AVCodec         *m_avVideoCodec  { nullptr };
     AVStream              *m_audioStream   { nullptr };
-    AVCodec               *m_avAudioCodec  { nullptr };
+    const AVCodec         *m_avAudioCodec  { nullptr };
     AVFrame               *m_picture       { nullptr };
     AVFrame               *m_audPicture    { nullptr };
     unsigned char         *m_audioInBuf    { nullptr };

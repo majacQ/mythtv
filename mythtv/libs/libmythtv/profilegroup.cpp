@@ -1,9 +1,10 @@
+#include "libmythbase/mythdb.h"
+#include "libmythui/mythuihelper.h"
+
+#include "cardutil.h"
+#include "profilegroup.h"
 #include "recordingprofile.h"
 #include "videosource.h"
-#include "profilegroup.h"
-#include "mythdb.h"
-#include "mythuihelper.h"
-#include "cardutil.h"
 
 QString ProfileGroupStorage::GetWhereClause(MSqlBindings &bindings) const
 {
@@ -33,7 +34,7 @@ void ProfileGroup::HostName::fillSelections()
 {
     QStringList hostnames;
     ProfileGroup::getHostNames(&hostnames);
-    for (const auto & hostname : qAsConst(hostnames))
+    for (const auto & hostname : std::as_const(hostnames))
         this->addSelection(hostname);
 }
 
@@ -48,6 +49,7 @@ ProfileGroup::ProfileGroup()
     auto *cardInfo = new CardInfo(*this);
     addChild(cardInfo);
     CardType::fillSelections(cardInfo);
+    //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     m_host = new HostName(*this);
     addChild(m_host);
     m_host->fillSelections();

@@ -1,16 +1,16 @@
+#include <algorithm> // for lower_bound
 #include <unistd.h>
 
-#include <algorithm> // for lower_bound
+#include "libmythbase/compat.h"
 
 #include "dtvchannel.h"
 #include "dtvsignalmonitor.h"
-#include "scanstreamdata.h"
-#include "mpegtables.h"
-#include "atsctables.h"
-#include "dvbtables.h"
-#include "compat.h"
+#include "mpeg/atsctables.h"
+#include "mpeg/dvbtables.h"
+#include "mpeg/mpegtables.h"
+#include "mpeg/scanstreamdata.h"
 
-#undef DBG_SM
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define DBG_SM(FUNC, MSG) LOG(VB_CHANNEL, LOG_INFO, \
     QString("DTVSigMon[%1]: %2 %3").arg(m_inputid).arg(FUNC, MSG))
 
@@ -310,31 +310,48 @@ void DTVSignalMonitor::HandlePAT(const ProgramAssociationTable *pat)
         GetStreamData()->SetVersionPAT(tsid, -1,0);
         // END HACK HACK HACK
 
+        LOG(VB_CHANNEL, LOG_DEBUG, LOC + QString("HandlePAT() ") +
+            QString("Received PAT for tsid %1 waiting for tsid %2")
+                .arg(tsid).arg(m_transportID));
+
+        // Only one entry in the PAT, just use this program
+        int spts_program = 0;
+        if (pat->ProgramCount() == 1)
+        {
+            spts_program = pat->ProgramNumber(0);
+            pmt_pid = pat->ProgramPID(0);
+        }
+
+        // Two entries in the PAT, but if one is a pointer to the NIT PID
+        // instead of a real program then the other is the single program.
+        if (pat->ProgramCount() == 2)
+        {
+            if (pat->ProgramNumber(0) == 0)
+            {
+                spts_program = pat->ProgramNumber(1);
+                pmt_pid = pat->ProgramPID(1);
+            }
+            else if (pat->ProgramNumber(1) == 0)
+            {
+                spts_program = pat->ProgramNumber(0);
+                pmt_pid = pat->ProgramPID(0);
+            }
+        }
+
+        if (spts_program > 0)
+        {
+            LOG(VB_GENERAL, LOG_INFO, LOC +
+                QString("Program %1 found in PAT of SPTS").arg(spts_program));
+            SetProgramNumber(spts_program);
+            AddFlags(kDTVSigMon_PATMatch);
+            GetStreamData()->AddListeningPID(pmt_pid);
+        }
+
         if (insert_crc(m_seenTableCrc, *pat))
         {
             QString errStr = QString("Program #%1 not found in PAT!")
                 .arg(m_programNumber);
             LOG(VB_GENERAL, LOG_ERR, LOC + errStr + "\n" + pat->toString());
-        }
-        // only one entry in the PAT, just use it
-        if (pat->ProgramCount() == 1)
-        {
-            LOG(VB_GENERAL, LOG_ERR, LOC + "But there is only one program "
-                                           "in the PAT, so we'll just use it");
-            SetProgramNumber(pat->ProgramNumber(0));
-            AddFlags(kDTVSigMon_PATMatch);
-            GetStreamData()->AddListeningPID(pat->ProgramPID(0));
-        }
-        // two entries, but one is a pointer to the NIT PID instead
-        // of a real program, use the other
-        if ((pat->ProgramCount() == 2) && ((pat->ProgramNumber(0) == 0) || (pat->ProgramNumber(1) == 0)))
-        {
-            LOG(VB_GENERAL, LOG_ERR, LOC + "But there is only one program "
-                                           "in the PAT, so we'll just use it");
-            uint pid = pat->FindAnyPID();
-            SetProgramNumber(pat->FindProgram(pid));
-            AddFlags(kDTVSigMon_PATMatch);
-            GetStreamData()->AddListeningPID(pid);
         }
     }
 }
@@ -356,6 +373,10 @@ void DTVSignalMonitor::HandlePMT(uint /*program_num*/, const ProgramMapTable *pm
         }
         return; // Not the PMT we are looking for...
     }
+
+    LOG(VB_CHANNEL, LOG_DEBUG, LOC +
+        QString("Found PMT; pmt->ProgramNumber(%1)")
+        .arg(pmt->ProgramNumber()));
 
     if (pmt->IsEncrypted(GetDTVChannel()->GetSIStandard())) {
         LOG(VB_GENERAL, LOG_NOTICE, LOC +

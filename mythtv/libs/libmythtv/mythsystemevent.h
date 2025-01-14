@@ -4,9 +4,9 @@
 #include <QEvent>
 #include <QObject>
 
-#include "programinfo.h"
+#include "libmythbase/programinfo.h"
+#include "libmythui/rawsettingseditor.h"
 #include "recordinginfo.h"
-#include "rawsettingseditor.h"
 
 // Helper commands for formatting and sending a MythSystemEvent
 MTV_PUBLIC void SendMythSystemRecEvent(const QString &msg,
@@ -53,6 +53,7 @@ class MTV_PUBLIC MythSystemEventEditor : public RawSettingsEditor
 
   public:
     explicit MythSystemEventEditor(MythScreenStack *parent, const char *name = nullptr);
+    static void createSettingList(QMap <QString, QString>  &settings);
 };
 
 #endif

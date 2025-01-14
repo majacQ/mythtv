@@ -1,13 +1,17 @@
-#include <chrono>
-
 // Own header
 #include "websocket.h"
 
+// C++
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+
 // MythTV headers
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythevent.h"
-#include "codecutil.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/stringutil.h"
+
 #include "websocket_extensions/websocket_mythevent.h"
 
 // QT headers
@@ -15,7 +19,6 @@
 #include <QSslCipher>
 #include <QTcpSocket>
 #include <QThread>
-#include <QtCore>
 #include <QtGlobal>
 
 /////////////////////////////////////////////////////////////////////////////
@@ -27,7 +30,7 @@ WebSocketServer::WebSocketServer() :
 {
     setObjectName("WebSocketServer");
     // Number of connections processed concurrently
-    int maxThreads = qMax(QThread::idealThreadCount() * 2, 2); // idealThreadCount can return -1
+    int maxThreads = std::max(QThread::idealThreadCount() * 2, 2); // idealThreadCount can return -1
     // Don't allow more connections than we can process, it will simply cause
     // browsers to stall
     setMaxPendingConnections(maxThreads);
@@ -46,7 +49,7 @@ WebSocketServer::~WebSocketServer()
     m_threadPool.Stop();
 }
 
-void WebSocketServer::newTcpConnection(qt_socket_fd_t socket)
+void WebSocketServer::newTcpConnection(qintptr socket)
 {
 
     PoolServerType type = kTCPServer;
@@ -68,7 +71,7 @@ void WebSocketServer::newTcpConnection(qt_socket_fd_t socket)
 /////////////////////////////////////////////////////////////////////////////
 
 WebSocketWorkerThread::WebSocketWorkerThread(WebSocketServer& webSocketServer,
-                                 qt_socket_fd_t sock, PoolServerType type
+                                 qintptr sock, PoolServerType type
 #ifndef QT_NO_OPENSSL
                                  , const QSslConfiguration& sslConfig
 #endif
@@ -100,7 +103,7 @@ void WebSocketWorkerThread::run(void)
 /////////////////////////////////////////////////////////////////////////////
 
 WebSocketWorker::WebSocketWorker(WebSocketServer& webSocketServer,
-                                 qt_socket_fd_t sock, PoolServerType type
+                                 qintptr sock, PoolServerType type
 #ifndef QT_NO_OPENSSL
                                  , const QSslConfiguration& sslConfig
 #endif
@@ -327,12 +330,7 @@ bool WebSocketWorker::ProcessHandshake(QTcpSocket *socket)
     if (line.isEmpty())
         return false;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList tokens = QString(line).split(' ', QString::SkipEmptyParts);
-#else
     QStringList tokens = QString(line).split(' ', Qt::SkipEmptyParts);
-#endif
-
     if (tokens.length() != 3) // Anything but 3 is invalid - {METHOD} {HOST/PATH} {PROTOCOL}
     {
         LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker::ProcessHandshake() - Invalid number of tokens in Request line");
@@ -345,7 +343,7 @@ bool WebSocketWorker::ProcessHandshake(QTcpSocket *socket)
         return false;
     }
 
-    QString path = tokens[1];
+    const QString& path = tokens[1];
 
     if (path.contains('#')) // RFC 6455 - Fragments MUST NOT be used
     {
@@ -403,11 +401,7 @@ bool WebSocketWorker::ProcessHandshake(QTcpSocket *socket)
         return false;
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList connectionValues = requestHeaders["connection"].split(',', QString::SkipEmptyParts);
-#else
     QStringList connectionValues = requestHeaders["connection"].split(',', Qt::SkipEmptyParts);
-#endif
     if (!connectionValues.contains("Upgrade", Qt::CaseInsensitive)) // RFC 6455 - 1.3. Opening Handshake
     {
         LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker::ProcessHandshake() - Invalid 'Connection' header");
@@ -536,7 +530,7 @@ void WebSocketWorker::ProcessFrames(QTcpSocket *socket)
             frame.m_payloadSize = 0;
             for (int i = 0; i < payloadHeaderSize; i++)
             {
-                frame.m_payloadSize |= ((uint8_t)payloadHeader.at(i) << ((payloadHeaderSize - (i + 1)) * 8));
+                frame.m_payloadSize |= ((uint64_t)payloadHeader.at(i) << ((payloadHeaderSize - (i + 1)) * 8));
             }
         }
         else
@@ -572,7 +566,7 @@ void WebSocketWorker::ProcessFrames(QTcpSocket *socket)
         LOG(VB_HTTP, LOG_DEBUG, QString("Total Payload Size: %1 Bytes").arg(QString::number( m_readFrame.m_payloadSize)));
 
         if (!m_fuzzTesting &&
-            frame.m_payloadSize > qPow(2,20)) // Set 1MB limit on payload per frame
+            frame.m_payloadSize > std::pow(2,20)) // Set 1MB limit on payload per frame
         {
             LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker::ProcessFrames() - Frame payload larger than limit of 1MB");
             SendClose(kCloseTooLarge, "Frame payload larger than limit of 1MB");
@@ -580,7 +574,7 @@ void WebSocketWorker::ProcessFrames(QTcpSocket *socket)
         }
 
         if (!m_fuzzTesting &&
-            m_readFrame.m_payloadSize > qPow(2,22)) // Set 4MB limit on total payload
+            m_readFrame.m_payloadSize > std::pow(2,22)) // Set 4MB limit on total payload
         {
             LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker::ProcessFrames() - Total payload larger than limit of 4MB");
             SendClose(kCloseTooLarge, "Total payload larger than limit of 4MB");
@@ -642,8 +636,10 @@ void WebSocketWorker::ProcessFrames(QTcpSocket *socket)
                     // Fall through to appropriate handler for complete payload
                 }
                 else
+                {
                     break;
-                [[clang::fallthrough]];
+                }
+                [[fallthrough]];
             case WebSocketFrame::kOpTextFrame:
             case WebSocketFrame::kOpBinaryFrame:
                 HandleDataFrame(frame);
@@ -679,7 +675,7 @@ void WebSocketWorker::HandleDataFrame(const WebSocketFrame &frame)
         switch (frame.m_opCode)
         {
             case WebSocketFrame::kOpTextFrame :
-                if (!CodecUtil::isValidUTF8(frame.m_payload))
+                if (!StringUtil::isValidUTF8(frame.m_payload))
                 {
                     LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker - Message is not valid UTF-8");
                     SendClose(kCloseBadData, "Message is not valid UTF-8");
@@ -688,7 +684,7 @@ void WebSocketWorker::HandleDataFrame(const WebSocketFrame &frame)
                 // For Debugging and fuzz testing
                 if (m_fuzzTesting)
                     SendText(frame.m_payload);
-                for (auto *const extension : qAsConst(m_extensions))
+                for (auto *const extension : std::as_const(m_extensions))
                 {
                     if (extension->HandleTextFrame(frame))
                         break;
@@ -697,7 +693,7 @@ void WebSocketWorker::HandleDataFrame(const WebSocketFrame &frame)
             case WebSocketFrame::kOpBinaryFrame :
                 if (m_fuzzTesting)
                     SendBinary(frame.m_payload);
-                for (auto *const extension : qAsConst(m_extensions))
+                for (auto *const extension : std::as_const(m_extensions))
                 {
                     if (extension->HandleBinaryFrame(frame))
                         break;
@@ -751,7 +747,7 @@ void WebSocketWorker::HandleCloseConnection(const QByteArray &payload)
     if (payload.length() > 2)
     {
         QByteArray messageBytes = payload.mid(2);
-        if (!CodecUtil::isValidUTF8(messageBytes))
+        if (!StringUtil::isValidUTF8(messageBytes))
         {
             LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker - Message is not valid UTF-8");
             SendClose(kCloseBadData, "Message is not valid UTF-8");
@@ -772,7 +768,7 @@ QByteArray WebSocketWorker::CreateFrame(WebSocketFrame::OpCode type,
 
     int payloadSize = payload.length();
 
-    if (payloadSize >= qPow(2,64))
+    if (payloadSize >= std::pow(2,64))
     {
         LOG(VB_GENERAL, LOG_ERR, "WebSocketWorker::CreateFrame() - Payload "
                               "exceeds the allowed size for a single frame");
@@ -863,7 +859,7 @@ bool WebSocketWorker::SendText(const QString &message)
 
 bool WebSocketWorker::SendText(const QByteArray& message)
 {
-    if (!CodecUtil::isValidUTF8(message))
+    if (!StringUtil::isValidUTF8(message))
     {
         LOG(VB_GENERAL, LOG_ERR, QString("WebSocketWorker::SendText('%1...') - "
                                           "Text contains invalid UTF-8 character codes. Discarded.")

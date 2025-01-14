@@ -5,29 +5,24 @@
 #include <sys/ioctl.h>
 
 // ANSI C++ headers
+#include <algorithm>
 #include <cmath>
+#include <cstdarg>
+#include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdio>
-#include <cstdarg>
 
 #ifdef USING_V4L2
-// HACK. Broken kernel headers < 2.6.25 fail compile in videodev2.h when
-//       compiling with -std=c99.  We could remove this in the .pro file,
-//       but that would disable it for all .c files.
-#undef __STRICT_ANSI__
-#ifdef USING_V4L1
-#include <linux/videodev.h>
-#endif // USING_V4L1
 #include <linux/videodev2.h>
 #endif // USING_V4L2
 
 // vbitext headers
-#include "vt.h"
+#include "captions/vbilut.h"
 #include "vbi.h"
-#include "vbilut.h"
+#include "vt.h"
 
-#define FAC    (1<<16)         // factor for fix-point arithmetic
+static constexpr int FAC = { 1<<16 };  // factor for fix-point arithmetic
 
 static unsigned char *rawbuf = nullptr;// one common buffer for raw vbi data.
 #ifdef USING_V4L2
@@ -92,8 +87,8 @@ vbi_send(struct vbi *vbi, int type, int i1, int i2, int i3, void *p1)
     ev.i3 = i3;
     ev.p1 = p1;
 
-    for (cl = static_cast<vbi_client *>((void*)vbi->clients[0].first);
-         (cln = static_cast<vbi_client *>((void*)cl->node->next)) != nullptr;
+    for (cl = reinterpret_cast<vbi_client *>(vbi->clients[0].first);
+         (cln = reinterpret_cast<vbi_client *>(cl->node->next)) != nullptr;
          cl = cln)
        cl->handler(cl->data, &ev);
 }
@@ -120,9 +115,9 @@ vbi_send_page(struct vbi *vbi, struct raw_page *rvtp, int page)
 // it collects parity and hamming errors and moves the sampling point
 // a 10th of a bitlength left or right.
 
-#define PLL_SAMPLES    4       // number of err vals to collect
-#define PLL_ERROR      4       // if this err val is crossed, readjust
-//#define PLL_ADJUST   4       // max/min adjust (10th of bitlength)
+static constexpr int8_t PLL_SAMPLES  { 4 };  // number of err vals to collect
+static constexpr int8_t PLL_ERROR    { 4 };  // if this err val is crossed, readjust
+//static constexpr int8_t PLL_ADJUST { 4 };  // max/min adjust (10th of bitlength)
 
 static void
 pll_add(struct vbi *vbi, int n, int err)
@@ -130,8 +125,8 @@ pll_add(struct vbi *vbi, int n, int err)
     if (vbi->pll_fixed)
        return;
 
-    if (err > PLL_ERROR*2/3)   // limit burst errors
-       err = PLL_ERROR*2/3;
+    // limit burst errors
+    err = std::min(err, PLL_ERROR*2/3);
 
     vbi->pll_err += err;
     vbi->pll_cnt += n;
@@ -266,8 +261,8 @@ vt_line(struct vbi *vbi, unsigned char *p)
                return 4;
 
            std::array<unsigned int,13> t {};
-           for (int i = 0; i < 13; ++i)
-               t[i] = hamm24(p + 1 + 3*i, &err);
+           for (ptrdiff_t i = 0; i < 13; ++i)
+               t[i] = hamm24(p + 1 + (3*i), &err);
            if (err & 0xf000)
                return 4;
 
@@ -288,12 +283,12 @@ vt_line(struct vbi *vbi, unsigned char *p)
            if (b1 != 0 || !(b2 & 8))
                return 0;
 
-           for (int i = 0; i < 6; ++i)
+           for (ptrdiff_t i = 0; i < 6; ++i)
            {
                err = 0;
-               b1 = hamm16(p+1+6*i, &err);
-               b2 = hamm16(p+3+6*i, &err);
-               int b3 = hamm16(p+5+6*i, &err);
+               b1 = hamm16(p+1+(6*i), &err);
+               b2 = hamm16(p+3+(6*i), &err);
+               int b3 = hamm16(p+5+(6*i), &err);
                if (err & 0xf000)
                    return 1;
                int x = (b2 >> 7) | ((b3 >> 5) & 0x06);
@@ -346,7 +341,7 @@ vbi_line(struct vbi *vbi, const unsigned char *p)
 
     /* remove DC. edge-detector */
     for (i = vbi->soc; i < vbi->eoc; ++i)
-       dt[i] = p[i+bpb/FAC] - p[i];    // amplifies the edges best.
+       dt[i] = p[i+(bpb/FAC)] - p[i];    // amplifies the edges best.
 
     /* set barrier */
     for (i = vbi->eoc; i < vbi->eoc+16; i += 2)
@@ -377,8 +372,7 @@ vbi_line(struct vbi *vbi, const unsigned char *p)
        if (p[i] > max)
            max = p[i], sync = i;
     for (i = lo[4]; i < lo[5]; ++i)
-       if (p[i] < min)
-           min = p[i];
+       min = std::min(p[i], min);
     int thr = (min + max) / 2;
 
     p += sync;
@@ -398,7 +392,8 @@ vbi_line(struct vbi *vbi, const unsigned char *p)
            if (data[0] != 0x27)        // really 11100100? (rev order!)
                return -1;
 
-           if ((i = vt_line(vbi, data.data()+1)))
+           i = vt_line(vbi, data.data()+1);
+           if (i != 0)
            {
                if (i < 0)
                    pll_add(vbi, 2, -i);
@@ -416,12 +411,10 @@ vbi_line(struct vbi *vbi, const unsigned char *p)
 // called when new vbi data is waiting
 
 void
-vbi_handler(struct vbi *vbi, int fd)
+vbi_handler(struct vbi *vbi, [[maybe_unused]] int fd)
 {
     int n = 0;
     unsigned int seq = 0;
-
-    (void)fd;
 
     n = read(vbi->fd, rawbuf, vbi->bufsize);
 
@@ -461,16 +454,15 @@ vbi_handler(struct vbi *vbi, int fd)
 int
 vbi_add_handler(struct vbi *vbi, vbic_handler handler, void *data)
 {
-    struct vbi_client *cl = nullptr;
-
-    if (!(cl = new struct vbi_client))
+    auto *cl = new struct vbi_client;
+    if (cl == nullptr)
        return -1;
     cl->handler = handler;
     cl->data = data;
     // cl is not leaking, the first struct element has the same address
     // as the struct
     dl_insert_last(vbi->clients, cl->node);
-    return 0;
+    return 0; // cppcheck-suppress memleak
 }
 
 
@@ -480,9 +472,9 @@ vbi_del_handler(struct vbi *vbi, vbic_handler handler, void *data)
 {
     struct vbi_client *cl = nullptr;
 
-    for (cl = static_cast<vbi_client*>((void*)vbi->clients->first);
+    for (cl = reinterpret_cast<vbi_client*>(vbi->clients->first);
          cl->node->next != nullptr;
-         cl = static_cast<vbi_client*>((void*)cl->node->next))
+         cl = reinterpret_cast<vbi_client*>(cl->node->next))
     {
        if (cl->handler == handler && cl->data == data)
        {
@@ -520,10 +512,8 @@ set_decode_parms(struct vbi *vbi, struct v4l2_vbi_format *p)
     double bpb = fs/6937500.0; // bytes per bit
     int    soc = (int)(9.2e-6*fs) - (int)p->offset;  // start of clock run-in
     int    eoc = (int)(12.9e-6*fs) - (int)p->offset; // end of clock run-in
-    if (soc < 0)
-       soc = 0;
-    if (eoc > bpl - (int)(43*8*bpb))
-       eoc = bpl - (int)(43*8*bpb);
+    soc = std::max(soc, 0);
+    eoc = std::min(eoc, bpl - (int)(43*8*bpb));
     if (eoc - soc < (int)(16*bpb))
     {
        // line too short or offset too large or wrong sample_rate
@@ -551,7 +541,7 @@ set_decode_parms(struct vbi *vbi, struct v4l2_vbi_format *p)
 #endif // USING_V4L2
 
 static int
-setup_dev(struct vbi *vbi)
+setup_dev([[maybe_unused]] struct vbi *vbi)
 {
 #ifdef USING_V4L2
     struct v4l2_format v4l2_format {};
@@ -561,36 +551,8 @@ setup_dev(struct vbi *vbi)
     v4l2_format.type = V4L2_BUF_TYPE_VBI_CAPTURE;
     if (ioctl(vbi->fd, VIDIOC_G_FMT, &v4l2_format) == -1)
     {
-#ifdef USING_V4L1
-       // not a v4l2 device.  assume bttv and create a standard fmt-struct.
-       int size;
-       perror("ioctl VIDIOC_G_FMT");
-
-       vbifmt->sample_format = V4L2_PIX_FMT_GREY;
-       vbifmt->sampling_rate = 35468950;
-       vbifmt->samples_per_line = 2048;
-       vbifmt->offset = 244;
-       if ((size = ioctl(vbi->fd, BTTV_VBISIZE, 0)) == -1)
-       {
-           // BSD or older bttv driver.
-           vbifmt->count[0] = 16;
-           vbifmt->count[1] = 16;
-       }
-       else if (size % 2048)
-       {
-           error("broken bttv driver (bad buffer size)");
-           return -1;
-       }
-       else
-       {
-           size /= 2048;
-           vbifmt->count[0] = size/2;
-           vbifmt->count[1] = size - size/2;
-       }
-#else
        error("Video 4 Linux version 1 support is not enabled.");
        return -1;
-#endif
     }
 
     if (set_decode_parms(vbi, vbifmt) == -1)
@@ -607,7 +569,8 @@ setup_dev(struct vbi *vbi)
     {
        delete [] rawbuf;
        rawbuf_size = vbi->bufsize;
-       if (!(rawbuf = new u_char[rawbuf_size]))
+       rawbuf = new u_char[rawbuf_size];
+       if (rawbuf == nullptr)
        {
             error("unable to allocate in setup_dev()\n");
        }
@@ -615,7 +578,6 @@ setup_dev(struct vbi *vbi)
 
     return 0;
 #else
-     (void)vbi;
     return -1;
 #endif // USING_V4L2
 }
@@ -623,12 +585,13 @@ setup_dev(struct vbi *vbi)
 
 
 struct vbi *
-vbi_open(const char *vbi_dev_name, struct cache *ca, int fine_tune, int big_buf)
+vbi_open(const char *vbi_dev_name,
+         [[maybe_unused]] struct cache *ca,
+         int fine_tune,
+         int big_buf)
 {
     static int s_inited = 0;
     struct vbi *vbi = nullptr;
-
-    (void)ca;
 
     if (! s_inited)
        lang_init();
@@ -641,7 +604,8 @@ vbi_open(const char *vbi_dev_name, struct cache *ca, int fine_tune, int big_buf)
        goto fail1;
     }
 
-    if ((vbi->fd = open(vbi_dev_name, O_RDONLY)) == -1)
+    vbi->fd = open(vbi_dev_name, O_RDONLY);
+    if (vbi->fd == -1)
     {
        error("cannot open vbi device");
        goto fail2;
@@ -686,13 +650,12 @@ vbi_close(struct vbi *vbi)
 
 
 struct vt_page *
-vbi_query_page(struct vbi *vbi, int pgno, int subno)
+vbi_query_page([[maybe_unused]] struct vbi *vbi,
+               [[maybe_unused]] int pgno,
+               [[maybe_unused]] int subno)
 {
 #ifdef IMPLEMENTED
     struct vt_page *vtp = 0;
-
-    (void)pgno;
-    (void)subno;
 
     if (vbi->cache)
         vtp = vbi->cache->op->get(vbi->cache, pgno, subno);
@@ -705,9 +668,6 @@ vbi_query_page(struct vbi *vbi, int pgno, int subno)
     vbi_send(vbi, EV_PAGE, 1, 0, 0, vtp);
     return vtp;
 #else
-    (void)vbi;
-    (void)pgno;
-    (void)subno;
     return nullptr;
 #endif
 }

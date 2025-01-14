@@ -6,14 +6,15 @@
 #include <QString>
 #include <QStringList>
 
-#include "mythdbcheck.h"
-#include "videodbcheck.h"
-#include "mythdb.h"
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "remotefile.h"
-#include "mythmiscutil.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdbcheck.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/remotefile.h"
 #include "libmythmetadata/videoutils.h"
+
+#include "videodbcheck.h"
 
 const QString minimumVideoDatabaseVersion = "1016";
 const QString finalVideoDatabaseVersion = "1038";
@@ -61,7 +62,9 @@ static void UpdateHashes(void)
                 hash =  RemoteFile::GetFileHash(url);
             }
             else
+            {
                 hash = FileHash(filename);
+            }
 
             if (hash == "NULL")
                 hash = QString();
@@ -577,7 +580,9 @@ bool doUpgradeVideoDatabaseSchema(void)
             }
         }
         else
+        {
             ok = false;
+        }
 
         if (!ok)
             return false;

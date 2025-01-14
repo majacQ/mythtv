@@ -1,5 +1,5 @@
 // MythTV
-#include "iso639.h"
+#include "libmythbase/iso639.h"
 #include "mythdvdbuffer.h"
 #include "mythdvdplayer.h"
 #include "mythdvddecoder.h"
@@ -34,9 +34,7 @@ void MythDVDDecoder::ReleaseLastVideoPkt(void)
 {
     if (m_lastVideoPkt)
     {
-        av_packet_unref(m_lastVideoPkt);
-        delete m_lastVideoPkt;
-        m_lastVideoPkt = nullptr;
+        av_packet_free(&m_lastVideoPkt);
         m_lbaLastVideoPkt = INVALID_LBA;
     }
 }
@@ -271,7 +269,7 @@ void MythDVDDecoder::CheckContext(int64_t Pts)
 }
 
 
-bool MythDVDDecoder::ProcessVideoPacket(AVStream *Stream, AVPacket *Pkt, bool &Retry)
+bool MythDVDDecoder::ProcessVideoPacket(AVCodecContext* codecContext, AVStream *Stream, AVPacket *Pkt, bool &Retry)
 {
     int64_t pts = Pkt->pts;
 
@@ -280,7 +278,7 @@ bool MythDVDDecoder::ProcessVideoPacket(AVStream *Stream, AVPacket *Pkt, bool &R
 
     CheckContext(pts);
 
-    bool ret = AvFormatDecoder::ProcessVideoPacket(Stream, Pkt, Retry);
+    bool ret = AvFormatDecoder::ProcessVideoPacket(codecContext, Stream, Pkt, Retry);
     if (Retry)
         return ret;
 
@@ -292,15 +290,13 @@ bool MythDVDDecoder::ProcessVideoPacket(AVStream *Stream, AVPacket *Pkt, bool &R
         // should be displayed with audio)
         if (!m_lastVideoPkt)
         {
-            m_lastVideoPkt = new AVPacket;
-            memset(m_lastVideoPkt, 0, sizeof(AVPacket));
+            // This packet will be freed in the destructor.
+            m_lastVideoPkt = av_packet_alloc();
         }
         else
         {
             av_packet_unref(m_lastVideoPkt);
         }
-
-        av_init_packet(m_lastVideoPkt);
         av_packet_ref(m_lastVideoPkt, Pkt);
         m_lbaLastVideoPkt = m_curContext->GetLBA();
 
@@ -334,7 +330,7 @@ bool MythDVDDecoder::ProcessVideoPacket(AVStream *Stream, AVPacket *Pkt, bool &R
     return ret;
 }
 
-bool MythDVDDecoder::ProcessVideoFrame(AVStream *Stream, AVFrame *Frame)
+bool MythDVDDecoder::ProcessVideoFrame(AVCodecContext* codecContext, AVStream *Stream, AVFrame *Frame)
 {
     bool ret = true;
 
@@ -342,7 +338,7 @@ bool MythDVDDecoder::ProcessVideoFrame(AVStream *Stream, AVFrame *Frame)
     {
         // Only process video frames if we're not searching for
         // the previous video frame after seeking in a slideshow.
-        ret = AvFormatDecoder::ProcessVideoFrame(Stream, Frame);
+        ret = AvFormatDecoder::ProcessVideoFrame(codecContext, Stream, Frame);
     }
 
     return ret;
@@ -463,7 +459,7 @@ void MythDVDDecoder::PostProcessTracks(void)
                 {
                     // This stream is mapped in the current program chain
                     int lang = static_cast<int>(m_ringBuffer->DVD()->GetSubtitleLanguage(static_cast<int>(i)));
-                    int lang_indx = static_cast<int>(lang_sub_cnt[lang]++);
+                    uint lang_indx = lang_sub_cnt[lang]++;
                     int trackNo = -1;
 
                     if (stream2idx.count(streamid) != 0)
@@ -473,8 +469,7 @@ void MythDVDDecoder::PostProcessTracks(void)
                     {
                         // Create a dummy track if the physical stream has not
                         // yet been seen.
-                        filteredTracks.push_back(StreamInfo(-1, lang, static_cast<uint>(lang_indx),
-                                                            streamid, 0, 0, false, false, false));
+                        filteredTracks.emplace_back(-1, streamid, lang, lang_indx);
                     }
                     else
                     {
@@ -482,7 +477,7 @@ void MythDVDDecoder::PostProcessTracks(void)
                         filteredTracks.push_back(m_tracks[kTrackTypeSubtitle][static_cast<uint>(trackNo)]);
                         filteredTracks.back().m_stream_id &= 0x1f;
                         filteredTracks.back().m_language = lang;
-                        filteredTracks.back().m_language_index = static_cast<uint>(lang_indx);
+                        filteredTracks.back().m_language_index = lang_indx;
                     }
                 }
             }

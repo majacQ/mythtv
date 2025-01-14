@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -15,8 +15,9 @@
 
 #include <QString>
 
-#include "mythlogging.h"
-#include "upnp.h"
+#include "libmythbase/mythlogging.h"
+
+#include "libmythupnp/upnp.h"
 
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
@@ -41,9 +42,9 @@ class SSDPCacheTask : public Task
 
         SSDPCacheTask() : Task("SSDPCacheTask")
         {
-            m_nExecuteCount = 0;
-            m_nInterval     =
-                UPnp::GetConfiguration()->GetDuration<std::chrono::seconds>("UPnP/SSDP/CacheInterval", 30s);
+            m_nInterval     = 30s;
+// TODO: Rework when separating upnp/ssdp stack
+//               XmlConfiguration().GetDuration<std::chrono::seconds>("UPnP/SSDP/CacheInterval", 30s);
         }
 
         QString Name() override // Task

@@ -8,14 +8,15 @@
 #include <utility>
 
 // MythTV headers
-#include "metadatagrabber.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+
 #include "metadatacommon.h"
-#include "mythsystemlegacy.h"
-#include "exitcodes.h"
-#include "mythdate.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
-#include "mythcorecontext.h"
+#include "metadatagrabber.h"
 
 #define LOC QString("Metadata Grabber: ")
 static constexpr std::chrono::seconds kGrabberRefresh { 60s };
@@ -38,7 +39,7 @@ static const QMap<GrabberType, GrabberOpts> grabberTypes {
                             "metadata/Movie/tmdb3.py" } },
     { kGrabberTelevision, { "%1metadata/Television/",
                             "TelevisionGrabber",
-                            "metadata/Television/ttvdb.py" } },
+                            "metadata/Television/ttvdb4.py" } },
     { kGrabberGame,       { "%1metadata/Game/",
                             "mythgame.MetadataGrabber",
                             "metadata/Game/giantbomb.py" } },
@@ -64,7 +65,7 @@ GrabberList MetaGrabberScript::GetList(const QString &type, bool refresh)
     QString tmptype = type.toLower();
     if (!grabberTypeStrings.contains(tmptype))
         // unknown type, return empty list
-        return GrabberList();
+        return {};
 
     return MetaGrabberScript::GetList(grabberTypeStrings[tmptype], refresh);
 }
@@ -89,16 +90,25 @@ GrabberList MetaGrabberScript::GetList(GrabberType type,
 
             // loop through different types of grabber scripts and the 
             // directories they are stored in
-            for (const auto& grabberType : qAsConst(grabberTypes))
+            for (const auto& grabberType : std::as_const(grabberTypes))
             {
                 QString path = (grabberType.m_path).arg(GetShareDir());
-                QStringList scripts = QDir(path).entryList(QDir::Executable | QDir::Files);
+                QDir dir = QDir(path);
+                if (!dir.exists())
+                {
+                    LOG(VB_GENERAL, LOG_DEBUG, LOC +
+                        QString("No script directory %1").arg(path));
+                    continue;
+                }
+                QStringList scripts = dir.entryList(QDir::Executable | QDir::Files);
+                LOG(VB_GENERAL, LOG_DEBUG, LOC +
+                    QString("Found %1 scripts in %2").arg(scripts.count()).arg(path));
                 if (scripts.count() == 0)
                     // no scripts found
                     continue;
 
                 // loop through discovered scripts
-                for (const auto& name : qAsConst(scripts))
+                for (const auto& name : std::as_const(scripts))
                 {
                     QString cmd = QDir(path).filePath(name);
                     MetaGrabberScript script(cmd);
@@ -107,6 +117,10 @@ GrabberList MetaGrabberScript::GetList(GrabberType type,
                     {
                         LOG(VB_GENERAL, LOG_DEBUG, LOC + "Adding " + script.m_command);
                         s_grabberList.append(script);
+                    }
+                    else
+                    {
+                        LOG(VB_GENERAL, LOG_DEBUG, LOC + "Failed " + name);
                     }
                  }
             }
@@ -117,7 +131,7 @@ GrabberList MetaGrabberScript::GetList(GrabberType type,
         tmpGrabberList = s_grabberList;
     }
 
-    for (const auto& item : qAsConst(tmpGrabberList))
+    for (const auto& item : std::as_const(tmpGrabberList))
     {
         if ((type == kGrabberAll) || (item.GetType() == type))
             retGrabberList.append(item);
@@ -129,12 +143,8 @@ GrabberList MetaGrabberScript::GetList(GrabberType type,
 MetaGrabberScript MetaGrabberScript::GetGrabber(GrabberType defaultType,
                                                 const MetadataLookup *lookup)
 {
-    if (!lookup)
-    {
-        return GetType(defaultType);
-    }
-
-    if (!lookup->GetInetref().isEmpty() &&
+    if (lookup &&
+        !lookup->GetInetref().isEmpty() &&
         lookup->GetInetref() != "00000000")
     {
         // inetref is defined, see if we have a pre-defined grabber
@@ -148,7 +158,16 @@ MetaGrabberScript MetaGrabberScript::GetGrabber(GrabberType defaultType,
         // fall through
     }
 
-    return GetType(defaultType);
+    auto grabber = GetType(defaultType);
+    if (!grabber.m_valid)
+    {
+        QString name = grabberTypes[defaultType].m_setting;
+        if (name.isEmpty())
+            name = QString("Type %1").arg(defaultType);
+        LOG(VB_GENERAL, LOG_INFO,
+            QString("Grabber '%1' is not configured. Do you need to set PYTHONPATH?").arg(name));
+    }
+    return grabber;
 }
 
 MetaGrabberScript MetaGrabberScript::GetType(const QString &type)
@@ -156,7 +175,7 @@ MetaGrabberScript MetaGrabberScript::GetType(const QString &type)
     QString tmptype = type.toLower();
     if (!grabberTypeStrings.contains(tmptype))
         // unknown type, return empty grabber
-        return MetaGrabberScript();
+        return {};
 
     return MetaGrabberScript::GetType(grabberTypeStrings[tmptype]);
 }
@@ -173,14 +192,11 @@ MetaGrabberScript MetaGrabberScript::GetType(const GrabberType type)
         cmd = grabberTypes[type].m_def;
     }
 
-    if (s_grabberAge.isValid() && MythDate::secsInPast(s_grabberAge) <= kGrabberRefresh)
-    {
-        // just pull it from the cache
-        GrabberList list = GetList();
-        for (const auto& item : qAsConst(list))
-            if (item.GetPath().endsWith(cmd))
-                return item;
-    }
+    // just pull it from the cache
+    GrabberList list = GetList(type);
+    for (const auto& item : std::as_const(list))
+        if (item.GetPath().endsWith(cmd))
+            return item;
 
     // polling the cache will cause a refresh, so lets just grab and
     // process the script directly
@@ -192,7 +208,7 @@ MetaGrabberScript MetaGrabberScript::GetType(const GrabberType type)
         return script;
     }
 
-    return MetaGrabberScript();
+    return {};
 }
 
 MetaGrabberScript MetaGrabberScript::FromTag(const QString &tag,
@@ -201,7 +217,7 @@ MetaGrabberScript MetaGrabberScript::FromTag(const QString &tag,
     GrabberList list = GetList();
 
     // search for direct match on tag
-    for (const auto& item : qAsConst(list))
+    for (const auto& item : std::as_const(list))
     {
         if (item.GetCommand() == tag)
         {
@@ -212,7 +228,7 @@ MetaGrabberScript MetaGrabberScript::FromTag(const QString &tag,
     // no direct match. do we require a direct match? search for one that works
     if (!absolute)
     {
-        for (const auto& item : qAsConst(list))
+        for (const auto& item : std::as_const(list))
         {
             if (item.Accepts(tag))
             {
@@ -222,7 +238,7 @@ MetaGrabberScript MetaGrabberScript::FromTag(const QString &tag,
     }
 
     // no working match. return a blank
-    return MetaGrabberScript();
+    return {};
 }
 
 MetaGrabberScript MetaGrabberScript::FromInetref(const QString &inetref,
@@ -243,7 +259,7 @@ MetaGrabberScript MetaGrabberScript::FromInetref(const QString &inetref,
     }
 
     // no working match, return a blank
-    return MetaGrabberScript();
+    return {};
 }
 
 QString MetaGrabberScript::CleanedInetref(const QString &inetref)
@@ -290,7 +306,11 @@ MetaGrabberScript::MetaGrabberScript(const QString &path)
         return;
 
     QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     doc.setContent(result, true);
+#else
+    doc.setContent(result, QDomDocument::ParseOption::UseNamespaceProcessing);
+#endif
     QDomElement root = doc.documentElement();
     if (root.isNull())
         // no valid XML
@@ -385,7 +405,11 @@ MetadataLookupList MetaGrabberScript::RunGrabber(const QStringList &args,
     if (!result.isEmpty())
     {
         QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         doc.setContent(result, true);
+#else
+        doc.setContent(result, QDomDocument::ParseOption::UseNamespaceProcessing);
+#endif
         QDomElement root = doc.documentElement();
         QDomElement item = root.firstChildElement("item");
 
@@ -413,7 +437,7 @@ QString MetaGrabberScript::GetRelPath(void) const
     if (m_fullcommand.startsWith(share))
         return m_fullcommand.right(m_fullcommand.size() - share.size());
 
-    return QString();
+    return {};
 }
 
 void MetaGrabberScript::toMap(InfoMap &metadataMap) const
@@ -462,10 +486,10 @@ MetadataLookupList MetaGrabberScript::SearchSubtitle(const QString &title,
 }
 
 MetadataLookupList MetaGrabberScript::SearchSubtitle(const QString &inetref,
-                        const QString &title, const QString &subtitle,
+                        [[maybe_unused]] const QString &title,
+                        const QString &subtitle,
                         MetadataLookup *lookup, bool passseas)
 {
-    (void)title;
     QStringList args;
     SetDefaultArgs(args);
 

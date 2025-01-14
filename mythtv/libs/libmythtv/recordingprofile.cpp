@@ -2,10 +2,11 @@
 #include "recordingprofile.h"
 
 #include "cardutil.h"
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
 #include "v4l2util.h"
+#include <algorithm>
 #include <utility>
 
 QString RecordingProfileStorage::GetWhereClause(MSqlBindings &bindings) const
@@ -203,20 +204,26 @@ class MPEG2audType : public MythUIComboBoxSetting, public CodecParamStorage
 
         if ((val == "Layer I") && !m_allowLayer1)
         {
-            val = (m_allowLayer2) ? "Layer II" :
-                ((m_allowLayer3) ? "Layer III" : val);
+            if (m_allowLayer2)
+                val = "Layer II";
+            else if (m_allowLayer3)
+                val = "Layer III";
         }
 
         if ((val == "Layer II") && !m_allowLayer2)
         {
-            val = (m_allowLayer3) ? "Layer III" :
-                ((m_allowLayer1) ? "Layer I" : val);
+            if (m_allowLayer3)
+                val = "Layer III";
+            else if (m_allowLayer1)
+                val = "Layer I";
         }
 
         if ((val == "Layer III") && !m_allowLayer3)
         {
-            val = (m_allowLayer2) ? "Layer II" :
-                ((m_allowLayer1) ? "Layer I" : val);
+            if (m_allowLayer2)
+                val = "Layer II";
+            else if (m_allowLayer1)
+                val = "Layer I";
         }
 
         if (getValue() != val)
@@ -350,7 +357,7 @@ class MPEG2AudioBitrateSettings : public GroupSetting
         addTargetedChild(layers[1], new MPEG2audBitrateL2(parent));
         addTargetedChild(layers[2], new MPEG2audBitrateL3(parent));
 
-        uint desired_layer = std::max(std::min(3U, default_layer), 1U) - 1;
+        uint desired_layer = std::clamp(default_layer, 1U, 3U) - 1;
         int which = audType->getValueIndex(layers[desired_layer]);
         if (which >= 0)
             audType->setValue(which);
@@ -399,12 +406,12 @@ class AudioCompressionSettings : public GroupSetting
 {
   public:
     AudioCompressionSettings(const RecordingProfile &parentProfile,
-                             V4L2util* v4l2) :
-        m_parent(parentProfile)
+                             [[maybe_unused]] V4L2util* v4l2) :
+        m_parent(parentProfile),
+        m_codecName(new AudioCodecName(m_parent))
     {
         setName(QObject::tr("Audio Quality"));
 
-        m_codecName = new AudioCodecName(m_parent);
         addChild(m_codecName);
 
         QString label("MP3");
@@ -444,11 +451,11 @@ class AudioCompressionSettings : public GroupSetting
                  * to the same setting configuration, so we need to do
                  * this in two passes. */
 
-                for (const auto & option : qAsConst(options))
+                for (const auto & option : std::as_const(options))
                 {
                     if (option.m_category == DriverOption::AUDIO_ENCODING)
                     {
-                        for (const auto & Imenu : qAsConst(option.m_menu))
+                        for (const auto & Imenu : std::as_const(option.m_menu))
                         {
                             if (!Imenu.isEmpty())
                                 m_v4l2codecs << "V4L2:" + Imenu;
@@ -458,7 +465,7 @@ class AudioCompressionSettings : public GroupSetting
 
                 for (auto Icodec = m_v4l2codecs.begin(); Icodec < m_v4l2codecs.end(); ++Icodec)
                 {
-                    for (const auto & option : qAsConst(options))
+                    for (const auto & option : std::as_const(options))
                     {
                         if (option.m_category == DriverOption::AUDIO_BITRATE_MODE)
                         {
@@ -483,7 +490,7 @@ class AudioCompressionSettings : public GroupSetting
                             bool layer2 = false;
                             bool layer3 = false;
 
-                            for (const auto & Imenu : qAsConst(option.m_menu))
+                            for (const auto & Imenu : std::as_const(option.m_menu))
                             {
                                 if (Imenu.indexOf("Layer III") >= 0)
                                     layer3 = true;
@@ -511,8 +518,6 @@ class AudioCompressionSettings : public GroupSetting
                 }
             }
         }
-#else
-	Q_UNUSED(v4l2);
 #endif //  USING_V4L2
     }
 
@@ -529,7 +534,7 @@ class AudioCompressionSettings : public GroupSetting
             }
             else if (groupType.startsWith("V4L2:"))
             {
-                for (const auto & codec : qAsConst(m_v4l2codecs))
+                for (const auto & codec : std::as_const(m_v4l2codecs))
                     m_codecName->addSelection(codec);
             }
             else
@@ -806,7 +811,7 @@ class MPEG2streamType : public MythUIComboBoxSetting, public CodecParamStorage
         MythUIComboBoxSetting(this),
         CodecParamStorage(this, parent, "mpeg2streamtype")
     {
-        if (maxopt > 8) maxopt = 8;
+        maxopt = std::min<uint>(maxopt, 8);
 
         setLabel(QObject::tr("Stream Type"));
 
@@ -832,7 +837,7 @@ class MPEG2aspectRatio : public MythUIComboBoxSetting, public CodecParamStorage
         MythUIComboBoxSetting(this),
         CodecParamStorage(this, parent, "mpeg2aspectratio")
     {
-        if (maxopt > 3) maxopt = 3;
+        maxopt = std::min<uint>(maxopt, 3);
 
         setLabel(QObject::tr("Aspect Ratio"));
 
@@ -895,12 +900,12 @@ class VideoCompressionSettings : public GroupSetting
 {
   public:
     VideoCompressionSettings(const RecordingProfile &parentProfile,
-                             V4L2util* v4l2) :
-        m_parent(parentProfile)
+                             [[maybe_unused]] V4L2util* v4l2) :
+        m_parent(parentProfile),
+        m_codecName(new VideoCodecName(m_parent))
     {
         setName(QObject::tr("Video Compression"));
 
-        m_codecName = new VideoCodecName(m_parent);
         addChild(m_codecName);
 
         QString label("RTjpeg");
@@ -983,11 +988,11 @@ class VideoCompressionSettings : public GroupSetting
                  * to the same setting configuration, so we need to do
                  * this in two passes. */
 
-                for (const auto & option : qAsConst(options))
+                for (const auto & option : std::as_const(options))
                 {
                     if (option.m_category == DriverOption::VIDEO_ENCODING)
                     {
-                        for (const auto & Imenu : qAsConst(option.m_menu))
+                        for (const auto & Imenu : std::as_const(option.m_menu))
                         {
                             if (!Imenu.isEmpty())
                                 m_v4l2codecs << "V4L2:" + Imenu;
@@ -1033,7 +1038,9 @@ class VideoCompressionSettings : public GroupSetting
                                              "medium_mpegbitratemode"));
                             }
                             else
+                            {
                                 bit_low->addChild(new BitrateMode(m_parent));
+                            }
                         }
                         else if (option.m_category == DriverOption::VIDEO_BITRATE)
                         {
@@ -1127,8 +1134,6 @@ class VideoCompressionSettings : public GroupSetting
                 }
             }
         }
-#else
-	Q_UNUSED(v4l2);
 #endif // USING_V4L2
     }
 
@@ -1140,13 +1145,17 @@ class VideoCompressionSettings : public GroupSetting
                m_codecName->addSelection("MPEG-4 AVC Hardware Encoder");
             else if (groupType.startsWith("V4L2:"))
             {
-                for (const auto & codec : qAsConst(m_v4l2codecs))
+                for (const auto & codec : std::as_const(m_v4l2codecs))
                     m_codecName->addSelection(codec);
             }
             else if (groupType == "MPEG")
+            {
                m_codecName->addSelection("MPEG-2 Hardware Encoder");
+            }
             else if (groupType == "MJPEG")
+            {
                 m_codecName->addSelection("Hardware MJPEG");
+            }
             else if (groupType == "GO7007")
             {
                 m_codecName->addSelection("MPEG-4");
@@ -1390,10 +1399,6 @@ RecordingProfile::RecordingProfile(const QString& profName)
     setLabel(profName);
     addChild(m_name);
 
-    m_trFilters  = nullptr;
-    m_trLossless = nullptr;
-    m_trResize   = nullptr;
-
     if (!profName.isEmpty())
     {
         if (profName.startsWith("Transcoders"))
@@ -1406,7 +1411,9 @@ RecordingProfile::RecordingProfile(const QString& profName)
             addChild(m_trResize);
         }
         else
+        {
             addChild(new AutoTranscode(*this));
+        }
     }
     else
     {
@@ -1486,7 +1493,7 @@ void RecordingProfile::FiltersChanged(const QString &val)
 }
 
 bool RecordingProfile::loadByType(const QString &name, const QString &card,
-                                  const QString &videodev)
+                                  [[maybe_unused]] const QString &videodev)
 {
     QString hostname = gCoreContext->GetHostName().toLower();
     QString cardtype = card;
@@ -1499,8 +1506,6 @@ bool RecordingProfile::loadByType(const QString &name, const QString &card,
         if (m_v4l2util->IsOpen())
             cardtype = m_v4l2util->ProfileName();
     }
-#else
-    Q_UNUSED(videodev);
 #endif
 
     MSqlQuery result(MSqlQuery::InitCon());
@@ -1588,7 +1593,7 @@ void RecordingProfile::CompleteLoad(int profileId, const QString &type,
             QStringList devices = CardUtil::GetVideoDevices("V4L2ENC");
             if (!devices.isEmpty())
             {
-                for (const auto & device : qAsConst(devices))
+                for (const auto & device : std::as_const(devices))
                 {
                     delete m_v4l2util;
                     m_v4l2util = new V4L2util(device);
@@ -1631,7 +1636,9 @@ void RecordingProfile::CompleteLoad(int profileId, const QString &type,
                     this,         &RecordingProfile::FiltersChanged);
         }
     }
-    else if (type.toUpper() == "DVB")
+
+    // Cards that can receive additional streams such as EIT and MHEG
+    if (CardUtil::IsEITCapable(type))
     {
         addChild(new RecordingTypeStream(*this));
     }
@@ -1888,7 +1895,7 @@ QString RecordingProfile::groupType(void) const
     else if (result.next())
         return result.value(0).toString();
 
-    return QString();
+    return {};
 }
 
 QString RecordingProfile::getName(int id)
@@ -1906,7 +1913,7 @@ QString RecordingProfile::getName(int id)
     else if (result.next())
         return result.value(0).toString();
 
-    return QString();
+    return {};
 }
 
 bool RecordingProfile::canDelete(void)

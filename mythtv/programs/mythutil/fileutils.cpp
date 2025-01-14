@@ -1,8 +1,8 @@
 // libmyth* headers
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "io/mythmediabuffer.h"
-#include "mythdownloadmanager.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythtv/io/mythmediabuffer.h"
 
 // local headers
 #include "fileutils.h"
@@ -84,7 +84,9 @@ static int CopyFile(const MythUtilCommandLineParser &cmdline)
             ok = false;
         }
         else
+        {
             totalBytesCopied += ret;
+        }
 
         int percentComplete = totalBytesCopied * 100 / totalBytes;
         if ((percentComplete % 5) == 0)

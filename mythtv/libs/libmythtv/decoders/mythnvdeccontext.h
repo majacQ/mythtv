@@ -15,7 +15,8 @@ extern "C" {
 #include "libavutil/hwcontext.h"
 #include "libavcodec/avcodec.h"
 #include "libavutil/pixdesc.h"
-#include "compat/cuda/dynlink_loader.h"
+#include <ffnvcodec/dynlink_cuda.h>
+#include <ffnvcodec/dynlink_cuviddec.h>
 }
 
 // Std
@@ -35,7 +36,7 @@ class MythNVDECContext : public MythCodecContext
     bool IsDeinterlacing                 (bool &DoubleRate, bool StreamChange = false) override;
     bool DecoderWillResetOnFlush         (void) override;
     static MythCodecID GetSupportedCodec (AVCodecContext **CodecContext,
-                                          AVCodec       **Codec,
+                                          const AVCodec **Codec,
                                           const QString  &Decoder,
                                           AVStream       *Stream,
                                           uint            StreamType);
@@ -60,8 +61,8 @@ class MythNVDECContext : public MythCodecContext
         cudaVideoCodec m_codec          { cudaVideoCodec_NumCodecs };
         uint           m_depth          { 0 };
         cudaVideoChromaFormat m_format  { cudaVideoChromaFormat_Monochrome };
-        QSize          m_minimum        { };
-        QSize          m_maximum        { };
+        QSize          m_minimum;
+        QSize          m_maximum;
         uint           m_macroBlocks    { 0 };
     };
 

@@ -6,14 +6,15 @@
 
 #include <QTimer>
 
-#include "mythuibuttonlist.h"
-#include "imagemanager.h"
+#include "libmythmetadata/imagemanager.h"
+#include "libmythui/mythuibuttonlist.h"
 
 
 class MythScreenType;
 
 //! Displayed info/details about an image.
-enum InfoVisibleState { kNoInfo,    //!< Details not displayed
+enum InfoVisibleState : std::uint8_t
+                      { kNoInfo,    //!< Details not displayed
                         kBasicInfo, //!< Shows just the most useful exif tags
                         kFullInfo   //!< Shows all exif tags
                       };

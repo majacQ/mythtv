@@ -13,13 +13,13 @@ class MythUIButton;
 #include <QKeyEvent>
 #include <QCoreApplication>
 
-// mythtv
-#include <mythscreentype.h>
+// MythTV
+#include <libmythui/mythscreentype.h>
 
 struct SmartPLOperator;
 struct SmartPLField;
 
-enum SmartPLFieldType
+enum SmartPLFieldType : std::uint8_t
 {
     ftString = 1,
     ftNumeric,
@@ -125,7 +125,7 @@ class SmartPlaylistEditor : public MythScreenType
     void getSmartPlaylistCategories(void);
     void loadFromDatabase(const QString& category, const QString& name);
 
-    QList<SmartPLCriteriaRow*> m_criteriaRows {};
+    QList<SmartPLCriteriaRow*> m_criteriaRows;
     SmartPLCriteriaRow* m_tempCriteriaRow     {nullptr};
 
     int     m_matchesCount                    {0};

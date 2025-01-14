@@ -1,6 +1,10 @@
 #include <algorithm> // for min
 #include <cstdint>
 
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+
 #include "firewirerecorder.h"
 #include "recordingprofile.h"
 #include "firewirechannel.h"
@@ -18,8 +22,6 @@
 #include "hdhrchannel.h"
 #include "iptvchannel.h"
 #include "mythsystemevent.h"
-#include "mythlogging.h"
-#include "programinfo.h"
 #include "asichannel.h"
 #include "dtvchannel.h"
 #include "dvbchannel.h"
@@ -29,7 +31,6 @@
 #include "io/mythmediabuffer.h"
 #include "cardutil.h"
 #include "tv_rec.h"
-#include "mythdate.h"
 #if CONFIG_LIBMP3LAME
 #include "NuppelVideoRecorder.h"
 #endif
@@ -115,7 +116,9 @@ void RecorderBase::SetRecording(const RecordingInfo *pginfo)
         recFile->Save();
     }
     else
+    {
         m_curRecording = nullptr;
+    }
 
     delete oldrec;
 }
@@ -164,7 +167,9 @@ void RecorderBase::SetOption(const QString &name, const QString &value)
             SetFrameRate(29.97);
         }
         else if (value.toLower() == "pal-m")
+        {
             SetFrameRate(29.97);
+        }
         else if (value.toLower() == "atsc")
         {
             // Here we set the TV format values for ATSC. ATSC isn't really
@@ -178,7 +183,9 @@ void RecorderBase::SetOption(const QString &name, const QString &value)
             SetFrameRate(29.97);
         }
         else
+        {
             SetFrameRate(25.00);
+        }
     }
     else
     {
@@ -259,9 +266,8 @@ bool RecorderBase::IsRecordingRequested(void)
  *  \param clear if true any generated timecodes should be reset.
  *  \sa Unpause(), WaitForPause()
  */
-void RecorderBase::Pause(bool clear)
+void RecorderBase::Pause([[maybe_unused]] bool clear)
 {
-    (void) clear;
     QMutexLocker locker(&m_pauseLock);
     m_requestPause = true;
 }
@@ -365,7 +371,7 @@ bool RecorderBase::CheckForRingBufferSwitch(void)
         ResetForNewFile();
 
         m_videoAspect = m_videoWidth = m_videoHeight = 0;
-        m_frameRate = FrameRate(0);
+        m_frameRate = MythAVRational(0);
 
         SetRingBuffer(m_nextRingBuffer);
         SetRecording(m_nextRecording);
@@ -451,7 +457,7 @@ void RecorderBase::FinishRecording(void)
             recFile->m_containerFormat = m_containerFormat;
 
             // Video
-            recFile->m_videoCodec = ff_codec_id_string(m_primaryVideoCodec);
+            recFile->m_videoCodec = avcodec_get_name(m_primaryVideoCodec);
             switch (m_curRecording->QueryAverageAspectRatio())
             {
                 case MARK_ASPECT_1_1 :
@@ -476,12 +482,14 @@ void RecorderBase::FinishRecording(void)
             recFile->m_videoFrameRate = (double)m_curRecording->QueryAverageFrameRate() / 1000.0;
 
             // Audio
-            recFile->m_audioCodec = ff_codec_id_string(m_primaryAudioCodec);
+            recFile->m_audioCodec = avcodec_get_name(m_primaryAudioCodec);
 
             recFile->Save();
         }
         else
+        {
             LOG(VB_GENERAL, LOG_CRIT, "RecordingFile object is NULL. No video file metadata can be stored");
+        }
 
         SavePositionMap(true, true); // Save Position Map only, not file size
 
@@ -520,20 +528,22 @@ RecordingQuality *RecorderBase::GetRecordingQuality(
 long long RecorderBase::GetKeyframePosition(long long desired) const
 {
     QMutexLocker locker(&m_positionMapLock);
-    long long ret = -1;
 
     if (m_positionMap.empty())
-        return ret;
+        return -1;
 
     // find closest exact or previous keyframe position...
     frm_pos_map_t::const_iterator it = m_positionMap.lowerBound(desired);
     if (it == m_positionMap.end())
-        ret = *m_positionMap.begin();
-    else if ((it.key() == desired) ||
-             (--it != m_positionMap.end()))
-        ret = *it;
+        return *m_positionMap.begin();
+    if (it.key() == desired)
+        return *it;
 
-    return ret;
+    it--;
+    if (it != m_positionMap.end())
+        return *it;
+
+    return -1;
 }
 
 bool RecorderBase::GetKeyframePositions(
@@ -665,35 +675,43 @@ void RecorderBase::TryWriteProgStartMark(const frm_pos_map_t &durationDeltaCopy)
             .arg(m_estimatedProgStartMS));
         return;
     }
+    frm_pos_map_t::const_iterator first_it = durationDeltaCopy.begin();
+    if (first_it == durationDeltaCopy.end())
+    {
+        LOG(VB_RECORD, LOG_DEBUG, "No progstart mark because map is empty");
+        return;
+    }
     frm_pos_map_t::const_iterator last_it = durationDeltaCopy.end();
     --last_it;
     long long bookmarkFrame = 0;
+    long long first_time { first_it.value() };
+    long long last_time  { last_it.value()  };
     LOG(VB_RECORD, LOG_DEBUG,
         QString("durationDeltaCopy.begin() = (%1,%2)")
-        .arg(durationDeltaCopy.begin().key())
-        .arg(durationDeltaCopy.begin().value()));
-    if (m_estimatedProgStartMS > *last_it)
+        .arg(first_it.key())
+        .arg(first_it.value()));
+    if (m_estimatedProgStartMS > last_time)
     {
         // Do nothing because we haven't reached recstartts yet.
         LOG(VB_RECORD, LOG_DEBUG,
             QString("No progstart mark yet because estimatedProgStartMS=%1 "
                     "and *last_it=%2")
-            .arg(m_estimatedProgStartMS).arg(*last_it));
+            .arg(m_estimatedProgStartMS).arg(last_time));
     }
     else if (m_lastSavedDuration <= m_estimatedProgStartMS &&
-             m_estimatedProgStartMS < *durationDeltaCopy.begin())
+             m_estimatedProgStartMS < first_time)
     {
         // Set progstart mark @ lastSavedKeyframe
         LOG(VB_RECORD, LOG_DEBUG,
             QString("Set progstart mark=%1 because %2<=%3<%4")
             .arg(m_lastSavedKeyframe).arg(m_lastSavedDuration)
-            .arg(m_estimatedProgStartMS).arg(*durationDeltaCopy.begin()));
+            .arg(m_estimatedProgStartMS).arg(first_time));
         bookmarkFrame = m_lastSavedKeyframe;
     }
-    else if (*durationDeltaCopy.begin() <= m_estimatedProgStartMS &&
-             m_estimatedProgStartMS < *last_it)
+    else if (first_time <= m_estimatedProgStartMS &&
+             m_estimatedProgStartMS < last_time)
     {
-        frm_pos_map_t::const_iterator upper_it = durationDeltaCopy.begin();
+        frm_pos_map_t::const_iterator upper_it = first_it;
         for (; upper_it != durationDeltaCopy.end(); ++upper_it)
         {
             if (*upper_it > m_estimatedProgStartMS)
@@ -821,7 +839,7 @@ void RecorderBase::VideoCodecChange(AVCodecID vCodec)
 {
     if (m_curRecording && m_curRecording->GetRecordingFile())
     {
-        m_curRecording->GetRecordingFile()->m_videoCodec = ff_codec_id_string(vCodec);
+        m_curRecording->GetRecordingFile()->m_videoCodec = avcodec_get_name(vCodec);
         m_curRecording->GetRecordingFile()->Save();
     }
 }
@@ -830,7 +848,7 @@ void RecorderBase::AudioCodecChange(AVCodecID aCodec)
 {
     if (m_curRecording && m_curRecording->GetRecordingFile())
     {
-        m_curRecording->GetRecordingFile()->m_audioCodec = ff_codec_id_string(aCodec);
+        m_curRecording->GetRecordingFile()->m_audioCodec = avcodec_get_name(aCodec);
         m_curRecording->GetRecordingFile()->Save();
     }
 }
@@ -858,25 +876,33 @@ RecorderBase *RecorderBase::CreateRecorder(
         return nullptr;
 
     RecorderBase *recorder = nullptr;
-    if (genOpt.m_inputType == "MPEG")
-    { // NOLINTNEXTLINE(bugprone-branch-clone)
-#ifdef USING_IVTV
-        recorder = new MpegRecorder(tvrec);
-#endif // USING_IVTV
+    if (genOpt.m_inputType == "IMPORT")
+    {
+        recorder = new ImportRecorder(tvrec);
     }
-#ifdef USING_HDPVR
-    else if (genOpt.m_inputType == "HDPVR")
+    else if (genOpt.m_inputType == "EXTERNAL")
+    {
+        if (dynamic_cast<ExternalChannel*>(channel))
+            recorder = new ExternalRecorder(tvrec, dynamic_cast<ExternalChannel*>(channel));
+    }
+#ifdef USING_V4L2
+    else if ((genOpt.m_inputType == "MPEG") ||
+	     (genOpt.m_inputType == "HDPVR") ||
+	     (genOpt.m_inputType == "DEMO"))
     {
         recorder = new MpegRecorder(tvrec);
     }
-#endif // USING_HDPVR
-#ifdef USING_V4L2
     else if (genOpt.m_inputType == "V4L2ENC")
     {
         if (dynamic_cast<V4LChannel*>(channel))
             recorder = new V4L2encRecorder(tvrec, dynamic_cast<V4LChannel*>(channel));
     }
-#endif
+#else
+    else if (genOpt.m_inputType == "DEMO")
+    {
+        recorder = new ImportRecorder(tvrec);
+    }
+#endif // USING_V4L2
 #ifdef USING_FIREWIRE
     else if (genOpt.m_inputType == "FIREWIRE")
     {
@@ -948,18 +974,6 @@ RecorderBase *RecorderBase::CreateRecorder(
         }
     }
 #endif // USING_ASI
-    else if (genOpt.m_inputType == "IMPORT")
-    {
-        recorder = new ImportRecorder(tvrec);
-    }
-    else if (genOpt.m_inputType == "DEMO")
-    {
-#ifdef USING_IVTV
-        recorder = new MpegRecorder(tvrec);
-#else
-        recorder = new ImportRecorder(tvrec);
-#endif
-    }
 #if CONFIG_LIBMP3LAME && defined(USING_V4L2)
     else if (CardUtil::IsV4L(genOpt.m_inputType))
     {
@@ -968,11 +982,6 @@ RecorderBase *RecorderBase::CreateRecorder(
         recorder->SetBoolOption("skipbtaudio", genOpt.m_skipBtAudio);
     }
 #endif // USING_V4L2
-    else if (genOpt.m_inputType == "EXTERNAL")
-    {
-        if (dynamic_cast<ExternalChannel*>(channel))
-            recorder = new ExternalRecorder(tvrec, dynamic_cast<ExternalChannel*>(channel));
-    }
 
     if (recorder)
     {

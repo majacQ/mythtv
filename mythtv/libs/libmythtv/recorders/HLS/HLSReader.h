@@ -17,13 +17,13 @@
 */
 
 #ifdef HLS_USE_MYTHDOWNLOADMANAGER
-#include "mythdownloadmanager.h"
+#include "libmythbase/mythdownloadmanager.h"
 #else
-#include "mythsingledownload.h"
+#include "libmythbase/mythsingledownload.h"
 #endif
 
-#include "mythlogging.h"
-#include "mythtvexp.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythtv/mythtvexp.h"
 
 #include "HLSSegment.h"
 #include "HLSStream.h"
@@ -40,12 +40,12 @@ class MTV_PUBLIC  HLSReader
     using StreamContainer = QMap<QString, HLSRecStream* >;
     using SegmentContainer = QVector<HLSRecSegment>;
 
-    HLSReader(void) = default;
+    HLSReader(int inputId) { m_inputId = inputId; };
     ~HLSReader(void);
 
     bool Open(const QString & m3u, int bitrate_index = 0);
     void Close(bool quiet = false);
-    int Read(uint8_t* buffer, int len);
+    qint64 Read(uint8_t* buffer, qint64 len);
     void Throttle(bool val);
     bool IsThrottled(void) const { return m_throttle; }
     bool IsOpen(const QString& url) const
@@ -56,6 +56,7 @@ class MTV_PUBLIC  HLSReader
     void ResetStream(void)
       { QMutexLocker lock(&m_streamLock); m_curstream = nullptr; }
     void ResetSequence(void) { m_curSeq = -1; }
+
 
     QString StreamURL(void) const
     { return QString("%1").arg(m_curstream ? m_curstream->M3U8Url() : ""); }
@@ -87,7 +88,6 @@ class MTV_PUBLIC  HLSReader
     void IncreaseBitrate(int progid);
 
     // Downloading
-    bool LoadSegments(HLSRecStream & hlsstream);
     int DownloadSegmentData(MythSingleDownload& downloader, HLSRecStream* hls,
 			    const HLSRecSegment& segment, int playlist_size);
 
@@ -106,7 +106,7 @@ class MTV_PUBLIC  HLSReader
     bool               m_fatal          {false};
     bool               m_cancel         {false};
     bool               m_throttle       {true};
-                     // only print one time that the media is encrypted
+    // Only print one time that the media is encrypted
     bool               m_aesMsg         {false};
 
     HLSPlaylistWorker *m_playlistWorker {nullptr};
@@ -115,11 +115,16 @@ class MTV_PUBLIC  HLSReader
     int                m_playlistSize   {0};
     bool               m_bandwidthCheck {false};
     uint               m_prebufferCnt   {10};
+
     QMutex             m_seqLock;
+
     mutable QMutex     m_streamLock;
+
     mutable QMutex     m_workerLock;
+
     QMutex             m_throttleLock;
     QWaitCondition     m_throttleCond;
+
     bool               m_debug          {false};
     int                m_debugCnt       {0};
 
@@ -127,6 +132,9 @@ class MTV_PUBLIC  HLSReader
     int                m_slowCnt        {0};
     QByteArray         m_buffer;
     QMutex             m_bufLock;
+
+    // Log message
+    int                m_inputId        {0};
 };
 
 #endif // HLS_READER_H

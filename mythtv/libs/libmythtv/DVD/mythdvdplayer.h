@@ -39,8 +39,7 @@ class MythDVDPlayer : public MythPlayerUI
     void     ResetPlaying(bool ResetFrames = true) override;
     bool     PrebufferEnoughFrames(int MinBuffers = 0) override;
     void     DecoderPauseCheck(void) override;
-    bool     DecoderGetFrameFFREW(void) override;
-    bool     DecoderGetFrameREW(void) override;
+    void     DoFFRewSkip(void) override;
     void     ChangeSpeed(void) override;
     void     DisplayPauseFrame(void) override;
     void     PreProcessNormalFrame(void) override;
@@ -77,16 +76,12 @@ class MythDVDPlayer : public MythPlayerUI
     int      m_initialTitle           { -1 };
     int      m_initialAudioTrack      { -1 };
     int      m_initialSubtitleTrack   { -1 };
-    QString  m_initialDvdState        { };
+    QString  m_initialDvdState;
 
     // still frame timing
-    MythTimer m_stillFrameTimer       { };
+    MythTimer m_stillFrameTimer;
     std::chrono::seconds  m_stillFrameLength  { 0s };
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex   m_stillFrameTimerLock    { QMutex::Recursive };
-#else
     QRecursiveMutex m_stillFrameTimerLock;
-#endif
 };
 
 #endif // MYTHDVDPLAYER_H

@@ -1,12 +1,14 @@
+// MythTV other libs
+#include "libmythbase/mythlogging.h"
+
 // MythTV
-#include "mythlogging.h"
-#include "mythplayerui.h"
 #include "Bluray/mythbdbuffer.h"
 #include "Bluray/mythbdoverlayscreen.h"
-#include "captions/teletextscreen.h"
 #include "captions/subtitlescreen.h"
-#include "interactivescreen.h"
+#include "captions/teletextscreen.h"
+#include "mheg/interactivescreen.h"
 #include "mythcaptionsoverlay.h"
+#include "mythplayerui.h"
 
 #define LOC QString("Captions: ")
 
@@ -29,7 +31,7 @@ void MythCaptionsOverlay::TearDown()
 void MythCaptionsOverlay::Draw(QRect Rect)
 {
     bool visible = false;
-    for (auto * screen : qAsConst(m_children))
+    for (auto * screen : std::as_const(m_children))
     {
         if (screen->IsVisible())
         {
@@ -41,7 +43,7 @@ void MythCaptionsOverlay::Draw(QRect Rect)
     if (visible)
     {
         m_painter->Begin(nullptr);
-        for (auto * screen : qAsConst(m_children))
+        for (auto * screen : std::as_const(m_children))
         {
             if (screen->IsVisible())
             {
@@ -196,7 +198,8 @@ void MythCaptionsOverlay::DisableForcedSubtitles()
     if (HasWindow(OSD_WIN_SUBTITLE))
     {
         SubtitleScreen *sub = InitSubtitles();
-        sub->DisableForcedSubtitles();
+        if (sub)
+            sub->DisableForcedSubtitles();
     }
 }
 

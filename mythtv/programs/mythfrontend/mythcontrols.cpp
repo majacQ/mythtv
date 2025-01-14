@@ -25,24 +25,21 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
 
-#include "mythcontrols.h"
-
 // Qt headers
-#include <QStringList>
 #include <QCoreApplication>
+#include <QStringList>
 
 // MythTV headers
-#include "mythcorecontext.h"
-#include "mythmainwindow.h"
-
-// MythUI headers
-#include "mythuitext.h"
-#include "mythuibutton.h"
-#include "mythuibuttonlist.h"
-#include "mythdialogbox.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
 
 // MythControls headers
 #include "keygrabber.h"
+#include "mythcontrols.h"
 
 #define LOC QString("MythControls: ")
 #define LOC_ERR QString("MythControls, Error: ")
@@ -147,18 +144,16 @@ void MythControls::ChangeButtonFocus(int direction)
 /**
  *  \brief Slot handling a button being pressed in the left list
  */
-void MythControls::LeftPressed(MythUIButtonListItem *item)
+void MythControls::LeftPressed([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void) item;
     NextPrevWidgetFocus(true);
 }
 
 /**
  *  \brief Slot handling a button being pressed in the left list
  */
-void MythControls::RightPressed(MythUIButtonListItem *item)
+void MythControls::RightPressed([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void) item;
     if (m_currentView == kActionsByContext)
         ChangeButtonFocus(0);
 }
@@ -187,8 +182,10 @@ void MythControls::ActionButtonPressed()
         m_menuPopup->AddButton(tr("Set Binding"));
         m_menuPopup->AddButton(tr("Remove Binding"));
     }
-    else // for blank keys, no reason to ask what to do
+    else {
+        // for blank keys, no reason to ask what to do
         GrabKey();
+    }
 }
 
 /**
@@ -253,7 +250,9 @@ void MythControls::Close()
         confirmPopup->SetReturnEvent(this, "exit");
     }
     else
+    {
         MythScreenType::Close();
+    }
 }
 
 /**
@@ -288,7 +287,7 @@ void MythControls::SetListContents(
     uilist->Reset();
 
     // add each new string
-    for (const auto & content : qAsConst(contents))
+    for (const auto & content : std::as_const(contents))
     {
         auto *item = new MythUIButtonListItem(uilist, content);
         item->setDrawArrow(arrows);
@@ -365,12 +364,12 @@ QString MythControls::GetCurrentContext(void)
         return m_leftList->GetItemCurrent()->GetText();
 
     if (GetFocusWidget() == m_leftList)
-        return QString();
+        return {};
 
     QString desc = m_rightList->GetItemCurrent()->GetText();
     int loc = desc.indexOf(" => ");
     if (loc == -1)
-        return QString(); // Should not happen
+        return {}; // Should not happen
 
     if (m_rightListType == kContextList)
         return desc.left(loc);
@@ -393,14 +392,14 @@ QString MythControls::GetCurrentAction(void)
         {
             return m_leftList->GetItemCurrent()->GetText();
         }
-        return QString();
+        return {};
     }
 
     if (GetFocusWidget() == m_leftList)
-        return QString();
+        return {};
 
     if (!m_rightList || !m_rightList->GetItemCurrent())
-        return QString();
+        return {};
 
     QString desc = m_rightList->GetItemCurrent()->GetText();
     if (kContextList == m_leftListType &&
@@ -411,14 +410,14 @@ QString MythControls::GetCurrentAction(void)
 
     int loc = desc.indexOf(" => ");
     if (loc == -1)
-        return QString(); // should not happen..
+        return {}; // should not happen..
 
     if (m_rightListType == kActionList)
         return desc.left(loc);
 
     QString rv = desc.mid(loc+4);
     if (rv == "<none>")
-        return QString();
+        return {};
 
     return rv;
 }
@@ -450,14 +449,15 @@ uint MythControls::GetCurrentButton(void)
 QString MythControls::GetCurrentKey(void)
 {
     MythUIButtonListItem* currentButton = nullptr;
-    if (m_leftListType == kKeyList &&
-        (currentButton = m_leftList->GetItemCurrent()))
+    if (m_leftListType == kKeyList)
     {
-        return currentButton->GetText();
+        currentButton = m_leftList->GetItemCurrent();
+        if (currentButton != nullptr)
+            return currentButton->GetText();
     }
 
     if (GetFocusWidget() == m_leftList)
-        return QString();
+        return {};
 
     if ((m_leftListType == kContextList) && (m_rightListType == kActionList))
     {
@@ -469,7 +469,7 @@ QString MythControls::GetCurrentKey(void)
         if (b < (uint)keys.count())
             return keys[b];
 
-        return QString();
+        return {};
     }
 
     currentButton = m_rightList->GetItemCurrent();
@@ -479,7 +479,7 @@ QString MythControls::GetCurrentKey(void)
 
     int loc = desc.indexOf(" => ");
     if (loc == -1)
-        return QString(); // Should not happen
+        return {}; // Should not happen
 
 
     if (m_rightListType == kKeyList)
@@ -507,7 +507,7 @@ void MythControls::LoadData(const QString &hostname)
     m_sortedContexts.insert(m_sortedContexts.begin(),
                             ActionSet::kJumpContext);
 
-    for (const auto & ctx_name : qAsConst(m_sortedContexts))
+    for (const auto & ctx_name : std::as_const(m_sortedContexts))
     {
         QStringList actions = m_bindings->GetActions(ctx_name);
         actions.sort();
@@ -554,7 +554,9 @@ void MythControls::DeleteKey(void)
         popupStack->AddScreen(confirmPopup);
     }
     else
+    {
         delete confirmPopup;
+    }
 }
 
 /**
@@ -732,7 +734,9 @@ void MythControls::customEvent(QEvent *event)
                 contents = m_bindings->GetKeys();
             }
             else
+            {
                 return;
+            }
 
             m_leftDescription->SetText(leftcaption);
             m_rightDescription->SetText(rightcaption);

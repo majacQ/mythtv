@@ -1,35 +1,27 @@
 // -*- Mode: c++ -*-
 
-#ifndef _SATIPSTREAMHANDLER_H_
-#define _SATIPSTREAMHANDLER_H_
+#ifndef SATIPSTREAMHANDLER_H
+#define SATIPSTREAMHANDLER_H
 
 // Qt headers
 #include <QString>
 #include <QStringList>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QMap>
 
 // MythTV headers
-#include "mpegstreamdata.h"
-#include "streamhandler.h"
-#include "dtvmultiplex.h"
 #include "dtvconfparserhelpers.h"
+#include "dtvmultiplex.h"
+#include "mpeg/mpegstreamdata.h"
 #include "satiprtsp.h"
+#include "streamhandler.h"
 
-class SatIPStreamHandler;
-class DTVSignalMonitor;
-class SatIPChannel;
-class DeviceReadBuffer;
+class SatIPDataReadHelper;
+class SatIPControlReadHelper;
 
 class SatIPStreamHandler : public StreamHandler
 {
-    friend class SatIPRTSPWriteHelper;
-    friend class SatIPRTSPReadHelper;
-    friend class SatIPSignalMonitor;
+    friend class SatIPDataReadHelper;
 
   public:
     static SatIPStreamHandler *Get(const QString &devname, int inputid);
@@ -48,6 +40,7 @@ class SatIPStreamHandler : public StreamHandler
 
   private:
     explicit SatIPStreamHandler(const QString & device, int inputid);
+    ~SatIPStreamHandler() override;
 
     bool Open(void);
     void Close(void);
@@ -61,6 +54,7 @@ class SatIPStreamHandler : public StreamHandler
 
   public:
     int          m_inputId        {0};
+    int          m_satipsrc       {1};
 
   private:
     DTVTunerType m_tunerType;
@@ -70,15 +64,73 @@ class SatIPStreamHandler : public StreamHandler
     QUrl         m_tuningurl;
     QUrl         m_oldtuningurl;
     bool         m_setupinvoked   {false};
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex       m_tunelock       {QMutex::Recursive};
-#else
     QRecursiveMutex m_tunelock;
-#endif
     QStringList  m_oldpids;
 
-  protected:
-    SatIPRTSP   *m_rtsp           {nullptr};
+  public:
+    QUdpSocket  *m_dsocket        {nullptr};    // RTP data socket
+    QUdpSocket  *m_csocket        {nullptr};    // RTCP control socket
+    ushort       m_dport          {0};          // RTP data port          Note: this is m_dsocket->localPort()
+    ushort       m_cport          {0};          // RTCP control port      Note: this is m_csocket->localPort()
+
+  public:
+    SatIPRTSP               *m_rtsp               {nullptr};
+    SatIPDataReadHelper     *m_dataReadHelper     {nullptr};
+    SatIPControlReadHelper  *m_controlReadHelper  {nullptr};
+
+  public:
+    bool HasLock();
+    int  GetSignalStrength();
+    void SetSigmonValues(bool lock, int level);
+
+  private:
+    QMutex m_sigmonLock;
+    bool m_hasLock          {false};
+    int  m_signalStrength   {0};
+
+  public:
+    static uint  GetUDPReceiveBufferSize(QUdpSocket *socket);
+    static uint  SetUDPReceiveBufferSize(QUdpSocket *socket, uint rcvbuffersize);
 };
 
-#endif // _SATIPSTREAMHANDLER_H_
+// --- SatIPDataReadHelper ---------------------------------------------------
+
+class SatIPDataReadHelper : public QObject
+{
+    Q_OBJECT
+
+  public:
+    explicit SatIPDataReadHelper(SatIPStreamHandler *handler);
+    ~SatIPDataReadHelper() override;
+
+  public slots:
+    void ReadPending(void);
+
+  private:
+    SatIPStreamHandler *m_streamHandler   {nullptr};
+    QUdpSocket         *m_socket          {nullptr};
+    int                 m_timer           {0};
+    uint                m_sequenceNumber  {0};
+    uint                m_count           {0};
+    bool                m_valid           {false};
+};
+
+// --- SatIPControlReadHelper ------------------------------------------------
+
+class SatIPControlReadHelper : public QObject
+{
+    Q_OBJECT
+
+  public:
+    explicit SatIPControlReadHelper(SatIPStreamHandler *handler);
+    ~SatIPControlReadHelper() override;
+
+  public slots:
+    void ReadPending(void);
+
+  private:
+    SatIPStreamHandler *m_streamHandler   {nullptr};
+    QUdpSocket         *m_socket          {nullptr};
+};
+
+#endif // SATIPSTREAMHANDLER_H

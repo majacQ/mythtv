@@ -6,7 +6,7 @@
 #include "mythbaseexp.h"
 #include "mythdbcon.h"
 
-enum MythDBBackupStatus
+enum MythDBBackupStatus : std::uint8_t
 {
     kDB_Backup_Unknown = 0,
     kDB_Backup_Failed,
@@ -53,6 +53,7 @@ class MBASE_PUBLIC DBUtil
     static void UnlockSchema(MSqlQuery &query);
 
     static bool CheckTimeZoneSupport(void);
+    static bool CheckTableColumnExists(const QString &tableName, const QString &columnName);
 
     static const int kUnknownVersionNumber;
 

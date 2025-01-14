@@ -8,28 +8,28 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
-#include <QTimer>
 #include <QRegularExpression>
+#include <QTimer>
 #include <QUrl>
 
 // MythTV headers
-#include <mythuibuttonlist.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythcontext.h>
-#include <mythuiimage.h>
-#include <mythsystemlegacy.h>
-#include <mythuitext.h>
-#include <mythdate.h>
-#include <mythdirs.h>
-#include <mythdb.h>
-#include <mythdownloadmanager.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // MythNews headers
 #include "mythnews.h"
+#include "mythnewsconfig.h"
 #include "mythnewseditor.h"
 #include "newsdbutil.h"
-#include "mythnewsconfig.h"
 
 #define LOC      QString("MythNews: ")
 #define LOC_WARN QString("MythNews, Warning: ")
@@ -277,7 +277,9 @@ void MythNews::updateInfoView(MythUIButtonListItem *selected)
                         m_downloadImage->Show();
                 }
                 else
+                {
                     m_downloadImage->Hide();
+                }
             }
 
             if (m_enclosureImage)
@@ -288,7 +290,9 @@ void MythNews::updateInfoView(MythUIButtonListItem *selected)
                         m_enclosureImage->Show();
                 }
                 else
+                {
                     m_enclosureImage->Hide();
+                }
             }
 
             if (m_podcastImage)
@@ -346,33 +350,12 @@ void MythNews::updateInfoView(MythUIButtonListItem *selected)
                                            MythDate::kDateTimeFull | MythDate::kSimplify);
             }
             else
+            {
                 text += tr("Unknown");
+            }
             m_updatedText->SetText(text);
         }
     }
-}
-
-QString MythNews::formatSize(long long bytes, int prec)
-{
-    long long sizeKB = bytes / 1024;
-
-    if (sizeKB>1024*1024*1024) // Terabytes
-    {
-        double sizeGB = sizeKB/(1024*1024*1024.0);
-        return QString("%1 TB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024*1024) // Gigabytes
-    {
-        double sizeGB = sizeKB/(1024*1024.0);
-        return QString("%1 GB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024) // Megabytes
-    {
-        double sizeMB = sizeKB/1024.0;
-        return QString("%1 MB").arg(sizeMB, 0, 'f', (sizeMB>10)?0:prec);
-    }
-    // Kilobytes
-    return QString("%1 KB").arg(sizeKB);
 }
 
 bool MythNews::keyPressEvent(QKeyEvent *event)
@@ -385,7 +368,7 @@ bool MythNews::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "RETRIEVENEWS")
@@ -524,7 +507,7 @@ void MythNews::slotViewArticle(MythUIButtonListItem *articlesListItem)
     if (it == m_articles.constEnd())
         return;
 
-    const NewsArticle article = *it;
+    const NewsArticle& article = *it;
 
     if (article.articleURL().isEmpty())
         return;
@@ -589,7 +572,9 @@ void MythNews::ShowEditDialog(bool edit)
         mainStack->AddScreen(mythnewseditor);
     }
     else
+    {
         delete mythnewseditor;
+    }
 }
 
 void MythNews::ShowFeedManager() const
@@ -604,7 +589,9 @@ void MythNews::ShowFeedManager() const
         mainStack->AddScreen(mythnewsconfig);
     }
     else
+    {
         delete mythnewsconfig;
+    }
 }
 
 void MythNews::ShowMenu(void)
@@ -708,29 +695,40 @@ QString MythNews::cleanText(const QString &text)
     result.replace("&#39;", "'");    // Apostrophe
 
     // Replace paragraph and break HTML with newlines
-    if( result.contains(QRegularExpression("</(p|P)>")) )
+    static const QRegularExpression kHtmlParaStartRE
+        { "<p>", QRegularExpression::CaseInsensitiveOption };
+    static const QRegularExpression kHtmlParaEndRE
+        { "</p>", QRegularExpression::CaseInsensitiveOption };
+    static const QRegularExpression kHtmlBreak1RE
+        { "<(br|)>", QRegularExpression::CaseInsensitiveOption };
+    static const QRegularExpression kHtmlBreak2RE
+        { "<(br|)/>", QRegularExpression::CaseInsensitiveOption };
+    if( result.contains(kHtmlParaEndRE) )
     {
-        result.replace( QRegularExpression("<(p|P)>"), "");
-        result.replace( QRegularExpression("</(p|P)>"), "\n\n");
+        result.replace( kHtmlParaStartRE, "");
+        result.replace( kHtmlParaEndRE, "\n\n");
     }
     else
     {
-        result.replace( QRegularExpression("<(p|P)>"), "\n\n");
-        result.replace( QRegularExpression("</(p|P)>"), "");
+        result.replace( kHtmlParaStartRE, "\n\n");
+        result.replace( kHtmlParaEndRE, "");
     }
-    result.replace( QRegularExpression("<(br|BR|)/>"), "\n");
-    result.replace( QRegularExpression("<(br|BR|)>"), "\n");
+    result.replace( kHtmlBreak2RE, "\n");
+    result.replace( kHtmlBreak1RE, "\n");
     // These are done instead of simplifyWhitespace
     // because that function also strips out newlines
     // Replace tab characters with nothing
-    result.replace( QRegularExpression("\t"), "");
+    static const QRegularExpression kTabRE { "\t" };
+    result.replace( kTabRE, "");
     // Replace double space with single
-    result.replace( QRegularExpression("  "), "");
+    static const QRegularExpression kTwoSpaceRE { "  " };
+    result.replace( kTwoSpaceRE, "");
     // Replace whitespace at beginning of lines with newline
-    result.replace( QRegularExpression("\n "), "\n");
+    static const QRegularExpression kStartingSpaceRE { "\n " };
+    result.replace( kStartingSpaceRE, "\n");
     // Remove any remaining HTML tags
-    QRegularExpression removeHTML(QRegularExpression("</?.+>"));
-    result.remove((const QRegularExpression&) removeHTML);
+    static const QRegularExpression kRemoveHtmlRE(QRegularExpression("</?.+>"));
+    result.remove(kRemoveHtmlRE);
     result = result.trimmed();
 
     return result;

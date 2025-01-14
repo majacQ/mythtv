@@ -10,11 +10,11 @@
 #include <QObject>
 
 // MythTV headers
-#include "mythdialogbox.h"
-#include "mythdirs.h"
-#include "mythscreenstack.h"
-#include "mythscreentype.h"
-#include "themeinfo.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythscreenstack.h"
+#include "libmythui/mythscreentype.h"
+#include "libmythui/themeinfo.h"
 
 class MythDialogBox;
 class MythUIButtonList;
@@ -55,10 +55,10 @@ class ThemeChooser : public MythScreenType
     void themeChanged(void);
 
   private:
-    void LoadVersion(const QString &version, QStringList &themesSeen,
+    bool LoadVersion(const QString &version, QStringList &themesSeen,
                      bool alert_user);
 
-    enum DownloadState
+    enum DownloadState : std::uint8_t
     {
         dsIdle = 0,
         dsDownloadingOnBackend,

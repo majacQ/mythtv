@@ -18,10 +18,8 @@
 #include <sys/socket.h>
 #endif
 #include <unistd.h> // for usleep (and socket code on Q_OS_WIN)
-#include <algorithm> // for min/max
-using std::max;
+#include <algorithm> // for max
 #include <vector> // for vector
-using std::vector;
 
 // MythTV
 #include "mythsocket.h"
@@ -31,11 +29,6 @@ using std::vector;
 #include "mythlogging.h"
 #include "mythcorecontext.h"
 #include "portchecker.h"
-
-#define SLOC(a) QString("MythSocket(%1:%2): ") \
-    .arg((intptr_t)(a), 0, 16)                 \
-    .arg((a)->GetSocketDescriptor())
-#define LOC SLOC(this)
 
 const int MythSocket::kSocketReceiveBufferSize = 128 * 1024;
 
@@ -76,13 +69,13 @@ static QString to_sample(const QByteArray &payload)
 }
 
 MythSocket::MythSocket(
-    qt_socket_fd_t socket, MythSocketCBs *cb, bool use_shared_thread) :
+    qintptr socket, MythSocketCBs *cb, bool use_shared_thread) :
     ReferenceCounter(QString("MythSocket(%1)").arg(socket)),
     m_tcpSocket(new QTcpSocket()),
     m_callback(cb),
     m_useSharedThread(use_shared_thread)
 {
-    LOG(VB_SOCKET, LOG_INFO, LOC + QString("MythSocket(%1, 0x%2) ctor")
+    LOG(VB_SOCKET, LOG_INFO, LOC() + QString("MythSocket(%1, 0x%2) ctor")
         .arg(socket).arg((intptr_t)(cb),0,16));
 
     if (socket != -1)
@@ -107,15 +100,9 @@ MythSocket::MythSocket(
     connect(m_tcpSocket,  &QAbstractSocket::connected,
             this, &MythSocket::ConnectHandler,
             Qt::DirectConnection);
-#if QT_VERSION < QT_VERSION_CHECK(5,15,0)
-    connect(m_tcpSocket, qOverload<QAbstractSocket::SocketError>(&QAbstractSocket::error),
-            this, &MythSocket::ErrorHandler,
-            Qt::DirectConnection);
-#else
     connect(m_tcpSocket,  &QAbstractSocket::errorOccurred,
             this, &MythSocket::ErrorHandler,
             Qt::DirectConnection);
-#endif
     connect(m_tcpSocket,  &QIODevice::aboutToClose,
             this, &MythSocket::AboutToCloseHandler);
     connect(m_tcpSocket,  &QAbstractSocket::disconnected,
@@ -152,7 +139,7 @@ MythSocket::MythSocket(
 
 MythSocket::~MythSocket()
 {
-    LOG(VB_SOCKET, LOG_INFO, LOC + QString("MythSocket dtor : cb 0x%2")
+    LOG(VB_SOCKET, LOG_INFO, LOC() + QString("MythSocket dtor : cb 0x%2")
         .arg((intptr_t)(m_callback),0,16));
 
     if (IsConnected())
@@ -210,7 +197,7 @@ void MythSocket::ConnectHandler(void)
 #endif
     if (ret < 0)
     {
-        LOG(VB_SOCKET, LOG_INFO, LOC + "Failed to set SO_REUSEADDR" + ENO);
+        LOG(VB_SOCKET, LOG_INFO, LOC() + "Failed to set SO_REUSEADDR" + ENO);
     }
 
     int rcv_buf_val = kSocketReceiveBufferSize;
@@ -225,12 +212,12 @@ void MythSocket::ConnectHandler(void)
 #endif
     if (ret < 0)
     {
-        LOG(VB_SOCKET, LOG_INFO, LOC + "Failed to set SO_RCVBUF" + ENO);
+        LOG(VB_SOCKET, LOG_INFO, LOC() + "Failed to set SO_RCVBUF" + ENO);
     }
 
     if (m_callback)
     {
-        LOG(VB_SOCKET, LOG_DEBUG, LOC +
+        LOG(VB_SOCKET, LOG_DEBUG, LOC() +
             "calling m_callback->connected()");
         m_callback->connected(this);
     }
@@ -245,7 +232,7 @@ void MythSocket::ErrorHandler(QAbstractSocket::SocketError err)
 
     if (m_callback)
     {
-        LOG(VB_SOCKET, LOG_DEBUG, LOC +
+        LOG(VB_SOCKET, LOG_DEBUG, LOC() +
             "calling m_callback->error() err: " + m_tcpSocket->errorString());
         m_callback->error(this, (int)err);
     }
@@ -263,7 +250,7 @@ void MythSocket::DisconnectHandler(void)
 
     if (m_callback)
     {
-        LOG(VB_SOCKET, LOG_DEBUG, LOC +
+        LOG(VB_SOCKET, LOG_DEBUG, LOC() +
             "calling m_callback->connectionClosed()");
         m_callback->connectionClosed(this);
     }
@@ -271,7 +258,7 @@ void MythSocket::DisconnectHandler(void)
 
 void MythSocket::AboutToCloseHandler(void)
 {
-    LOG(VB_SOCKET, LOG_DEBUG, LOC + "AboutToClose");
+    LOG(VB_SOCKET, LOG_DEBUG, LOC() + "AboutToClose");
 }
 
 void MythSocket::ReadyReadHandler(void)
@@ -291,7 +278,7 @@ void MythSocket::CallReadyReadHandler(void)
     // the callback.
     if (IsDataAvailable())
     {
-        LOG(VB_SOCKET, LOG_DEBUG, LOC +
+        LOG(VB_SOCKET, LOG_DEBUG, LOC() +
             "calling m_callback->readyRead()");
         m_callback->readyRead(this);
     }
@@ -353,26 +340,26 @@ bool MythSocket::SendReceiveStringList(
 
     if (!WriteStringList(strlist))
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "Failed to send command.");
+        LOG(VB_GENERAL, LOG_ERR, LOC() + "Failed to send command.");
         return false;
     }
 
     if (!ReadStringList(strlist, timeoutMS))
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "No response.");
+        LOG(VB_GENERAL, LOG_ERR, LOC() + "No response.");
         return false;
     }
 
     if (min_reply_length && ((uint)strlist.size() < min_reply_length))
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "Response too short.");
+        LOG(VB_GENERAL, LOG_ERR, LOC() + "Response too short.");
         return false;
     }
 
 #if 0
     if (!strlist.empty() && strlist[0] == "BACKEND_MESSAGE")
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "Got MythEvent on non-event socket");
+        LOG(VB_GENERAL, LOG_ERR, LOC() + "Got MythEvent on non-event socket");
         return false;
     }
 #endif
@@ -403,7 +390,7 @@ bool MythSocket::ConnectToHost(const QString &host, quint16 port)
             }
             else
             {
-                LOG(VB_GENERAL, LOG_ERR, LOC + QString("Unable to lookup: %1")
+                LOG(VB_GENERAL, LOG_ERR, LOC() + QString("Unable to lookup: %1")
                         .arg(host));
                 return false;
             }
@@ -470,14 +457,14 @@ bool MythSocket::Announce(const QStringList &new_announce)
 {
     if (!m_isValidated)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             "refusing to announce unvalidated socket");
         return false;
     }
 
     if (m_isAnnounced)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "refusing to re-announce socket");
+        LOG(VB_GENERAL, LOG_ERR, LOC() + "refusing to re-announce socket");
         return false;
     }
 
@@ -486,7 +473,7 @@ bool MythSocket::Announce(const QStringList &new_announce)
     QStringList tmplist;
     if (!ReadStringList(tmplist, MythSocket::kShortTimeout))
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             QString("\n\t\t\tCould not read string list from server %1:%2")
             .arg(m_tcpSocket->peerAddress().toString())
             .arg(m_tcpSocket->peerPort()));
@@ -513,7 +500,7 @@ void MythSocket::DisconnectFromHost(void)
     if (QThread::currentThread() != m_thread->qthread() &&
         gCoreContext && gCoreContext->IsExiting())
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             QString("Programmer error, QEventLoop isn't running and deleting "
                     "MythSocket(0x%1)").arg(reinterpret_cast<intptr_t>(this),0,16));
         return;
@@ -615,7 +602,7 @@ void MythSocket::ConnectToHostReal(const QHostAddress& _addr, quint16 port, bool
 {
     if (m_tcpSocket->state() == QAbstractSocket::ConnectedState)
     {
-        LOG(VB_SOCKET, LOG_ERR, LOC +
+        LOG(VB_SOCKET, LOG_ERR, LOC() +
             "connect() called with already open socket, closing");
         m_tcpSocket->close();
     }
@@ -655,11 +642,11 @@ void MythSocket::ConnectToHostReal(const QHostAddress& _addr, quint16 port, bool
 
     if (usingLoopback)
     {
-        LOG(VB_SOCKET, LOG_INFO, LOC +
+        LOG(VB_SOCKET, LOG_INFO, LOC() +
             "IP is local, using loopback address instead");
     }
 
-    LOG(VB_SOCKET, LOG_INFO, LOC + QString("attempting connect() to (%1:%2)")
+    LOG(VB_SOCKET, LOG_INFO, LOC() + QString("attempting connect() to (%1:%2)")
         .arg(addr.toString()).arg(port));
 
     bool ok = true;
@@ -680,12 +667,12 @@ void MythSocket::ConnectToHostReal(const QHostAddress& _addr, quint16 port, bool
 
     if (ok)
     {
-        LOG(VB_SOCKET, LOG_INFO, LOC + QString("Connected to (%1:%2)")
+        LOG(VB_SOCKET, LOG_INFO, LOC() + QString("Connected to (%1:%2)")
             .arg(addr.toString()).arg(port));
     }
     else
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             QString("Failed to connect to (%1:%2) %3")
             .arg(addr.toString()).arg(port)
             .arg(m_tcpSocket->errorString()));
@@ -703,7 +690,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
 {
     if (list->empty())
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             "WriteStringList: Error, invalid string list.");
         *ret = false;
         return;
@@ -711,7 +698,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
 
     if (m_tcpSocket->state() != QAbstractSocket::ConnectedState)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             "WriteStringList: Error, called with unconnected socket.");
         *ret = false;
         return;
@@ -720,7 +707,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
     QString str = list->join("[]:[]");
     if (str.isEmpty())
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             "WriteStringList: Error, joined null string.");
         *ret = false;
         return;
@@ -748,7 +735,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
             msg.truncate(127);
             msg += "…";
         }
-        LOG(VB_NETWORK, LOG_INFO, LOC + msg);
+        LOG(VB_NETWORK, LOG_INFO, LOC() + msg);
     }
 
     MythTimer timer; timer.start();
@@ -757,7 +744,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
     {
         if (m_tcpSocket->state() != QAbstractSocket::ConnectedState)
         {
-            LOG(VB_GENERAL, LOG_ERR, LOC +
+            LOG(VB_GENERAL, LOG_ERR, LOC() +
                 "WriteStringList: Error, socket went unconnected." +
                 QString("\n\t\t\tWe wrote %1 of %2 bytes with %3 errors")
                     .arg(written).arg(written+size).arg(errorcount) +
@@ -783,7 +770,7 @@ void MythSocket::WriteStringListReal(const QStringList *list, bool *ret)
             errorcount++;
             if (timer.elapsed() > 1s)
             {
-                LOG(VB_GENERAL, LOG_ERR, LOC + "WriteStringList: Error, " +
+                LOG(VB_GENERAL, LOG_ERR, LOC() + "WriteStringList: Error, " +
                     QString("No data written on write (%1 errors)")
                         .arg(errorcount) +
                     QString("\n\t\t\tstarts with: %1")
@@ -815,7 +802,7 @@ void MythSocket::ReadStringListReal(
         elapsed = timer.elapsed();
         if (elapsed >= timeoutMS)
         {
-            LOG(VB_GENERAL, LOG_ERR, LOC + "ReadStringList: " +
+            LOG(VB_GENERAL, LOG_ERR, LOC() + "ReadStringList: " +
                 QString("Error, timed out after %1 ms.").arg(timeoutMS.count()));
             m_tcpSocket->close();
             m_dataAvailable.fetchAndStoreOrdered(0);
@@ -824,7 +811,7 @@ void MythSocket::ReadStringListReal(
 
         if (m_tcpSocket->state() != QAbstractSocket::ConnectedState)
         {
-            LOG(VB_GENERAL, LOG_ERR, LOC + "ReadStringList: Connection died.");
+            LOG(VB_GENERAL, LOG_ERR, LOC() + "ReadStringList: Connection died.");
             m_dataAvailable.fetchAndStoreOrdered(0);
             return;
         }
@@ -835,7 +822,7 @@ void MythSocket::ReadStringListReal(
     QByteArray sizestr(8, '\0');
     if (m_tcpSocket->read(sizestr.data(), 8) < 0)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             QString("ReadStringList: Error, read return error (%1)")
                 .arg(m_tcpSocket->errorString()));
         m_tcpSocket->close();
@@ -850,7 +837,7 @@ void MythSocket::ReadStringListReal(
     if (btr < 1)
     {
         int pending = m_tcpSocket->bytesAvailable();
-        LOG(VB_GENERAL, LOG_ERR, LOC +
+        LOG(VB_GENERAL, LOG_ERR, LOC() +
             QString("Protocol error: %1'%2' is not a valid size "
                     "prefix. %3 bytes pending.")
                 .arg(ok ? "" : "(parse failed) ",
@@ -875,7 +862,7 @@ void MythSocket::ReadStringListReal(
             }
             else
             {
-                LOG(VB_GENERAL, LOG_ERR, LOC +
+                LOG(VB_GENERAL, LOG_ERR, LOC() +
                     "ReadStringList: Connection died.");
                 m_dataAvailable.fetchAndStoreOrdered(0);
                 return;
@@ -894,14 +881,14 @@ void MythSocket::ReadStringListReal(
         }
         else if (sret < 0)
         {
-            LOG(VB_GENERAL, LOG_ERR, LOC + "ReadStringList: Error, read");
+            LOG(VB_GENERAL, LOG_ERR, LOC() + "ReadStringList: Error, read");
             m_tcpSocket->close();
             m_dataAvailable.fetchAndStoreOrdered(0);
             return;
         }
         else if (!m_tcpSocket->isValid())
         {
-            LOG(VB_GENERAL, LOG_ERR, LOC +
+            LOG(VB_GENERAL, LOG_ERR, LOC() +
                 "ReadStringList: Error, socket went unconnected");
             m_tcpSocket->close();
             m_dataAvailable.fetchAndStoreOrdered(0);
@@ -915,7 +902,7 @@ void MythSocket::ReadStringListReal(
                 if ((elapsed - errmsgtime) > 10s)
                 {
                     errmsgtime = elapsed;
-                    LOG(VB_GENERAL, LOG_ERR, LOC +
+                    LOG(VB_GENERAL, LOG_ERR, LOC() +
                         QString("ReadStringList: Waiting for data: %1 %2")
                             .arg(readoffset).arg(btr));
                 }
@@ -923,7 +910,7 @@ void MythSocket::ReadStringListReal(
 
             if (elapsed > 100s)
             {
-                LOG(VB_GENERAL, LOG_ERR, LOC +
+                LOG(VB_GENERAL, LOG_ERR, LOC() +
                     "Error, ReadStringList timeout (readBlock)");
                 m_dataAvailable.fetchAndStoreOrdered(0);
                 return;
@@ -950,7 +937,7 @@ void MythSocket::ReadStringListReal(
             msg.truncate(127);
             msg += "…";
         }
-        LOG(VB_NETWORK, LOG_INFO, LOC + msg);
+        LOG(VB_NETWORK, LOG_INFO, LOC() + msg);
     }
 
     *list = str.split("[]:[]");
@@ -991,7 +978,7 @@ void MythSocket::ReadReal(char *data, int size, std::chrono::milliseconds max_wa
 
 void MythSocket::ResetReal(void)
 {
-    vector<char> trash;
+    std::vector<char> trash;
 
     m_tcpSocket->waitForReadyRead(30);
     do
@@ -999,11 +986,11 @@ void MythSocket::ResetReal(void)
         uint avail = m_tcpSocket->bytesAvailable();
         if (avail)
         {
-            trash.resize(max((uint)trash.size(),avail));
+            trash.resize(std::max((uint)trash.size(),avail));
             m_tcpSocket->read(trash.data(), avail);
         }
 
-        LOG(VB_NETWORK, LOG_INFO, LOC + "Reset() " +
+        LOG(VB_NETWORK, LOG_INFO, LOC() + "Reset() " +
             QString("%1 bytes available").arg(avail));
 
         m_tcpSocket->waitForReadyRead(30);

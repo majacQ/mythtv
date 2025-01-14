@@ -1,9 +1,12 @@
 #ifndef FRONTEND_H
 #define FRONTEND_H
 
+#include "libmythbase/mythconfig.h"
+#if CONFIG_QTSCRIPT
 #include <QScriptEngine>
-#include "services/frontendServices.h"
-#include "service.h"
+#endif
+#include "libmythservicecontracts/services/frontendServices.h"
+#include "libmythservicecontracts/service.h"
 
 class Frontend : public FrontendServices
 {
@@ -17,7 +20,7 @@ class Frontend : public FrontendServices
   public:
     DTC::FrontendStatus* GetStatus(void) override; // FrontendServices
     bool                 SendMessage(const QString &Message,
-                                     uint _Timeout) override; // FrontendServices
+                                     uint TimeoutInt) override; // FrontendServices
     bool                 SendNotification(bool  Error,
                                           const QString &Type,
                                           const QString &Message,
@@ -65,6 +68,7 @@ class Frontend : public FrontendServices
 // We should continue to look for a cleaning solution to this problem.
 // --------------------------------------------------------------------------
 
+#if CONFIG_QTSCRIPT
 class ScriptableFrontend : public QObject
 {
     Q_OBJECT
@@ -74,9 +78,9 @@ class ScriptableFrontend : public QObject
     QScriptEngine *m_pEngine;
 
   public:
-    Q_INVOKABLE explicit ScriptableFrontend( QScriptEngine *pEngine, QObject *parent = nullptr ) : QObject( parent )
+    Q_INVOKABLE explicit ScriptableFrontend( QScriptEngine *pEngine, QObject *parent = nullptr )
+      : QObject( parent ), m_pEngine(pEngine)
     {
-        m_pEngine = pEngine;
     }
   public slots:
     QObject* GetStatus(void) { SCRIPT_CATCH_EXCEPTION( nullptr,
@@ -85,5 +89,6 @@ class ScriptableFrontend : public QObject
 
 // NOLINTNEXTLINE(modernize-use-auto)
 Q_SCRIPT_DECLARE_QMETAOBJECT_MYTHTV(ScriptableFrontend, QObject*);
+#endif
 
 #endif // FRONTEND_H

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -10,16 +11,14 @@
 #ifndef _WIN32
 #include <sys/ioctl.h>
 #else
-#include "compat.h"
+#include "libmythbase/compat.h"
 #endif
 
-#include "config.h"
-
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "audiooutputnull.h"
 
-#define CHANNELS_MIN 1
-#define CHANNELS_MAX 8
+static constexpr uint8_t CHANNELS_MIN { 1 };
+static constexpr uint8_t CHANNELS_MAX { 8 };
 
 AudioOutputNULL::AudioOutputNULL(const AudioSettings &settings) :
     AudioOutputBase(settings)
@@ -94,11 +93,7 @@ void AudioOutputNULL::WriteAudio(unsigned char* aubuf, int size)
 
 int AudioOutputNULL::readOutputData(unsigned char *read_buffer, size_t max_length)
 {
-    size_t amount_to_read = max_length;
-    if (amount_to_read > m_pcmOutputBuffer.size())
-    {
-        amount_to_read = m_pcmOutputBuffer.size();
-    }
+    size_t amount_to_read = std::min(max_length, m_pcmOutputBuffer.size());
 
     m_pcmOutputBufferMutex.lock();
     std::copy(m_pcmOutputBuffer.cbegin(),

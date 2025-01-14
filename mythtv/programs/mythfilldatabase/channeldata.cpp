@@ -1,33 +1,25 @@
 // C++ headers
-#include <iostream>
 #include <cstdlib>
+#include <iostream>
 
 // Qt headers
 #include <QDir>
 #include <QFile>
 #include <QRegularExpression>
 
-// libmythbase headers
-#include "mythdownloadmanager.h"
-
-// libmyth headers
-#include "mythlogging.h"
-#include "mythdb.h"
-#include "mythmiscutil.h"
-
-// libmythtv headers
-#include "channelutil.h"
-#include "frequencytables.h"
-#include "cardutil.h"
-#include "sourceutil.h"
+// MythTV headers
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/frequencytables.h"
+#include "libmythtv/sourceutil.h"
 
 // filldata headers
 #include "channeldata.h"
 #include "fillutil.h"
-
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
 
 static const QRegularExpression parseMajorMinor { R"((\d+)\D(\d+))" };
 

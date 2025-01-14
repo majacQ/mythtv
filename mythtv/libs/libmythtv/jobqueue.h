@@ -9,17 +9,17 @@
 #include <QObject>
 #include <QEvent>
 #include <QMutex>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 #include <QMap>
 
 #include "mythtvexp.h"
-#include "mythchrono.h"
+#include "libmythbase/mythchrono.h"
 
 class MThread;
 class ProgramInfo;
 class RecordingInfo;
+
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 
 // Strings are used by JobQueue::StatusText()
 #define JOBSTATUS_MAP(F) \
@@ -43,12 +43,14 @@ class RecordingInfo;
     F(JOB_ERRORED,      0x0130, JobQueue::tr("Errored")) \
     F(JOB_CANCELLED,    0x0140, JobQueue::tr("Cancelled")) \
 
-enum JobStatus {
 #define JOBSTATUS_ENUM(A,B,C)   A = (B) ,
+enum JobStatus : std::uint16_t {
     JOBSTATUS_MAP(JOBSTATUS_ENUM)
 };
 
-enum JobCmds {
+// NOLINTEND(cppcoreguidelines-macro-usage)
+
+enum JobCmds : std::uint8_t {
     JOB_RUN          = 0x0000,
     JOB_PAUSE        = 0x0001,
     JOB_RESUME       = 0x0002,
@@ -56,7 +58,7 @@ enum JobCmds {
     JOB_RESTART      = 0x0008
 };
 
-enum JobFlags {
+enum JobFlags : std::uint8_t {
     JOB_NO_FLAGS     = 0x0000,
     JOB_USE_CUTLIST  = 0x0001,
     JOB_LIVE_REC     = 0x0002,
@@ -64,7 +66,7 @@ enum JobFlags {
     JOB_REBUILD      = 0x0008
 };
 
-enum JobLists {
+enum JobLists : std::uint8_t {
     JOB_LIST_ALL      = 0x0001,
     JOB_LIST_DONE     = 0x0002,
     JOB_LIST_NOT_DONE = 0x0004,
@@ -72,7 +74,7 @@ enum JobLists {
     JOB_LIST_RECENT   = 0x0010
 };
 
-enum JobTypes {
+enum JobTypes : std::uint16_t {
     JOB_NONE         = 0x0000,
 
     JOB_SYSTEMJOB    = 0x00ff,
@@ -263,11 +265,7 @@ class MTV_PUBLIC JobQueue : public QObject, public QRunnable
 //  QMutex                     m_controlFlagsLock;
 //  QMap<QString, int *>       m_jobControlFlags;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex                    *m_runningJobsLock     {nullptr};
-#else
     QRecursiveMutex           *m_runningJobsLock     {nullptr};
-#endif
     QMap<int, RunningJobInfo>  m_runningJobs;
 
     bool                       m_isMaster;

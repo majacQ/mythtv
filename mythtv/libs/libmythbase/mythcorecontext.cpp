@@ -1,4 +1,5 @@
 // Qt
+#include <QtGlobal>
 #include <QCoreApplication>
 #include <QUrl>
 #include <QDir>
@@ -7,7 +8,6 @@
 #include <QMutex>
 #include <QRunnable>
 #include <QWaitCondition>
-#include <QNetworkInterface>
 #include <QAbstractSocket>
 #include <QHostAddress>
 #include <QHostInfo>
@@ -15,8 +15,8 @@
 #include <QNetworkAddressEntry>
 #include <QLocale>
 #include <QPair>
+#include <QRegularExpression>
 #include <QDateTime>
-#include <QRunnable>
 
 // Std
 #include <algorithm>
@@ -34,7 +34,6 @@
 
 // MythTV
 #include "compat.h"
-#include "mythconfig.h"       // for CONFIG_DARWIN
 #include "mythdownloadmanager.h"
 #include "mythcorecontext.h"
 #include "mythsocket.h"
@@ -53,10 +52,6 @@
 
 #define LOC      QString("MythCoreContext::%1(): ").arg(__func__)
 
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#define qEnvironmentVariable getenv
-#endif
-
 MythCoreContext *gCoreContext = nullptr;
 
 class MythCoreContextPrivate : public QObject
@@ -69,9 +64,9 @@ class MythCoreContextPrivate : public QObject
     bool WaitForWOL(std::chrono::milliseconds timeout = std::chrono::milliseconds::max());
 
   public:
-    MythCoreContext *m_parent;
-    QObject         *m_guiContext;
-    QObject         *m_guiObject;
+    MythCoreContext *m_parent     { nullptr };
+    QObject         *m_guiContext { nullptr };
+    QObject         *m_guiObject  { nullptr };
     QString          m_appBinaryVersion;
 
     QMutex  m_localHostLock;        ///< Locking for m_localHostname
@@ -82,48 +77,49 @@ class MythCoreContextPrivate : public QObject
     QMap<QString, QString> m_scopes;///< Scope Id cache for Link-Local addresses
 
     QMutex      m_sockLock;         ///< protects both m_serverSock and m_eventSock
-    MythSocket *m_serverSock;       ///< socket for sending MythProto requests
-    MythSocket *m_eventSock;        ///< socket events arrive on
+    MythSocket *m_serverSock { nullptr }; ///< socket for sending MythProto requests
+    MythSocket *m_eventSock  { nullptr }; ///< socket events arrive on
 
     QMutex         m_wolInProgressLock;
     QWaitCondition m_wolInProgressWaitCondition;
-    bool           m_wolInProgress;
-    bool           m_isWOLAllowed;
+    bool           m_wolInProgress { false };
+    bool           m_isWOLAllowed  { true };
 
-    bool m_backend;
-    bool m_frontend;
+    bool m_backend  { false };
+    bool m_frontend { false };
 
-    MythDB *m_database;
+    MythDB *m_database { nullptr };
 
-    QThread *m_uiThread;
+    QThread *m_uiThread { nullptr };
 
-    MythLocale *m_locale;
+    MythLocale *m_locale { nullptr };
     QString m_language;
+    QString m_audioLanguage;
 
-    MythScheduler *m_scheduler;
+    MythScheduler *m_scheduler { nullptr };
 
-    bool m_blockingClient;
+    bool m_blockingClient { true };
 
     QMap<QObject *, MythCoreContext::PlaybackStartCb> m_playbackClients;
     QMutex m_playbackLock;
-    bool m_inwanting;
-    bool m_intvwanting;
+    bool m_inwanting   { false };
+    bool m_intvwanting { false };
 
-    bool m_announcedProtocol;
+    bool m_announcedProtocol { false };
 
-    MythPluginManager *m_pluginmanager;
+    MythPluginManager *m_pluginmanager { nullptr };
 
-    bool m_isexiting;
+    bool m_isexiting { false };
 
     QMap<QString, QPair<int64_t, uint64_t> >  m_fileswritten;
     QMutex m_fileslock;
 
-    MythSessionManager *m_sessionManager;
+    MythSessionManager *m_sessionManager { nullptr };
 
     QList<QHostAddress> m_approvedIps;
     QList<QHostAddress> m_deniedIps;
 
-    MythPower *m_power;
+    MythPower *m_power { nullptr };
 };
 
 MythCoreContextPrivate::MythCoreContextPrivate(MythCoreContext *lparent,
@@ -131,31 +127,11 @@ MythCoreContextPrivate::MythCoreContextPrivate(MythCoreContext *lparent,
                                                QObject *guicontext)
     : m_parent(lparent),
       m_guiContext(guicontext),
-      m_guiObject(nullptr),
       m_appBinaryVersion(std::move(binversion)),
-      m_serverSock(nullptr),
-      m_eventSock(nullptr),
-      m_wolInProgress(false),
-      m_isWOLAllowed(true),
-      m_backend(false),
-      m_frontend(false),
       m_database(GetMythDB()),
-      m_uiThread(QThread::currentThread()),
-      m_locale(nullptr),
-      m_scheduler(nullptr),
-      m_blockingClient(true),
-      m_inwanting(false),
-      m_intvwanting(false),
-      m_announcedProtocol(false),
-      m_pluginmanager(nullptr),
-      m_isexiting(false),
-      m_sessionManager(nullptr),
-      m_power(nullptr)
+      m_uiThread(QThread::currentThread())
 {
     MThread::ThreadSetup("CoreContext");
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    srandom(MythDate::current().toSecsSinceEpoch() ^ QTime::currentTime().msec());
-#endif
 }
 
 static void delete_sock(
@@ -265,6 +241,8 @@ bool MythCoreContext::Init(void)
     }
 
 #ifndef _WIN32
+    static const QRegularExpression utf8
+        { "utf-?8", QRegularExpression::CaseInsensitiveOption };
     QString lang_variables("");
     QString lc_value = setlocale(LC_CTYPE, nullptr);
     if (lc_value.isEmpty())
@@ -275,10 +253,10 @@ bool MythCoreContext::Init(void)
         if (lc_value.isEmpty())
             lc_value = qEnvironmentVariable("LC_CTYPE");
     }
-    if (!lc_value.contains("UTF-8", Qt::CaseInsensitive))
+    if (!lc_value.contains(utf8))
         lang_variables.append("LC_ALL or LC_CTYPE");
     lc_value = qEnvironmentVariable("LANG");
-    if (!lc_value.contains("UTF-8", Qt::CaseInsensitive))
+    if (!lc_value.contains(utf8))
     {
         if (!lang_variables.isEmpty())
             lang_variables.append(", and ");
@@ -323,7 +301,7 @@ void MythCoreContext::setTestStringSettings(QMap<QString,QString> &overrides)
 
 bool MythCoreContext::SetupCommandSocket(MythSocket *serverSock,
                                          const QString &announcement,
-                                         std::chrono::milliseconds timeout,
+                                         [[maybe_unused]] std::chrono::milliseconds timeout,
                                          bool &proto_mismatch)
 {
     proto_mismatch = false;
@@ -334,8 +312,6 @@ bool MythCoreContext::SetupCommandSocket(MythSocket *serverSock,
         proto_mismatch = true;
         return false;
     }
-#else
-    Q_UNUSED(timeout);
 #endif
 
     QStringList strlist(announcement);
@@ -407,7 +383,11 @@ bool MythCoreContext::ConnectToMasterServer(bool blockingClient,
 
     if (!d->m_serverSock)
     {
-        QString type = IsFrontend() ? "Frontend" : (blockingClient ? "Playback" : "Monitor");
+        QString type { "Monitor" };
+        if (IsFrontend())
+            type = "Frontend";
+        else if (blockingClient)
+            type = "Playback";
         QString ann = QString("ANN %1 %2 %3")
             .arg(type, d->m_localHostname, QString::number(static_cast<int>(false)));
         d->m_serverSock = ConnectCommandSocket(
@@ -723,7 +703,7 @@ bool MythCoreContext::IsMasterBackend(void)
 
 bool MythCoreContext::BackendIsRunning(void)
 {
-#if CONFIG_DARWIN || (__FreeBSD__) || defined(__OpenBSD__)
+#if defined(Q_OS_DARWIN) || defined(__FreeBSD__) || defined(__OpenBSD__)
     const char *command = "ps -axc | grep -i mythbackend | grep -v grep > /dev/null";
 #elif defined _WIN32
     const char *command = "%systemroot%\\system32\\tasklist.exe "
@@ -1090,12 +1070,24 @@ int MythCoreContext::GetBackendServerPort(void)
     return GetBackendServerPort(d->m_localHostname);
 }
 
+QHash<QString,int> MythCoreContext::s_serverPortCache;
+
+void MythCoreContext::ClearBackendServerPortCache()
+{
+    s_serverPortCache.clear();
+}
+
 /**
  * Returns the backend "hosts"'s control port
  */
 int MythCoreContext::GetBackendServerPort(const QString &host)
 {
-    return GetNumSettingOnHost("BackendServerPort", host, 6543);
+    int port = s_serverPortCache.value(host, -1);
+    if (port != -1)
+        return port;
+    port = GetNumSettingOnHost("BackendServerPort", host, 6543);
+    s_serverPortCache[host] = port;
+    return port;
 }
 
 /**
@@ -1222,7 +1214,7 @@ QString MythCoreContext::resolveAddress(const QString &host, ResolveType type,
         QHostAddress v6;
 
         // Return the first address fitting the type critera
-        for (const auto& item : qAsConst(list))
+        for (const auto& item : std::as_const(list))
         {
             addr = item;
             QAbstractSocket::NetworkLayerProtocol prot = addr.protocol();
@@ -1249,14 +1241,18 @@ QString MythCoreContext::resolveAddress(const QString &host, ResolveType type,
                 addr = v6.isNull() ? QHostAddress::LocalHostIPv6 : v6;
                 break;
             default:
-                addr = v6.isNull() ?
-                    (v4.isNull() ? QHostAddress::LocalHostIPv6 : v4) : v6;
+                if (!v6.isNull())
+                    addr = v6;
+                else if (!v4.isNull())
+                    addr = v4;
+                else
+                    addr = QHostAddress::LocalHostIPv6;
                 break;
         }
     }
     else if (host.isEmpty())
     {
-        return QString();
+        return {};
     }
 
     if (!keepscope)
@@ -1318,13 +1314,13 @@ bool MythCoreContext::CheckSubnet(const QHostAddress &peer)
 
     // loop through all available interfaces
     QList<QNetworkInterface> IFs = QNetworkInterface::allInterfaces();
-    for (const auto & qni : qAsConst(IFs))
+    for (const auto & qni : std::as_const(IFs))
     {
         if ((qni.flags() & QNetworkInterface::IsRunning) == 0)
             continue;
 
         QList<QNetworkAddressEntry> IPs = qni.addressEntries();
-        for (const auto & qnai : qAsConst(IPs))
+        for (const auto & qnai : std::as_const(IPs))
         {
             int pfxlen = qnai.prefixLength();
             // Set this to test rejection without having an extra
@@ -1583,11 +1579,7 @@ void MythCoreContext::readyRead(MythSocket *sock)
 
         QString prefix = strlist[0];
         QString message = strlist[1];
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = message.split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = message.split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (prefix == "OK")
         {
@@ -1666,10 +1658,8 @@ void MythCoreContext::readyRead(MythSocket *sock)
     while (sock->IsDataAvailable());
 }
 
-void MythCoreContext::connectionClosed(MythSocket *sock)
+void MythCoreContext::connectionClosed([[maybe_unused]] MythSocket *sock)
 {
-    (void)sock;
-
     LOG(VB_GENERAL, LOG_NOTICE, LOC +
         "Event socket closed.  No connection to the backend.");
 
@@ -1807,6 +1797,40 @@ void MythCoreContext::ResetLanguage(void)
     d->m_language.clear();
 }
 
+/**
+ *  \brief Returns two character ISO-639 language descriptor for audio language.
+ *  \sa iso639_get_language_list()
+ */
+QString MythCoreContext::GetAudioLanguage(void)
+{
+    return GetAudioLanguageAndVariant().left(2);
+}
+
+/**
+ *  \brief Returns the user-set audio language and variant.
+ *
+ *   The string has the form ll or ll_vv, where ll is the two character
+ *   ISO-639 language code, and vv (which may not exist) is the variant.
+ *   Examples include en_AU, en_CA, en_GB, en_US, fr_CH, fr_DE, pt_BR, pt_PT.
+ */
+QString MythCoreContext::GetAudioLanguageAndVariant(void)
+{
+    if (d->m_audioLanguage.isEmpty())
+    {
+        auto menuLanguage = GetLanguageAndVariant();
+        d->m_audioLanguage = GetSetting("AudioLanguage", menuLanguage).toLower();
+
+        LOG(VB_AUDIO, LOG_DEBUG, LOC + QString("audio language:%1 menu language:%2")
+            .arg(d->m_audioLanguage, menuLanguage));
+    }
+    return d->m_audioLanguage;
+}
+
+void MythCoreContext::ResetAudioLanguage(void)
+{
+    d->m_audioLanguage.clear();
+}
+
 void MythCoreContext::ResetSockets(void)
 {
     QMutexLocker locker(&d->m_sockLock);
@@ -1901,12 +1925,12 @@ void MythCoreContext::WaitUntilSignals(std::vector<CoreWaitInfo> & sigs) const
         return;
 
     QEventLoop eventLoop;
-    for (auto s : sigs)
+    for (const auto& s : sigs)
     {
         LOG(VB_GENERAL, LOG_DEBUG, LOC +
             QString("Waiting for signal %1")
             .arg(s.name));
-        connect(this, s.fn, &eventLoop, &QEventLoop::quit);
+        connect(this, s.fn, &eventLoop, &QEventLoop::quit);// clazy:exclude=connect-non-signal
     }
 
     eventLoop.exec(QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers);

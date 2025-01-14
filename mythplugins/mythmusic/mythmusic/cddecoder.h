@@ -3,16 +3,10 @@
 
 #include "decoder.h"
 
-#include <mythconfig.h>
 #include "config.h"
 
-#if CONFIG_DARWIN
-#include <vector>
-using std::vector;
-#endif
-
 #ifdef HAVE_CDIO
-# ifdef HAVE_CDPARANOIA_SUBDIR
+# if __has_include(<cdio/paranoia/cdda.h>)
 #  include <cdio/paranoia/cdda.h>
 #  include <cdio/paranoia/paranoia.h>
 # else
@@ -20,6 +14,10 @@ using std::vector;
 #  include <cdio/paranoia.h>
 # endif
 #endif
+
+#ifdef HAVE_MUSICBRAINZ
+    #include "musicbrainz.h"
+#endif // HAVE_MUSICBRAINZ
 
 class MusicMetadata;
 
@@ -43,9 +41,6 @@ class CdDecoder : public Decoder
     // TODO check this is still true
     MusicMetadata *getMetadata(int track);
 
-#if CONFIG_DARWIN
-    double lengthInSeconds();
-#endif
     int getNumTracks();
     int getNumCDAudioTracks();
 
@@ -63,23 +58,9 @@ class CdDecoder : public Decoder
 
     QString            m_deviceName;
 
-#if CONFIG_DARWIN
-    void lookupCDDB(const QString &hexID, uint tracks);
-
-    uint32_t           m_diskID;        ///< For CDDB1/FreeDB lookup
-    uint               m_firstTrack,    ///< First AUDIO track
-                       m_lastTrack,     ///< Last  AUDIO track
-                       m_leadout;       ///< End of last track
-    double             m_lengthInSecs;
-    vector<int>        m_tracks;        ///< Start block offset of each track
-#endif
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex& getCdioMutex();
-#else
     static QRecursiveMutex& getCdioMutex();
-#endif
 
-    DecoderEvent::Type m_stat        {DecoderEvent::Error};
+    DecoderEvent::Type m_stat        {DecoderEvent::kError};
     char              *m_outputBuf   {nullptr};
     std::size_t        m_outputAt    {0};
 
@@ -103,6 +84,11 @@ class CdDecoder : public Decoder
     lsn_t              m_end         {CDIO_INVALID_LSN};
     lsn_t              m_curPos      {CDIO_INVALID_LSN};
 #endif
+
+#ifdef HAVE_MUSICBRAINZ
+    static MusicBrainz & getMusicBrainz();
+#endif // HAVE_MUSICBRAINZ
+
 };
 
 #endif

@@ -1,33 +1,30 @@
+// Sys
+#include <sys/ioctl.h>
+
 // Qt
 #include <QDir>
 
 // MythTV
-#include "mythlogging.h"
-#include "v4l2util.h"
-#include "fourcc.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/opengl/mythrenderopengl.h"
+
 #include "avformatdecoder.h"
+#include "fourcc.h"
 #include "mythplayerui.h"
-#include "opengl/mythrenderopengl.h"
+#include "v4l2util.h"
+
 #ifdef USING_EGL
 #include "opengl/mythdrmprimeinterop.h"
 #endif
-#include "mythv4l2m2mcontext.h"
+#include "decoders/mythv4l2m2mcontext.h"
 
 #ifdef USING_MMAL
-#include "mythmmalcontext.h"
+#include "decoders/mythmmalcontext.h"
 #endif
-
-// Sys
-#include <sys/ioctl.h>
 
 // FFmpeg
 extern "C" {
 #include "libavutil/opt.h"
-#ifdef USING_V4L2_REQUEST
-#include "libavcodec/v4l2_request.h"
-#else
-struct V4L2RequestDescriptor { int drm; };
-#endif
 }
 
 #define LOC QString("V4L2_M2M: ")
@@ -50,7 +47,7 @@ bool MythV4L2M2MContext::DecoderWillResetOnFlush()
 }
 
 MythCodecID MythV4L2M2MContext::GetSupportedCodec(AVCodecContext **Context,
-                                                  AVCodec **Codec,
+                                                  const AVCodec **Codec,
                                                   const QString &Decoder,
                                                   AVStream *Stream,
                                                   uint StreamType)
@@ -175,7 +172,7 @@ bool MythV4L2M2MContext::RetrieveFrame(AVCodecContext *Context, MythVideoFrame *
         return GetBuffer(Context, Frame, AvFrame, 0);
 
     if (m_request)
-        return MythV4L2M2MContext::GetRequestBuffer(Context, Frame, AvFrame);
+        return MythDRMPRIMEContext::GetDRMBuffer(Context, Frame, AvFrame, 0);
 
     return MythDRMPRIMEContext::RetrieveFrame(Context, Frame, AvFrame);
 }
@@ -185,7 +182,7 @@ bool MythV4L2M2MContext::RetrieveFrame(AVCodecContext *Context, MythVideoFrame *
  * Testing on Pi 3, the default of 20 is too high and leads to memory allocation
  * failures in the the kernel driver.
 */
-void MythV4L2M2MContext::SetDecoderOptions(AVCodecContext* Context, AVCodec* Codec)
+void MythV4L2M2MContext::SetDecoderOptions(AVCodecContext* Context, const AVCodec* Codec)
 {
     if (m_request)
         return;
@@ -273,11 +270,7 @@ const V4L2Profiles& MythV4L2M2MContext::GetStandardProfiles()
         { V4L2_PIX_FMT_HEVC,        MythCodecContext::HEVC  }
     }};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static V4L2Profiles s_profiles;
 
@@ -305,7 +298,7 @@ V4L2Profiles MythV4L2M2MContext::GetProfiles(const std::vector<V4L2Mapping>& Pro
     QStringList namefilters;
     namefilters.append("video*");
     auto devices = dir.entryList(namefilters, QDir::Files |QDir::System);
-    for (const QString& device : qAsConst(devices))
+    for (const QString& device : std::as_const(devices))
     {
         V4L2util v4l2dev(root + device);
         uint32_t caps = v4l2dev.GetCapabilities();
@@ -417,11 +410,7 @@ void MythV4L2M2MContext::GetDecoderList(QStringList &Decoders)
 
 bool MythV4L2M2MContext::HaveV4L2Codecs(bool Reinit /*=false*/)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     QMutexLocker locker(&lock);
     static bool s_checked = false;
     static bool s_available = false;
@@ -441,9 +430,9 @@ bool MythV4L2M2MContext::HaveV4L2Codecs(bool Reinit /*=false*/)
     LOG(VB_GENERAL, LOG_INFO, LOC + "Supported/available V4L2 decoders:");
     s_available = true;
     QSize size {0, 0};
-    for (auto profile : qAsConst(standard))
+    for (auto profile : std::as_const(standard))
         LOG(VB_GENERAL, LOG_INFO, LOC + MythCodecContext::GetProfileDescription(profile, size));
-    for (auto profile : qAsConst(request))
+    for (auto profile : std::as_const(request))
         LOG(VB_GENERAL, LOG_INFO, LOC + MythCodecContext::GetProfileDescription(profile, size) + "(Request)");
     return s_available;
 }
@@ -479,11 +468,7 @@ const V4L2Profiles& MythV4L2M2MContext::GetRequestProfiles()
         { V4L2_PIX_FMT_HEVC_SLICE,  MythCodecContext::HEVC  }
     }};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static V4L2Profiles s_profiles;
 
@@ -517,50 +502,11 @@ int MythV4L2M2MContext::InitialiseV4L2RequestContext(AVCodecContext *Context)
         return -1;
 
     // N.B. Interop support should already have been checked
-    // Allocate the device context
+    // Create the device context
     auto * hwdeviceref = MythCodecContext::CreateDevice(AV_HWDEVICE_TYPE_DRM, nullptr);
     if (!hwdeviceref)
         return -1;
 
-    // Initialise device context
-    if (av_hwdevice_ctx_init(hwdeviceref) < 0)
-    {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "Failed to initialise device context");
-        av_buffer_unref(&hwdeviceref);
-        return -1;
-    }
-
     Context->hw_device_ctx = hwdeviceref;
     return 0;
-}
-
-bool MythV4L2M2MContext::GetRequestBuffer(AVCodecContext* Context, MythVideoFrame* Frame, AVFrame* AvFrame)
-{
-    if (!Context || !AvFrame || !Frame)
-        return false;
-
-    if (Frame->m_type != FMT_DRMPRIME || static_cast<AVPixelFormat>(AvFrame->format) != AV_PIX_FMT_DRM_PRIME)
-    {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "Not a DRM PRIME buffer");
-        return false;
-    }
-
-    Frame->m_width    = AvFrame->width;
-    Frame->m_height   = AvFrame->height;
-    Frame->m_pixFmt   = Context->pix_fmt;
-    Frame->m_swPixFmt = Context->sw_pix_fmt;
-    Frame->m_directRendering = true;
-    AvFrame->opaque   = Frame;
-    AvFrame->reordered_opaque = Context->reordered_opaque;
-
-    // Frame->data[0] holds V4L2RequestDescriptor which holds AVDRMFrameDescriptor
-    Frame->m_buffer = reinterpret_cast<uint8_t*>(&(reinterpret_cast<V4L2RequestDescriptor*>(AvFrame->data[0])->drm));
-    // Retain the buffer so it is not released before we display it
-    Frame->m_priv[0] = reinterpret_cast<unsigned char*>(av_buffer_ref(AvFrame->buf[0]));
-    // Set interop
-    Frame->m_priv[1] = reinterpret_cast<unsigned char*>(m_interop);
-    // Set the release method
-    AvFrame->buf[1] = av_buffer_create(reinterpret_cast<uint8_t*>(Frame), 0, MythCodecContext::ReleaseBuffer,
-                                       static_cast<AvFormatDecoder*>(Context->opaque), 0);
-    return true;
 }

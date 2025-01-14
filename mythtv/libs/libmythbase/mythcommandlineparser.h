@@ -40,7 +40,7 @@ class MBASE_PUBLIC CommandLineArg : public ReferenceCounter
 
     bool            Set(const QString& opt);
     bool            Set(const QString& opt, const QByteArray& val);
-    void            Set(QVariant val)               { m_stored = std::move(val);
+    void            Set(const QVariant& val)        { m_stored = val;
                                                       m_given = true; }
 
     CommandLineArg* SetParent(const QString &opt);
@@ -118,7 +118,7 @@ class MBASE_PUBLIC MythCommandLineParser
   public:
     friend TestCommandLineParser;
 
-    enum class Result {
+    enum class Result : std::uint8_t {
         kEnd          = 0,
         kEmpty        = 1,
         kOptOnly      = 2,
@@ -128,6 +128,8 @@ class MBASE_PUBLIC MythCommandLineParser
         kPassthrough  = 6,
         kInvalid      = 7
     };
+
+    static QStringList MythSplitCommandString(const QString &line); // used in MythExternRecApp
 
     explicit MythCommandLineParser(QString appname);
     virtual ~MythCommandLineParser();

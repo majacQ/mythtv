@@ -1,6 +1,14 @@
-#include "mythcorecontext.h"
 #include "test_copyframes.h"
-#include "mythframe.h"
+
+#include <climits>
+
+extern "C" {
+#include "libavutil/mem.h"
+}
+
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythtv/mythframe.h"
 
 void TestCopyFrames::initTestCase(void)
 {
@@ -85,12 +93,9 @@ void TestCopyFrames::TestInvalidBuffers()
     dummy2.m_buffer = nullptr;
 }
 
-#include "mythmiscutil.h"
-
 static uint64_t FillRandom(MythVideoFrame* Frame)
 {
     uint64_t sum = 0;
-    uint64_t counts = 0;
     uint count = MythVideoFrame::GetNumPlanes(Frame->m_type);
     for (uint plane = 0; plane < count; ++plane)
     {
@@ -98,10 +103,9 @@ static uint64_t FillRandom(MythVideoFrame* Frame)
         int offset = Frame->m_offsets[plane];
         for (int i = 0; i < width; ++i)
         {
-            unsigned char val = MythRandom() & 0xFF;
+            unsigned char val = MythRandom(0, UCHAR_MAX);
             Frame->m_buffer[offset++] = val;
             sum += val;
-            counts++;
         }
     }
     return sum;
@@ -110,7 +114,6 @@ static uint64_t FillRandom(MythVideoFrame* Frame)
 static uint64_t GetSum(const MythVideoFrame* Frame)
 {
     uint64_t sum = 0;
-    uint64_t counts = 0;
     uint count = MythVideoFrame::GetNumPlanes(Frame->m_type);
     for (uint plane = 0; plane < count; ++plane)
     {
@@ -119,7 +122,6 @@ static uint64_t GetSum(const MythVideoFrame* Frame)
         for (int i = 0; i < width; ++i)
         {
             sum += Frame->m_buffer[offset++];
-            counts++;
         }
     }
     return sum;

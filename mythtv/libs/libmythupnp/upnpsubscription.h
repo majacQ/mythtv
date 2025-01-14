@@ -1,8 +1,9 @@
 #ifndef UPNPSUBSCRIPTION_H
 #define UPNPSUBSCRIPTION_H
 
-#include "mythevent.h"
-#include "upnp.h"
+#include "libmythbase/mythevent.h"
+
+#include "libmythupnp/upnp.h"
 
 class Subscription;
 
@@ -31,11 +32,7 @@ class UPNP_PUBLIC UPNPSubscription : public HttpServerExtension, public MythObse
                                      QString &uuidout);
   private:
     QHash<QString, Subscription*> m_subscriptions;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex  m_subscriptionLock {QMutex::Recursive};
-#else
     QRecursiveMutex  m_subscriptionLock;
-#endif
     QString m_callback         {"NOTSET"};
 };
 

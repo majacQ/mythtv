@@ -5,17 +5,17 @@
 #include <QApplication>
 #include <QEvent>
 
-// myth
-#include <mythlogging.h>
-#include <mythcontext.h>
-#include <mythmainwindow.h>
-#include <mythuiwebbrowser.h>
-#include <mythuihelper.h>
-#include <playgroup.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythtv/playgroup.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiwebbrowser.h>
 
 // mythbrowser
-#include "webpage.h"
 #include "mythflashplayer.h"
+#include "webpage.h"
 
 MythFlashPlayer::MythFlashPlayer(MythScreenStack *parent,
                          QStringList &urlList)
@@ -77,7 +77,7 @@ bool MythFlashPlayer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "PAUSE")

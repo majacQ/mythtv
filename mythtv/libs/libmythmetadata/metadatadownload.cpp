@@ -6,23 +6,25 @@
 #include <QEvent>
 #include <QDir>
 #include <QUrl>
+#include <QRegularExpression>
 
 // myth
-#include "mythcorecontext.h"
-#include "mythdirs.h"
-#include "mythuihelper.h"
-#include "mythsystemlegacy.h"
-#include "storagegroup.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythui/mythuihelper.h"
+
 #include "metadatadownload.h"
 #include "metadatafactory.h"
-#include "mythmiscutil.h"
-#include "remotefile.h"
-#include "mythlogging.h"
 
-QEvent::Type MetadataLookupEvent::kEventType =
+const QEvent::Type MetadataLookupEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
-QEvent::Type MetadataLookupFailure::kEventType =
+const QEvent::Type MetadataLookupFailure::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 MetadataDownload::~MetadataDownload()
@@ -141,7 +143,9 @@ void MetadataDownload::run()
             }
         }
         else if (lookup->GetType() == kMetadataGame)
+        {
             list = handleGame(lookup);
+        }
 
         // inform parent we have lookup ready for it
         if (m_parent && !list.isEmpty())
@@ -196,7 +200,7 @@ void MetadataDownload::run()
                     MetadataLookup *newlookup = list.takeFirst();
 
                     // pass through automatic type
-                    newlookup->SetAutomatic(true);   // ### XXX RER
+                    newlookup->SetAutomatic(true);
                     newlookup->SetStep(kLookupData);
                     // Type may have changed
                     LookupType ret = GuessLookupType(newlookup);
@@ -249,11 +253,20 @@ unsigned int MetadataDownload::findExactMatchCount(MetadataLookupList list,
 {
     unsigned int exactMatches = 0;
     unsigned int exactMatchesWithArt = 0;
+    static const QRegularExpression year { R"( \(\d{4}\)$)" };
 
-    for (auto lkup : qAsConst(list))
+    for (const auto& lkup : std::as_const(list))
     {
-        // Consider exact title matches (ignoring case)
-        if ((QString::compare(lkup->GetTitle(), originaltitle, Qt::CaseInsensitive) == 0))
+        // Consider exact title matches with or without trailing '(year)' (ignoring case)
+        QString titlewoyear = originaltitle;
+        auto match = year.match(titlewoyear);
+        if (match.hasMatch())
+        {
+            titlewoyear.remove(match.capturedStart(), match.capturedLength());
+        }
+
+        if ((QString::compare(lkup->GetTitle(), originaltitle, Qt::CaseInsensitive) == 0) ||
+            (QString::compare(lkup->GetTitle(), titlewoyear, Qt::CaseInsensitive) == 0))
         {
             // In lookup by name, the television database tends to only include Banner artwork.
             // In lookup by name, the movie database tends to include only Fan and Cover artwork.
@@ -282,24 +295,53 @@ MetadataLookup* MetadataDownload::findBestMatch(MetadataLookupList list,
     int exactMatches = 0;
     int exactMatchesWithArt = 0;
     bool foundMatchWithArt = false;
+    bool foundMatchWithYear = false;
+    uint year = 0;
+
+    QString titlewoyear = originaltitle;
+
+    static const QRegularExpression regexyear { R"( \(\d{4}\)$)" };
+
+    auto match = regexyear.match(titlewoyear);
+    if (match.hasMatch())
+    {
+        titlewoyear.remove(match.capturedStart(), match.capturedLength());
+        year = match.captured(0).replace(" (","").replace(")","").toUInt();
+        LOG(VB_GENERAL, LOG_DEBUG, QString("Looking for: '%1' with release year: '%2'")
+                                            .arg(titlewoyear, QString::number(year)));
+    }
 
     // Build a list of all the titles
-    for (auto lkup : qAsConst(list))
+    for (const auto& lkup : std::as_const(list))
     {
         QString title = lkup->GetTitle();
-        LOG(VB_GENERAL, LOG_INFO, QString("Comparing metadata title '%1' [%2] to recording title '%3'")
-                .arg(title, lkup->GetReleaseDate().toString(), originaltitle));
-        // Consider exact title matches (ignoring case), which have some artwork available.
-        if (QString::compare(title, originaltitle, Qt::CaseInsensitive) == 0)
+        LOG(VB_GENERAL, LOG_INFO,
+            QString("Comparing metadata title '%1' [%2] to recording title '%3' [%4]")
+                    .arg(title, lkup->GetReleaseDate().toString(), titlewoyear,
+                         (year == 0) ? "N/A" : QString::number(year)));
+
+        // Consider exact title matches with or without trailing '(year)' (ignoring case),
+        // which have some artwork available.
+        if ((QString::compare(title, originaltitle, Qt::CaseInsensitive) == 0) ||
+            (QString::compare(title, titlewoyear, Qt::CaseInsensitive) == 0))
         {
             bool hasArtwork = ((!(lkup->GetArtwork(kArtworkFanart)).empty()) ||
                                (!(lkup->GetArtwork(kArtworkCoverart)).empty()) ||
                                (!(lkup->GetArtwork(kArtworkBanner)).empty()));
 
-            LOG(VB_GENERAL, LOG_INFO, QString("'%1', popularity = %2, ReleaseDate = %3")
+            if ((lkup->GetYear() != 0) && (year == lkup->GetYear()))
+            {
+                exactTitleDate = lkup->GetReleaseDate();
+                exactTitlePopularity = lkup->GetPopularity();
+                foundMatchWithYear = true;
+                ret = lkup;
+            }
+
+            LOG(VB_GENERAL, LOG_INFO, QString("'%1', popularity = %2, ReleaseDate = %3, Year = %4")
                     .arg(title)
                     .arg(lkup->GetPopularity())
-                    .arg(lkup->GetReleaseDate().toString()));
+                    .arg(lkup->GetReleaseDate().toString())
+                    .arg(lkup->GetYear()));
 
             // After the first exact match, prefer any more popular one.
             // Most of the Movie database entries have Popularity fields.
@@ -307,8 +349,9 @@ MetadataLookup* MetadataDownload::findBestMatch(MetadataLookupList list,
             // so if none are found so far in the search, pick the most recently
             // released entry with artwork. Also, if the first exact match had
             // no artwork, prefer any later exact match with artwork.
+            // Stop searching if we have already found a match with correct year.
             if ((ret == nullptr) ||
-                (hasArtwork &&
+                (hasArtwork && !foundMatchWithYear &&
                  ((!foundMatchWithArt) ||
                   ((lkup->GetPopularity() > exactTitlePopularity)) ||
                   ((exactTitlePopularity == 0.0F) && (lkup->GetReleaseDate() > exactTitleDate)))))
@@ -317,6 +360,7 @@ MetadataLookup* MetadataDownload::findBestMatch(MetadataLookupList list,
                 exactTitlePopularity = lkup->GetPopularity();
                 ret = lkup;
             }
+
             exactMatches++;
             if (hasArtwork)
             {
@@ -345,8 +389,10 @@ MetadataLookup* MetadataDownload::findBestMatch(MetadataLookupList list,
         {
             LOG(VB_GENERAL, LOG_INFO,
                 QString("Multiple exact title matches found for '%1'. "
-                        "Selecting most popular or most recent [%2]")
-                    .arg(originaltitle, exactTitleDate.toString()));
+                        "Selecting by exact year [%2] or most popular or most recent [%3]")
+                        .arg(originaltitle,
+                             (year == 0) ? "N/A" : QString::number(year),
+                             exactTitleDate.toString()));
         }
         return ret;
     }
@@ -368,7 +414,7 @@ MetadataLookup* MetadataDownload::findBestMatch(MetadataLookupList list,
                     .arg(originaltitle, bestTitle));
 
     // Grab the one item that matches the besttitle (IMPERFECT)
-    for (auto item : qAsConst(list))
+    for (const auto& item : std::as_const(list))
     {
         if (item->GetTitle() == bestTitle)
         {
@@ -396,7 +442,11 @@ MetadataLookupList MetadataDownload::runGrabber(const QString& cmd, const QStrin
     if (!result.isEmpty())
     {
         QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         doc.setContent(result, true);
+#else
+        doc.setContent(result, QDomDocument::ParseOption::UseNamespaceProcessing);
+#endif
         QDomElement root = doc.documentElement();
         QDomElement item = root.firstChildElement("item");
 
@@ -478,7 +528,13 @@ MetadataLookupList MetadataDownload::readMXML(const QString& MXMLpath,
             if (loaded)
             {
                 QDomDocument doc;
-                if (doc.setContent(mxmlraw, true))
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+                bool success = doc.setContent(mxmlraw, true);
+#else
+                auto parseResult = doc.setContent(mxmlraw, QDomDocument::ParseOption::UseNamespaceProcessing);
+                bool success { parseResult };
+#endif
+                if (!success)
                 {
                     lookup->SetStep(kLookupData);
                     QDomElement root = doc.documentElement();
@@ -529,7 +585,13 @@ MetadataLookupList MetadataDownload::readNFO(const QString& NFOpath,
             {
                 QDomDocument doc;
 
-                if (doc.setContent(nforaw, true))
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+                bool success = doc.setContent(nforaw, true);
+#else
+                auto parseResult = doc.setContent(nforaw, QDomDocument::ParseOption::UseNamespaceProcessing);
+                bool success { parseResult };
+#endif
+                if (success)
                 {
                     lookup->SetStep(kLookupData);
                     item = doc.documentElement();
@@ -564,6 +626,8 @@ MetadataLookupList MetadataDownload::handleGame(MetadataLookup *lookup)
     MetadataLookupList list;
     MetaGrabberScript grabber =
         MetaGrabberScript::GetGrabber(kGrabberGame, lookup);
+    if (!grabber.IsValid())
+        return {};
 
     // If the inetref is populated, even in kLookupSearch mode,
     // become a kLookupData grab and use that.
@@ -607,6 +671,8 @@ MetadataLookupList MetadataDownload::handleMovie(MetadataLookup *lookup)
 
     MetaGrabberScript grabber =
         MetaGrabberScript::GetGrabber(kGrabberMovie, lookup);
+    if (!grabber.IsValid())
+        return {};
 
     // initial search mode
     if (!lookup->GetInetref().isEmpty() && lookup->GetInetref() != "00000000" &&
@@ -635,8 +701,8 @@ MetadataLookupList MetadataDownload::handleMovie(MetadataLookup *lookup)
  * attempt to find television data via the following (in order)
  * 1- Local MXML: already done before
  * 2- Local NFO: already done
- * 3- By inetref with subtitle
- * 4- By inetref with season and episode
+ * 3- By inetref with season and episode
+ * 4- By inetref with subtitle
  * 5- By inetref
  * 6- By title and subtitle
  * 7- By title
@@ -647,6 +713,8 @@ MetadataLookupList MetadataDownload::handleTelevision(MetadataLookup *lookup)
 
     MetaGrabberScript grabber =
         MetaGrabberScript::GetGrabber(kGrabberTelevision, lookup);
+    if (!grabber.IsValid())
+        return {};
     bool searchcollection = false;
 
     // initial search mode
@@ -655,17 +723,17 @@ MetadataLookupList MetadataDownload::handleTelevision(MetadataLookup *lookup)
     {
         // with inetref
         lookup->SetStep(kLookupData);
-        if (!lookup->GetSubtitle().isEmpty())
+        if (lookup->GetSeason() || lookup->GetEpisode())
+        {
+            list = grabber.LookupData(lookup->GetInetref(), lookup->GetSeason(),
+                                      lookup->GetEpisode(), lookup);
+        }
+
+        if (list.isEmpty() && (!lookup->GetSubtitle().isEmpty()))
         {
             list = grabber.SearchSubtitle(lookup->GetInetref(),
                                           lookup->GetBaseTitle() /* unused */,
                                           lookup->GetSubtitle(), lookup, false);
-        }
-
-        if (list.isEmpty() && (lookup->GetSeason() || lookup->GetEpisode()))
-        {
-            list = grabber.LookupData(lookup->GetInetref(), lookup->GetSeason(),
-                                      lookup->GetEpisode(), lookup);
         }
 
         if (list.isEmpty() && !lookup->GetCollectionref().isEmpty())

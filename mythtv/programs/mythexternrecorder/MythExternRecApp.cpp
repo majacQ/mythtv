@@ -18,17 +18,22 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <thread>
+// C/C++
 #include <csignal>
-#include "commandlineparser.h"
-#include "mythmiscutil.h"
-#include "MythExternRecApp.h"
+#include <thread>
+#include <unistd.h>
 
+// Qt
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
-#include <QProcess>
-#include <QtCore/QtCore>
-#include <unistd.h>
+
+// MythTV
+#include "libmythbase/mythchrono.h"
+
+// MythExternRecorder
+#include "MythExternRecApp.h"
+#include "mythexternrecorder_commandlineparser.h"
 
 #define LOC Desc()
 
@@ -55,11 +60,86 @@ MythExternRecApp::MythExternRecApp(QString command,
     m_desc.replace("%CHANNUM%", "");
     m_desc.replace("%CHANNAME%", "");
     m_desc.replace("%CALLSIGN%", "");
+    ReplaceVariables(m_desc);
 }
 
 MythExternRecApp::~MythExternRecApp(void)
 {
     Close();
+}
+
+/* Remove any non-replaced variables along with any dependant strings.
+   Dependant strings are wrapped in {} */
+QString MythExternRecApp::sanitize_var(const QString & var)
+{
+    qsizetype p1 { -1 };
+    qsizetype p2 { -1 };
+    QString cleaned = var;
+
+    while ((p1 = cleaned.indexOf('{')) != -1)
+    {
+        p2 = cleaned.indexOf('}', p1);
+        if (cleaned.mid(p1, p2 - p1).indexOf('%') == -1)
+        {
+            // Just remove the '{' and '}'
+            cleaned = cleaned.remove(p2, 1);
+            cleaned = cleaned.remove(p1, 1);
+        }
+        else
+        {
+            // Remove the contents of { ... }
+            cleaned = cleaned.remove(p1, p2 - p1 + 1);
+        }
+    }
+
+    LOG(VB_CHANNEL, LOG_DEBUG, QString("Sanitized: '%1' -> '%2'")
+        .arg(var, cleaned));
+
+    return cleaned;
+}
+
+QString MythExternRecApp::replace_extra_args(const QString & var,
+                                             const QVariantMap & extra_args) const
+{
+    QString result = var;
+    /*
+      Replace any information provided in JSON message
+     */
+    for (auto it = extra_args.keyValueBegin();
+         it != extra_args.keyValueEnd(); ++it)
+    {
+        if (it->first == "command")
+            continue;
+        result.replace(QString("\%%1\%").arg(it->first.toUpper()),
+                        it->second.toString());
+        LOG(VB_CHANNEL, LOG_DEBUG, LOC +
+            QString("Replaced '%1' with '%2'")
+            .arg(it->first.toUpper(), it->second.toString()));
+    }
+    result = sanitize_var(result);
+
+    return result;
+}
+
+void MythExternRecApp::ReplaceVariables(QString & cmd) const
+{
+    QMap<QString, QString>::const_iterator Ivar;
+    for (Ivar = m_settingVars.constBegin();
+         Ivar != m_settingVars.constEnd(); ++Ivar)
+    {
+        QString repl = "%" + Ivar.key() + "%";
+        if (cmd.indexOf(repl) >= 0)
+        {
+            LOG(VB_CHANNEL, LOG_DEBUG, QString("Replacing '%1' with '%2'")
+                .arg(repl, Ivar.value()));
+            cmd.replace(repl, Ivar.value());
+        }
+        else
+        {
+            LOG(VB_CHANNEL, LOG_DEBUG, QString("Did not find '%1' in '%2'")
+                .arg(repl, cmd));
+        }
+    }
 }
 
 QString MythExternRecApp::Desc(void) const
@@ -69,16 +149,73 @@ QString MythExternRecApp::Desc(void) const
     if (m_proc.processId() > 0)
         extra = QString("(pid %1) ").arg(m_proc.processId());
 
-    return QString("%1%2 ").arg(extra, m_desc);
+    QString desc = m_desc;
+    ReplaceVariables(desc);
+
+    return QString("%1%2 ").arg(extra, desc);
 }
 
 bool MythExternRecApp::config(void)
 {
+    QFileInfo conf_info = QFileInfo(m_configIni);
+
+    if (!QFileInfo::exists(m_configIni))
+    {
+        m_fatalMsg = QString("ERR:Config file '%1' does not exist "
+                             "in '%2'")
+                     .arg(conf_info.fileName(),
+                          conf_info.absolutePath());
+        LOG(VB_GENERAL, LOG_CRIT, m_fatalMsg);
+        m_fatal = true;
+        return false;
+    }
+
     QSettings settings(m_configIni, QSettings::IniFormat);
+
+    if (settings.childGroups().contains("VARIABLES"))
+    {
+        LOG(VB_CHANNEL, LOG_DEBUG, "Parsing variables");
+        settings.beginGroup("VARIABLES");
+
+        QStringList childKeys = settings.childKeys();
+        for (const QString & var : std::as_const(childKeys))
+        {
+            m_settingVars[var] = settings.value(var).toString();
+            LOG(VB_CHANNEL, LOG_INFO, QString("%1=%2")
+                .arg(var, settings.value(var).toString()));
+        }
+        settings.endGroup();
+
+        /* Replace defined VARs in the subsequently defined VARs */
+        QMap<QString, QString>::iterator Ivar;
+        QMap<QString, QString>::iterator Ivar2;
+        for (Ivar = m_settingVars.begin();
+             Ivar != m_settingVars.end(); ++Ivar)
+        {
+            QString repl = "%" + Ivar.key() + "%";
+            Ivar2 = Ivar;
+            for (++Ivar2; Ivar2 != m_settingVars.end(); ++Ivar2)
+            {
+                if ((*Ivar2).indexOf(repl) >= 0)
+                {
+                    LOG(VB_CHANNEL, LOG_DEBUG, QString("Replacing '%1' with '%2'")
+                        .arg(repl, Ivar.value()));
+                    (*Ivar2).replace(repl, Ivar.value());
+                }
+            }
+        }
+    }
+    else
+    {
+        LOG(VB_CHANNEL, LOG_DEBUG, "No VARIABLES section");
+    }
 
     if (!settings.contains("RECORDER/command"))
     {
-        LOG(VB_GENERAL, LOG_CRIT, "ini file missing [RECORDER]/command");
+        m_fatalMsg = QString("ERR:Config file %1 file missing "
+                             "[RECORDER]/command")
+                     .arg(conf_info.absolutePath());
+        LOG(VB_GENERAL, LOG_CRIT, m_fatalMsg);
         m_fatal = true;
         return false;
     }
@@ -93,6 +230,14 @@ bool MythExternRecApp::config(void)
     m_lockTimeout = settings.value("TUNER/timeout", "").toInt();
     m_scanCommand = settings.value("SCANNER/command", "").toString();
     m_scanTimeout = settings.value("SCANNER/timeout", "").toInt();
+
+    ReplaceVariables(m_recCommand);
+    ReplaceVariables(m_recDesc);
+    ReplaceVariables(m_cleanup);
+    ReplaceVariables(m_tuneCommand);
+    ReplaceVariables(m_newEpisodeCommand);
+    ReplaceVariables(m_onDataStart);
+    ReplaceVariables(m_scanCommand);
 
     settings.beginGroup("ENVIRONMENT");
 
@@ -112,8 +257,8 @@ bool MythExternRecApp::config(void)
         {
             // Assume the channels config is in the same directory as
             // main config
-            QDir conf_path = QFileInfo(m_configIni).absolutePath();
-            QFileInfo ini(conf_path, m_channelsIni);
+            QDir chan_path = QFileInfo(m_configIni).absolutePath();
+            QFileInfo ini(chan_path, m_channelsIni);
             m_channelsIni = ini.absoluteFilePath();
         }
     }
@@ -125,14 +270,14 @@ bool MythExternRecApp::Open(void)
 {
     if (m_fatal)
     {
-        emit SendMessage("Open", "0", "ERR:Already dead.");
+        emit SendMessage("Open", "0", m_fatalMsg, "ERR");
         return false;
     }
 
     if (m_command.isEmpty())
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": No recorder provided.");
-        emit SendMessage("Open", "0", "ERR:No recorder provided.");
+        emit SendMessage("Open", "0", "No recorder provided.", "ERR");
         return false;
     }
 
@@ -182,13 +327,7 @@ bool MythExternRecApp::Open(void)
 
 void MythExternRecApp::TerminateProcess(QProcess & proc, const QString & desc) const
 {
-    if (proc.state() == QProcess::Running)
-    {
-        LOG(VB_RECORD, LOG_INFO, LOC +
-            QString("Sending SIGINT to %1(%2)").arg(desc).arg(proc.processId()));
-        kill(proc.processId(), SIGINT);
-        proc.waitForFinished(5000);
-    }
+    m_terminating = true;
     if (proc.state() == QProcess::Running)
     {
         LOG(VB_RECORD, LOG_INFO, LOC +
@@ -203,6 +342,7 @@ void MythExternRecApp::TerminateProcess(QProcess & proc, const QString & desc) c
         proc.kill();
         proc.waitForFinished();
     }
+    m_terminating = false;
 }
 
 Q_SLOT void MythExternRecApp::Close(void)
@@ -271,11 +411,13 @@ Q_SLOT void MythExternRecApp::Cleanup(void)
     if (m_cleanup.isEmpty())
         return;
 
-    QStringList args = MythSplitCommandString(m_cleanup);
+    QStringList args = MythCommandLineParser::MythSplitCommandString(m_cleanup);
     QString cmd = args.takeFirst();
 
     LOG(VB_RECORD, LOG_WARNING, LOC +
         QString(" Beginning cleanup: '%1'").arg(cmd));
+
+    cmd = replace_extra_args(cmd, m_chaninfo);
 
     QProcess cleanup;
     cleanup.start(cmd, args);
@@ -302,29 +444,47 @@ Q_SLOT void MythExternRecApp::DataStarted(void)
 {
     LOG(VB_RECORD, LOG_INFO, LOC + "DataStarted");
 
-    if (m_onDataStart.isEmpty())
-        return;
+    QString startcmd = m_onDataStart;
 
-    QString cmd = m_onDataStart;
-    cmd.replace("%CHANNUM%", m_tunedChannel);
+    if (!m_channelsIni.isEmpty())
+    {
+        QSettings settings(m_channelsIni, QSettings::IniFormat);
+        settings.beginGroup(m_tunedChannel);
+
+        QString cmd = settings.value("ONSTART").toString();
+        if (!cmd.isEmpty())
+        {
+            ReplaceVariables(cmd);
+            LOG(VB_CHANNEL, LOG_INFO, LOC +
+                QString(": Using ONSTART cmd from '%1': '%2'")
+                .arg(m_channelsIni, cmd));
+            startcmd = cmd;
+        }
+
+        settings.endGroup();
+    }
+
+    if (startcmd.isEmpty())
+        return;
+    startcmd = replace_extra_args(startcmd, m_chaninfo);
 
     bool background = false;
-    int pos = cmd.lastIndexOf(QChar('&'));
+    int pos = startcmd.lastIndexOf(QChar('&'));
     if (pos > 0)
     {
         background = true;
-        cmd = cmd.left(pos);
+        startcmd = startcmd.left(pos);
     }
 
-    QStringList args = MythSplitCommandString(cmd);
-    cmd = args.takeFirst();
+    QStringList args = MythCommandLineParser::MythSplitCommandString(startcmd);
+    startcmd = args.takeFirst();
 
     TerminateProcess(m_finishTuneProc, "FinishTuning");
 
     LOG(VB_RECORD, LOG_INFO, LOC + QString("Finishing tune: '%1' %3")
-        .arg(m_onDataStart, background ? "in the background" : ""));
+        .arg(startcmd, background ? "in the background" : ""));
 
-    m_finishTuneProc.start(cmd, args);
+    m_finishTuneProc.start(startcmd, args);
     if (!m_finishTuneProc.waitForStarted())
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": Failed to finish tune process: "
@@ -353,7 +513,7 @@ Q_SLOT void MythExternRecApp::LoadChannels(const QString & serial)
     if (m_channelsIni.isEmpty())
     {
         LOG(VB_CHANNEL, LOG_ERR, LOC + ": No channels configured.");
-        emit SendMessage("LoadChannels", serial, "ERR:No channels configured.");
+        emit SendMessage("LoadChannels", serial, "No channels configured.", "ERR");
         return;
     }
 
@@ -362,7 +522,7 @@ Q_SLOT void MythExternRecApp::LoadChannels(const QString & serial)
         QString cmd = m_scanCommand;
         cmd.replace("%CHANCONF%", m_channelsIni);
 
-        QStringList args = MythSplitCommandString(cmd);
+        QStringList args = MythCommandLineParser::MythSplitCommandString(cmd);
         cmd = args.takeFirst();
 
         QProcess scanner;
@@ -372,8 +532,7 @@ Q_SLOT void MythExternRecApp::LoadChannels(const QString & serial)
         {
             QString errmsg = QString("Failed to start '%1': ").arg(cmd) + ENO;
             LOG(VB_CHANNEL, LOG_ERR, LOC + ": " + errmsg);
-            emit SendMessage("LoadChannels", serial,
-                             QString("ERR:%1").arg(errmsg));
+            emit SendMessage("LoadChannels", serial, errmsg, "ERR");
             return;
         }
 
@@ -403,8 +562,7 @@ Q_SLOT void MythExternRecApp::LoadChannels(const QString & serial)
         {
             QString errmsg = QString("Timedout waiting for '%1'").arg(cmd);
             LOG(VB_CHANNEL, LOG_ERR, LOC + ": " + errmsg);
-            emit SendMessage("LoadChannels", serial,
-                             QString("ERR:%1").arg(errmsg));
+            emit SendMessage("LoadChannels", serial, errmsg, "ERR");
             return;
         }
     }
@@ -414,8 +572,7 @@ Q_SLOT void MythExternRecApp::LoadChannels(const QString & serial)
     m_chanSettings->sync();
     m_channels = m_chanSettings->childGroups();
 
-    emit SendMessage("LoadChannels", serial,
-                     QString("OK:%1").arg(m_channels.size()));
+    emit SendMessage("LoadChannels", serial, QString::number(m_channels.size()), "OK");
 }
 
 void MythExternRecApp::GetChannel(const QString & serial, const QString & func)
@@ -423,23 +580,21 @@ void MythExternRecApp::GetChannel(const QString & serial, const QString & func)
     if (m_channelsIni.isEmpty() || m_channels.empty())
     {
         LOG(VB_CHANNEL, LOG_ERR, LOC + ": No channels configured.");
-        emit SendMessage("FirstChannel", serial,
-                         QString("ERR:No channels configured."));
+        emit SendMessage("FirstChannel", serial, "No channels configured.", "ERR");
         return;
     }
 
     if (m_chanSettings == nullptr)
     {
         LOG(VB_CHANNEL, LOG_WARNING, LOC + ": Invalid channel configuration.");
-        emit SendMessage(func, serial,
-                         "ERR:Invalid channel configuration.");
+        emit SendMessage(func, serial, "Invalid channel configuration.", "ERR");
         return;
     }
 
     if (m_channels.size() <= m_channelIdx)
     {
         LOG(VB_CHANNEL, LOG_WARNING, LOC + ": No more channels.");
-        emit SendMessage(func, serial, "ERR:No more channels.");
+        emit SendMessage(func, serial, "No more channels", "ERR");
         return;
     }
 
@@ -458,9 +613,9 @@ void MythExternRecApp::GetChannel(const QString & serial, const QString & func)
         QString(": NextChannel Name:'%1',Callsign:'%2',xmltvid:%3,Icon:%4")
         .arg(name, callsign, xmltvid, icon));
 
-    emit SendMessage(func, serial, QString("OK:%1,%2,%3,%4,%5")
+    emit SendMessage(func, serial, QString("%1,%2,%3,%4,%5")
                      .arg(channum, name, callsign,
-                          xmltvid, icon));
+                          xmltvid, icon), "OK");
 }
 
 Q_SLOT void MythExternRecApp::FirstChannel(const QString & serial)
@@ -474,58 +629,79 @@ Q_SLOT void MythExternRecApp::NextChannel(const QString & serial)
     GetChannel(serial, "NextChannel");
 }
 
-void MythExternRecApp::NewEpisodeStarting(const QString & channum)
+void MythExternRecApp::NewEpisodeStarting(void)
 {
     QString cmd = m_newEpisodeCommand;
-    cmd.replace("%CHANNUM%", channum);
+    int     pos = cmd.lastIndexOf(QChar('&'));
+    bool    background = false;
 
-    QStringList args = MythSplitCommandString(cmd);
+    if (pos > 0)
+    {
+        background = true;
+        cmd = cmd.left(pos);
+    }
+
+    cmd = replace_extra_args(cmd, m_chaninfo);
+
+    QStringList args = MythCommandLineParser::MythSplitCommandString(cmd);
     cmd = args.takeFirst();
 
     LOG(VB_RECORD, LOG_WARNING, LOC +
         QString(" New episode starting on current channel: '%1'").arg(cmd));
 
-    QProcess proc;
-    proc.start(cmd, args);
-    if (!proc.waitForStarted())
+    if (m_tuneProc.state() == QProcess::Running)
+        TerminateProcess(m_tuneProc, "Tune");
+
+    m_tuneProc.start(cmd, args);
+    if (!m_tuneProc.waitForStarted())
     {
         LOG(VB_RECORD, LOG_ERR, LOC +
             " NewEpisodeStarting: Failed to start process: " + ENO);
         return;
     }
-    proc.waitForFinished(5000);
-    if (proc.state() == QProcess::NotRunning)
+    if (background)
     {
-        if (proc.exitStatus() != QProcess::NormalExit)
+        LOG(VB_RECORD, LOG_INFO, LOC +
+            "NewEpisodeStarting: running in background.");
+        return;
+    }
+
+    m_tuneProc.waitForFinished(5000);
+    if (m_tuneProc.state() == QProcess::NotRunning)
+    {
+        if (m_tuneProc.exitStatus() != QProcess::NormalExit)
         {
             LOG(VB_RECORD, LOG_ERR, LOC +
                 " NewEpisodeStarting: process failed: " + ENO);
             return;
         }
     }
-
     LOG(VB_RECORD, LOG_INFO, LOC + "NewEpisodeStarting: finished.");
 }
 
 Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
-                                          const QString & channum)
+                                          const QVariantMap & chaninfo)
 {
+    m_chaninfo = chaninfo;
+
     if (m_tuneCommand.isEmpty() && m_channelsIni.isEmpty())
     {
         LOG(VB_CHANNEL, LOG_ERR, LOC + ": No 'tuner' configured.");
-        emit SendMessage("TuneChannel", serial, "ERR:No 'tuner' configured.");
+        emit SendMessage("TuneChannel", serial, "No 'tuner' configured.", "ERR");
         return;
     }
+
+    QString channum = m_chaninfo["channum"].toString();
 
     if (m_tunedChannel == channum)
     {
         if (!m_newEpisodeCommand.isEmpty())
-            NewEpisodeStarting(channum);
+            NewEpisodeStarting();
 
         LOG(VB_CHANNEL, LOG_INFO, LOC +
-            QString("TuneChanne: Already on %1").arg(channum));
+            QString("TuneChannel: Already on %1").arg(channum));
         emit SendMessage("TuneChannel", serial,
-                         QString("OK:Tunned to %1").arg(channum));
+                         QString("Tunned to %1").arg(channum), "OK");
         return;
     }
 
@@ -536,36 +712,39 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
     QString url;
     bool    background = false;
 
-    int pos = tunecmd.lastIndexOf(QChar('&'));
-    if (pos > 0)
-    {
-        background = true;
-        tunecmd = tunecmd.left(pos);
-    }
-
     if (!m_channelsIni.isEmpty())
     {
         QSettings settings(m_channelsIni, QSettings::IniFormat);
         settings.beginGroup(channum);
 
-        url = settings.value("URL").toString();
-
-        if (url.isEmpty())
+        QString cmd = settings.value("TUNE").toString();
+        if (!cmd.isEmpty())
         {
-            QString msg = QString("Channel number [%1] is missing a URL.")
-                          .arg(channum);
-
-            LOG(VB_CHANNEL, LOG_ERR, LOC + ": " + msg);
+            ReplaceVariables(cmd);
+            LOG(VB_CHANNEL, LOG_INFO, LOC +
+                QString(": Using tune cmd from '%1': '%2'")
+                .arg(m_channelsIni, cmd));
+            tunecmd = cmd;
         }
-        else
-            tunecmd.replace("%URL%", url);
 
-        if (!url.isEmpty() && m_command.indexOf("%URL%") >= 0)
+        url = settings.value("URL").toString();
+        if (!url.isEmpty())
         {
-            m_command.replace("%URL%", url);
-            LOG(VB_CHANNEL, LOG_DEBUG, LOC +
-                QString(": '%URL%' replaced with '%1' in cmd: '%2'")
-                .arg(url, m_command));
+            if (tunecmd.indexOf("%URL%") >= 0)
+            {
+                tunecmd.replace("%URL%", url);
+                LOG(VB_CHANNEL, LOG_DEBUG, LOC +
+                    QString(": '%URL%' replaced with '%1' in tunecmd: '%2'")
+                    .arg(url, tunecmd));
+            }
+
+            if (m_command.indexOf("%URL%") >= 0)
+            {
+                m_command.replace("%URL%", url);
+                LOG(VB_CHANNEL, LOG_DEBUG, LOC +
+                    QString(": '%URL%' replaced with '%1' in cmd: '%2'")
+                    .arg(url, m_command));
+            }
         }
 
         m_desc.replace("%CHANNAME%", settings.value("NAME").toString());
@@ -577,8 +756,14 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
     if (m_tuneProc.state() == QProcess::Running)
         TerminateProcess(m_tuneProc, "Tune");
 
-    tunecmd.replace("%CHANNUM%", channum);
-    m_command.replace("%CHANNUM%", channum);
+    int pos = tunecmd.lastIndexOf(QChar('&'));
+    if (pos > 0)
+    {
+        background = true;
+        tunecmd = tunecmd.left(pos);
+    }
+
+    tunecmd = replace_extra_args(tunecmd, m_chaninfo);
 
     if (!m_logFile.isEmpty() && m_command.indexOf("%LOGFILE%") >= 0)
     {
@@ -597,11 +782,10 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
     }
 
     m_desc.replace("%URL%", url);
-    m_desc.replace("%CHANNUM%", channum);
 
-    if (!m_tuneCommand.isEmpty())
+    if (!tunecmd.isEmpty())
     {
-        QStringList args = MythSplitCommandString(tunecmd);
+        QStringList args = MythCommandLineParser::MythSplitCommandString(tunecmd);
         QString cmd = args.takeFirst();
         m_tuningChannel = channum;
         m_tuneProc.start(cmd, args);
@@ -609,8 +793,7 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
         {
             QString errmsg = QString("Tune `%1` failed: ").arg(tunecmd) + ENO;
             LOG(VB_CHANNEL, LOG_ERR, LOC + ": " + errmsg);
-            emit SendMessage("TuneChannel", serial,
-                             QString("ERR:%1").arg(errmsg));
+            emit SendMessage("TuneChannel", serial, errmsg, "ERR");
             return;
         }
 
@@ -624,14 +807,14 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
             m_tuningChannel.clear();
             emit SetDescription(Desc());
             emit SendMessage("TuneChannel", serial,
-                             QString("OK:Tuned `%1`").arg(m_tunedChannel));
+                             QString("Tuned `%1`").arg(m_tunedChannel), "OK");
         }
         else
         {
             LOG(VB_CHANNEL, LOG_INFO, LOC + QString(": Started `%1` URL '%2'")
                 .arg(tunecmd, url));
             emit SendMessage("TuneChannel", serial,
-                             QString("OK:InProgress `%1`").arg(tunecmd));
+                             QString("InProgress `%1`").arg(tunecmd), "OK");
         }
     }
     else
@@ -639,7 +822,7 @@ Q_SLOT void MythExternRecApp::TuneChannel(const QString & serial,
         m_tunedChannel = channum;
         emit SetDescription(Desc());
         emit SendMessage("TuneChannel", serial,
-                         QString("OK:Tuned to %1").arg(m_tunedChannel));
+                         QString("Tuned to %1").arg(m_tunedChannel), "OK");
     }
 }
 
@@ -647,9 +830,9 @@ Q_SLOT void MythExternRecApp::TuneStatus(const QString & serial)
 {
     if (m_tuneProc.state() == QProcess::Running)
     {
-        LOG(VB_CHANNEL, LOG_INFO, LOC +
+        LOG(VB_CHANNEL, LOG_DEBUG, LOC +
             QString(": Tune process(%1) still running").arg(m_tuneProc.processId()));
-        emit SendMessage("TuneStatus", serial, "OK:InProgress");
+        emit SendMessage("TuneStatus", serial, "InProgress", "OK");
         return;
     }
 
@@ -659,8 +842,7 @@ Q_SLOT void MythExternRecApp::TuneStatus(const QString & serial)
         QString errmsg = QString("'%1' failed: ")
                          .arg(m_tuneProc.program()) + ENO;
         LOG(VB_CHANNEL, LOG_ERR, LOC + ": " + errmsg);
-        emit SendMessage("TuneStatus", serial,
-                         QString("ERR:%1").arg(errmsg));
+        emit SendMessage("TuneStatus", serial, errmsg, "WARN");
         return;
     }
 
@@ -670,7 +852,7 @@ Q_SLOT void MythExternRecApp::TuneStatus(const QString & serial)
     LOG(VB_CHANNEL, LOG_INFO, LOC + QString(": Tuned %1").arg(m_tunedChannel));
     emit SetDescription(Desc());
     emit SendMessage("TuneChannel", serial,
-                     QString("OK:Tuned to %1").arg(m_tunedChannel));
+                     QString("Tuned to %1").arg(m_tunedChannel), "OK");
 }
 
 Q_SLOT void MythExternRecApp::LockTimeout(const QString & serial)
@@ -679,7 +861,7 @@ Q_SLOT void MythExternRecApp::LockTimeout(const QString & serial)
     {
         LOG(VB_CHANNEL, LOG_WARNING, LOC +
             "Cannot read LockTimeout from config file.");
-        emit SendMessage("LockTimeout", serial, "ERR: Not open");
+        emit SendMessage("LockTimeout", serial, "Not open", "ERR");
         return;
     }
 
@@ -687,32 +869,30 @@ Q_SLOT void MythExternRecApp::LockTimeout(const QString & serial)
     {
         LOG(VB_CHANNEL, LOG_INFO, LOC +
             QString("Using configured LockTimeout of %1").arg(m_lockTimeout));
-        emit SendMessage("LockTimeout", serial,
-                         QString("OK:%1").arg(m_lockTimeout));
+        emit SendMessage("LockTimeout", serial, QString::number(m_lockTimeout), "OK");
         return;
     }
     LOG(VB_CHANNEL, LOG_INFO, LOC +
         "No LockTimeout defined in config, defaulting to 12000ms");
-    emit SendMessage("LockTimeout", serial, QString("OK:%1")
-                     .arg(m_scanCommand.isEmpty() ? 12000 : 120000));
+    emit SendMessage("LockTimeout", serial,
+                     m_scanCommand.isEmpty() ? "12000" : "120000", "OK");
 }
 
 Q_SLOT void MythExternRecApp::HasTuner(const QString & serial)
 {
-    emit SendMessage("HasTuner", serial, QString("OK:%1")
-                     .arg(m_tuneCommand.isEmpty() &&
-                          m_channelsIni.isEmpty() ? "No" : "Yes"));
+    emit SendMessage("HasTuner", serial, m_tuneCommand.isEmpty() &&
+                     m_channelsIni.isEmpty() ? "No" : "Yes", "OK");
 }
 
 Q_SLOT void MythExternRecApp::HasPictureAttributes(const QString & serial)
 {
-    emit SendMessage("HasPictureAttributes", serial, "OK:No");
+    emit SendMessage("HasPictureAttributes", serial, "No", "OK");
 }
 
 Q_SLOT void MythExternRecApp::SetBlockSize(const QString & serial, int blksz)
 {
     m_blockSize = blksz;
-    emit SendMessage("BlockSize", serial, "OK");
+    emit SendMessage("BlockSize", serial, QString("Blocksize %1").arg(blksz), "OK");
 }
 
 Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
@@ -722,7 +902,7 @@ Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": No channel has been tuned");
         emit SendMessage("StartStreaming", serial,
-                         "ERR:No channel has been tuned");
+                         "No channel has been tuned", "ERR");
         return;
     }
 
@@ -730,11 +910,13 @@ Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": Application already running");
         emit SendMessage("StartStreaming", serial,
-                         "WARN:Application already running");
+                         "Application already running", "WARN");
         return;
     }
 
-    QStringList args = MythSplitCommandString(m_command);
+    QString streamcmd = m_command;
+
+    QStringList args = MythCommandLineParser::MythSplitCommandString(streamcmd);
     QString cmd = args.takeFirst();
     m_proc.start(cmd, args, QIODevice::ReadOnly|QIODevice::Unbuffered);
     m_proc.setTextModeEnabled(false);
@@ -747,7 +929,7 @@ Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": Failed to start application.");
         emit SendMessage("StartStreaming", serial,
-                         "ERR:Failed to start application.");
+                         "Failed to start application.", "ERR");
         return;
     }
 
@@ -757,7 +939,7 @@ Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + ": Application failed to start");
         emit SendMessage("StartStreaming", serial,
-                         "ERR:Application failed to start");
+                         "Application failed to start", "ERR");
         return;
     }
 
@@ -766,7 +948,7 @@ Q_SLOT void MythExternRecApp::StartStreaming(const QString & serial)
 
     emit Streaming(true);
     emit SetDescription(Desc());
-    emit SendMessage("StartStreaming", serial, "OK:Streaming Started");
+    emit SendMessage("StartStreaming", serial, "Streaming Started", "OK");
 }
 
 Q_SLOT void MythExternRecApp::StopStreaming(const QString & serial, bool silent)
@@ -778,21 +960,21 @@ Q_SLOT void MythExternRecApp::StopStreaming(const QString & serial, bool silent)
 
         LOG(VB_RECORD, LOG_INFO, LOC + ": External application terminated.");
         if (silent)
-            emit SendMessage("StopStreaming", serial, "STATUS:Streaming Stopped");
+            emit SendMessage("StopStreaming", serial, "Streaming Stopped", "STATUS");
         else
-            emit SendMessage("StopStreaming", serial, "OK:Streaming Stopped");
+            emit SendMessage("StopStreaming", serial, "Streaming Stopped", "OK");
     }
     else
     {
         if (silent)
         {
             emit SendMessage("StopStreaming", serial,
-                             "STATUS:Already not Streaming");
+                             "Already not Streaming", "INFO");
         }
         else
         {
             emit SendMessage("StopStreaming", serial,
-                             "WARN:Already not Streaming");
+                             "Already not Streaming", "WARN");
         }
     }
 
@@ -844,31 +1026,61 @@ Q_SLOT void MythExternRecApp::ProcStateChanged(QProcess::ProcessState newState)
     if (unexpected)
     {
         emit Streaming(false);
-        MythLog("ERR Unexpected " + msg);
+        emit SendMessage("STATUS", "0", "Unexpected: " + msg, "ERR");
     }
 }
 
 Q_SLOT void MythExternRecApp::ProcError(QProcess::ProcessError /*error */)
 {
-    LOG(VB_RECORD, LOG_ERR, LOC + QString(": Error: %1")
-        .arg(m_proc.errorString()));
-    MythLog(m_proc.errorString());
+    if (m_terminating)
+    {
+        LOG(VB_RECORD, LOG_INFO, LOC + QString(": %1")
+            .arg(m_proc.errorString()));
+        emit SendMessage("STATUS", "0", m_proc.errorString(), "INFO");
+    }
+    else
+    {
+        LOG(VB_RECORD, LOG_ERR, LOC + QString(": Error: %1")
+            .arg(m_proc.errorString()));
+        emit SendMessage("STATUS", "0", m_proc.errorString(), "ERR");
+    }
 }
 
 Q_SLOT void MythExternRecApp::ProcReadStandardError(void)
 {
     QByteArray buf = m_proc.readAllStandardError();
     QString    msg = QString::fromUtf8(buf).trimmed();
+    QList<QString> msgs = msg.split('\n');
+    QString    message;
 
-    // Log any error messages
-    if (!msg.isEmpty())
+    for (int idx=0; idx < msgs.count(); ++idx)
     {
-        LOG(VB_RECORD, LOG_INFO, LOC + QString(">>> %1")
-            .arg(msg));
-        if (msg.size() > 79)
-            msg = QString("Application message: see '%1'").arg(m_logFile);
-
-        MythLog(msg);
+        // Log any error messages
+        if (!msgs[idx].isEmpty())
+        {
+            QStringList tokens = QString(msgs[idx])
+                                 .split(':', Qt::SkipEmptyParts);
+            tokens.removeFirst();
+            if (tokens.empty())
+                message = msgs[idx];
+            else
+                message = tokens.join(':');
+            if (msgs[idx].startsWith("err", Qt::CaseInsensitive))
+            {
+                LOG(VB_RECORD, LOG_ERR, LOC + QString(">>> %1").arg(msgs[idx]));
+                emit SendMessage("STATUS", "0", message, "ERR");
+            }
+            else if (msgs[idx].startsWith("warn", Qt::CaseInsensitive))
+            {
+                LOG(VB_RECORD, LOG_WARNING, LOC + QString(">>> %1").arg(msgs[idx]));
+                emit SendMessage("STATUS", "0", message, "WARN");
+            }
+            else
+            {
+                LOG(VB_RECORD, LOG_DEBUG, LOC + QString(">>> %1").arg(msgs[idx]));
+                emit SendMessage("STATUS", "0", message, "INFO");
+            }
+        }
     }
 }
 

@@ -1,32 +1,26 @@
-
-// own header
-#include "programrecpriority.h"
-
 // C/C++ headers
 #include <vector> // For std::vector
 
 // QT headers
 #include <QDateTime>
 
-// libmythtv headers
-#include "recordingrule.h"
-#include "scheduledrecording.h"
+// MythTV headers
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/stringutil.h"
+#include "libmythbase/ternarycompare.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythtv/scheduledrecording.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
 
-// libmythbase
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythmiscutil.h"
-#include "remoteutil.h"
-
-// libmythui
-#include "mythuihelper.h"
-#include "mythuibuttonlist.h"
-#include "mythuitext.h"
-#include "mythuistatetype.h"
-#include "mythdialogbox.h"
-
-// mythfrontend
+// MythFrontend
 #include "proglist.h"
+#include "programrecpriority.h"
 #include "scheduleeditor.h"
 
 void ProgramRecPriorityInfo::clone(
@@ -42,6 +36,8 @@ void ProgramRecPriorityInfo::clone(
         m_last_record      = other.m_last_record;
         m_avg_delay        = other.m_avg_delay;
         m_profile          = other.m_profile;
+        m_storageGroup     = other.m_storageGroup;
+        m_recordingGroup   = other.m_recordingGroup;
     }
 }
 
@@ -58,6 +54,8 @@ void ProgramRecPriorityInfo::clone(
         m_last_record      = QDateTime();
         m_avg_delay        = 0;
         m_profile.clear();
+        m_storageGroup.clear();
+        m_recordingGroup.clear();
     }
 }
 
@@ -74,6 +72,8 @@ void ProgramRecPriorityInfo::clone(
         m_last_record      = QDateTime();
         m_avg_delay        = 0;
         m_profile.clear();
+        m_storageGroup.clear();
+        m_recordingGroup.clear();
     }
 }
 
@@ -87,6 +87,8 @@ void ProgramRecPriorityInfo::clear(void)
     m_last_record      = QDateTime();
     m_avg_delay        = 0;
     m_profile.clear();
+    m_storageGroup.clear();
+    m_recordingGroup.clear();
 }
 
 void ProgramRecPriorityInfo::ToMap(InfoMap &progMap,
@@ -98,6 +100,10 @@ void ProgramRecPriorityInfo::ToMap(InfoMap &progMap,
         QObject::tr("Default (Template)") : m_title;
     progMap["category"] = (m_category == "Default") ?
         QObject::tr("Default") : m_category;
+    progMap["storagegroup"] = (m_storageGroup == "Default") ?
+        QObject::tr("Default") : m_storageGroup;
+    progMap["recordinggroup"] = (m_recordingGroup == "Default") ?
+        QObject::tr("Default") : m_recordingGroup;
 }
 
 class TitleSort
@@ -108,45 +114,20 @@ class TitleSort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        if (a->GetSortTitle() != b->GetSortTitle())
-        {
-            if (m_reverse)
-                return naturalCompare(b->GetSortTitle(), a->GetSortTitle()) < 0;
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        }
+        int cmp = StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle());
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle());
+        // sort higher recording priority before
+        if (cmp == 0)
+            cmp = ternary_compare(b->GetRecordingPriority(), a->GetRecordingPriority());
+        // sort lower RecordingTypePrecedence before
+        if (cmp == 0)
+            cmp = ternary_compare(RecTypePrecedence(a->m_recType), RecTypePrecedence(b->m_recType));
+        // sort lower RecordingRuleID before
+        if (cmp == 0)
+            cmp = ternary_compare(a->GetRecordingRuleID(), b->GetRecordingRuleID());
 
-        if (a->GetSortSubtitle() != b->GetSortSubtitle())
-        {
-            if (m_reverse)
-                return naturalCompare(b->GetSortSubtitle(), a->GetSortSubtitle()) < 0;
-            return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
-        }
-
-        int finalA = a->GetRecordingPriority();
-        int finalB = b->GetRecordingPriority();
-
-        if (finalA != finalB)
-        {
-            if (m_reverse)
-                return finalA < finalB;
-            return finalA > finalB;
-        }
-
-        int typeA = RecTypePrecedence(a->m_recType);
-        int typeB = RecTypePrecedence(b->m_recType);
-
-        if (typeA != typeB)
-        {
-            if (m_reverse)
-                return typeA > typeB;
-            return typeA < typeB;
-        }
-
-        if (m_reverse)
-            return (a->GetRecordingRuleID() >
-                    b->GetRecordingRuleID());
-        return (a->GetRecordingRuleID() <
-                b->GetRecordingRuleID());
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -161,31 +142,16 @@ class ProgramRecPrioritySort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        int finalA = a->GetRecordingPriority();
-        int finalB = b->GetRecordingPriority();
+        // sort higher recording priority before
+        int cmp = ternary_compare(b->GetRecordingPriority(), a->GetRecordingPriority());
+        // sort lower RecTypePrecedence before
+        if (cmp == 0)
+            cmp = ternary_compare(RecTypePrecedence(a->m_recType), RecTypePrecedence(b->m_recType));
+        // sort lower RecordingRuleID before
+        if (cmp == 0)
+            cmp = ternary_compare(a->GetRecordingRuleID(), b->GetRecordingRuleID());
 
-        if (finalA != finalB)
-        {
-            if (m_reverse)
-                return finalA < finalB;
-            return finalA > finalB;
-        }
-
-        int typeA = RecTypePrecedence(a->m_recType);
-        int typeB = RecTypePrecedence(b->m_recType);
-
-        if (typeA != typeB)
-        {
-            if (m_reverse)
-                return typeA > typeB;
-            return typeA < typeB;
-        }
-
-        if (m_reverse)
-            return (a->GetRecordingRuleID() >
-                    b->GetRecordingRuleID());
-        return (a->GetRecordingRuleID() <
-                b->GetRecordingRuleID());
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -200,31 +166,16 @@ class ProgramRecTypeSort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        int typeA = RecTypePrecedence(a->m_recType);
-        int typeB = RecTypePrecedence(b->m_recType);
+        // sort lower RecTypePrecedence before
+        int cmp = ternary_compare(RecTypePrecedence(a->m_recType), RecTypePrecedence(b->m_recType));
+        // sort higher recording priority before
+        if (cmp == 0)
+            cmp = ternary_compare(b->GetRecordingPriority(), a->GetRecordingPriority());;
+        // sort lower RecordingRuleID before
+        if (cmp == 0)
+            cmp = ternary_compare(a->GetRecordingRuleID(), b->GetRecordingRuleID());
 
-        if (typeA != typeB)
-        {
-            if (m_reverse)
-                return (typeA > typeB);
-            return (typeA < typeB);
-        }
-
-        int finalA = a->GetRecordingPriority();
-        int finalB = b->GetRecordingPriority();
-
-        if (finalA != finalB)
-        {
-            if (m_reverse)
-                return finalA < finalB;
-            return finalA > finalB;
-        }
-
-        if (m_reverse)
-            return (a->GetRecordingRuleID() >
-                    b->GetRecordingRuleID());
-        return (a->GetRecordingRuleID() <
-                b->GetRecordingRuleID());
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -239,34 +190,17 @@ class ProgramCountSort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        int countA = a->m_matchCount;
-        int countB = b->m_matchCount;
-        int recCountA = a->m_recCount;
-        int recCountB = b->m_recCount;
+        // sort higher match count before
+        int cmp = ternary_compare(b->m_matchCount, a->m_matchCount);
+        // sort higher recCount before
+        if (cmp == 0)
+            cmp = ternary_compare(b->m_recCount, a->m_recCount);
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle());
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle());
 
-        if (countA != countB)
-        {
-            if (m_reverse)
-                return countA < countB;
-            return countA > countB;
-        }
-
-        if (recCountA != recCountB)
-        {
-            if (m_reverse)
-                return recCountA < recCountB;
-            return recCountA > recCountB;
-        }
-
-        if (m_reverse)
-        {
-            if (a->GetSortTitle() != b->GetSortTitle())
-                return naturalCompare(b->GetSortTitle(), a->GetSortTitle()) < 0;
-            return naturalCompare(b->GetSortSubtitle(), a->GetSortSubtitle()) < 0;
-        }
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -281,34 +215,17 @@ class ProgramRecCountSort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        int countA = a->m_matchCount;
-        int countB = b->m_matchCount;
-        int recCountA = a->m_recCount;
-        int recCountB = b->m_recCount;
+        // sort higher recCount before
+        int cmp = ternary_compare(b->m_recCount, a->m_recCount);
+        // sort higher match count before
+        if (cmp == 0)
+            cmp = ternary_compare(b->m_matchCount, a->m_matchCount);
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle());
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle());
 
-        if (recCountA != recCountB)
-        {
-            if (m_reverse)
-                return recCountA < recCountB;
-            return recCountA > recCountB;
-        }
-
-        if (countA != countB)
-        {
-            if (m_reverse)
-                return countA < countB;
-            return countA > countB;
-        }
-
-        if (m_reverse)
-        {
-            if (a->GetSortTitle() != b->GetSortTitle())
-                return naturalCompare(b->GetSortTitle(), a->GetSortTitle()) < 0;
-            return naturalCompare(b->GetSortSubtitle(), a->GetSortSubtitle()) < 0;
-        }
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -323,25 +240,14 @@ class ProgramLastRecordSort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        QDateTime lastRecA = a->m_last_record;
-        QDateTime lastRecB = b->m_last_record;
+        // sort later date time before
+        int cmp = ternary_compare(b->m_last_record, a->m_last_record);
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle());
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle());
 
-        if (lastRecA != lastRecB)
-        {
-            if (m_reverse)
-                return lastRecA < lastRecB;
-            return lastRecA > lastRecB;
-        }
-
-        if (m_reverse)
-        {
-            if (a->GetSortTitle() != b->GetSortTitle())
-                return naturalCompare(b->GetSortTitle(), a->GetSortTitle()) < 0;
-            return naturalCompare(b->GetSortSubtitle(), a->GetSortSubtitle()) < 0;
-        }
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -356,25 +262,13 @@ class ProgramAvgDelaySort
     bool operator()(const ProgramRecPriorityInfo *a,
                     const ProgramRecPriorityInfo *b) const
     {
-        int avgA = a->m_avg_delay;
-        int avgB = b->m_avg_delay;
+        int cmp = ternary_compare(a->m_avg_delay, b->m_avg_delay);
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle());
+        if (cmp == 0)
+            cmp = StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle());
 
-        if (avgA != avgB)
-        {
-            if (m_reverse)
-                return avgA > avgB;
-            return avgA < avgB;
-        }
-
-        if (m_reverse)
-        {
-            if (a->GetSortTitle() != b->GetSortTitle())
-                return naturalCompare(b->GetSortTitle(), a->GetSortTitle()) < 0;
-            return naturalCompare(b->GetSortSubtitle(), a->GetSortSubtitle()) < 0;
-        }
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
+        return m_reverse ? cmp > 0 : cmp < 0;
     }
 
   private:
@@ -452,7 +346,7 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "RANKINC")
@@ -476,7 +370,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "2")
@@ -487,7 +383,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "4")
@@ -498,7 +396,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "5")
@@ -522,7 +422,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "7")
@@ -533,7 +435,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "8")
@@ -544,7 +448,9 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
                 m_reverseSort = false;
             }
             else
+            {
                 m_reverseSort = !m_reverseSort;
+            }
             SortList();
         }
         else if (action == "PREVVIEW" || action == "NEXTVIEW")
@@ -583,9 +489,13 @@ bool ProgramRecPriority::keyPressEvent(QKeyEvent *event)
             ShowUpcoming();
         }
         else if (action == "INFO" || action == "DETAILS")
+        {
             ShowDetails();
+        }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -721,7 +631,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
             else if (resulttext == tr("Sort By Priority"))
@@ -732,7 +644,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
             else if (resulttext == tr("Sort By Type"))
@@ -743,7 +657,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
             else if (resulttext == tr("Sort By Count"))
@@ -767,7 +683,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
             else if (resulttext == tr("Sort By Last Recorded"))
@@ -778,7 +696,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
             else if (resulttext == tr("Sort By Average Delay"))
@@ -789,7 +709,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
                     m_reverseSort = false;
                 }
                 else
+                {
                     m_reverseSort = !m_reverseSort;
+                }
                 SortList();
             }
         }
@@ -817,7 +739,9 @@ void ProgramRecPriority::customEvent(QEvent *event)
             newTemplate(resulttext);
         }
         else
+        {
             ScheduleCommon::customEvent(event);
+        }
     }
 }
 
@@ -844,7 +768,9 @@ void ProgramRecPriority::edit(MythUIButtonListItem *item) const
         connect(schededit, &ScheduleEditor::ruleDeleted, this, &ProgramRecPriority::scheduleChanged);
     }
     else
+    {
         delete schededit;
+    }
 }
 
 void ProgramRecPriority::newTemplate(QString category)
@@ -882,7 +808,9 @@ void ProgramRecPriority::newTemplate(QString category)
         connect(schededit, &ScheduleEditor::ruleDeleted, this, &ProgramRecPriority::scheduleChanged);
     }
     else
+    {
         delete schededit;
+    }
 }
 
 void ProgramRecPriority::scheduleChanged(int recid)
@@ -914,6 +842,8 @@ void ProgramRecPriority::scheduleChanged(int recid)
             RecStatus::Inactive : RecStatus::Unknown;
         progInfo.m_profile = record.m_recProfile;
         progInfo.m_last_record = record.m_lastRecorded;
+        progInfo.m_storageGroup = record.m_storageGroup;
+        progInfo.m_recordingGroup = RecordingInfo::GetRecgroupString(record.m_recGroupID);
 
         m_programData[recid] = progInfo;
         m_origRecPriorityData[record.m_recordID] =
@@ -1111,7 +1041,7 @@ void ProgramRecPriority::saveRecPriority(void)
 
 void ProgramRecPriority::FillList(void)
 {
-    vector<ProgramInfo *> recordinglist;
+    std::vector<ProgramInfo *> recordinglist;
 
     m_programData.clear();
 
@@ -1137,7 +1067,8 @@ void ProgramRecPriority::FillList(void)
 
     MSqlQuery result(MSqlQuery::InitCon());
     result.prepare("SELECT recordid, title, chanid, starttime, startdate, "
-                   "type, inactive, last_record, avg_delay, profile "
+                   "type, inactive, last_record, avg_delay, profile, "
+                   "recgroup, storagegroup "
                    "FROM record;");
 
     if (!result.exec())
@@ -1158,6 +1089,8 @@ void ProgramRecPriority::FillList(void)
             QDateTime lastrec = MythDate::as_utc(result.value(7).toDateTime());
             int avgd = result.value(8).toInt();
             QString profile = result.value(9).toString();
+            QString recordingGroup = result.value(10).toString();
+            QString storageGroup = result.value(11).toString();
 
             // find matching program in m_programData and set
             // recType
@@ -1175,6 +1108,8 @@ void ProgramRecPriority::FillList(void)
                 progInfo->m_last_record = lastrec;
                 progInfo->m_avg_delay = avgd;
                 progInfo->m_profile = profile;
+                progInfo->m_recordingGroup  = recordingGroup;
+                progInfo->m_storageGroup = storageGroup;
 
                 if (inactive)
                     progInfo->m_recStatus = RecStatus::Inactive;
@@ -1287,7 +1222,7 @@ void ProgramRecPriority::UpdateList()
 
     m_programList->Reset();
 
-    vector<ProgramRecPriorityInfo*>::iterator it;
+    std::vector<ProgramRecPriorityInfo*>::iterator it;
     for (it = m_sortedProgram.begin(); it != m_sortedProgram.end(); ++it)
     {
         ProgramRecPriorityInfo *progInfo = *it;
@@ -1307,7 +1242,9 @@ void ProgramRecPriority::UpdateList()
             item->DisplayState(rating, "ratingstate");
         }
         else
+        {
             progInfo->m_subtitle.clear();
+        }
 
         QString state;
         if (progInfo->m_recType == kDontRecord ||
@@ -1395,6 +1332,8 @@ void ProgramRecPriority::UpdateList()
             (profile == "High Quality") || (profile == "Low Quality"))
             profile = tr(profile.toUtf8().constData());
         item->SetText(profile, "recordingprofile", state);
+        item->SetText(progInfo->m_recordingGroup, "recordinggroup", state);
+        item->SetText(progInfo->m_storageGroup, "storagegroup", state);
         item->DisplayState(state, "status");
 
         if (m_currentItem == progInfo)
@@ -1410,6 +1349,9 @@ void ProgramRecPriority::UpdateList()
         norecordingText->SetVisible(m_programData.isEmpty());
 }
 
+// Called whenever a new recording is selected from the list of
+// recordings. This function updates the screen with the information
+// on the newly selected recording.
 void ProgramRecPriority::updateInfo(MythUIButtonListItem *item)
 {
     if (!item)
@@ -1518,7 +1460,6 @@ void ProgramRecPriority::updateInfo(MythUIButtonListItem *item)
             profile = tr(profile.toUtf8().constData());
         m_recProfileText->SetText(profile);
     }
-
 }
 
 void ProgramRecPriority::RemoveItemFromList(MythUIButtonListItem *item)

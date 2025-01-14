@@ -3,8 +3,8 @@
 
 #include <QString>
 
-#include "output.h"
-#include "audiooutput.h"
+#include "libmyth/output.h"
+#include "libmyth/audio/audiooutput.h"
 
 extern "C" {
 #include "libavcodec/avcodec.h"
@@ -25,7 +25,7 @@ class MPUBLIC SPDIFEncoder
     bool SetMaxHDRate(int rate);
 
   private:
-    static int funcIO(void *opaque, unsigned char *buf, int size);
+    static int funcIO(void *opaque, const uint8_t *buf, int size);
     void Destroy();
 
   private:

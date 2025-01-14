@@ -8,12 +8,12 @@
 #include <QKeyEvent>
 
 // mythtv
-#include <mythscreentype.h>
+#include <libmythui/mythscreentype.h>
 
 // mytharchive
 #include "archiveutil.h"
 
-enum NativeItemType
+enum NativeItemType : std::uint8_t
 {
     RT_RECORDING = 1,
     RT_VIDEO,

@@ -18,20 +18,34 @@ class MythUIButtonList;
 class MythUIScrollBar;
 class MythUIStateType;
 class MythUIGroup;
+class MythUIProgressBar;
 
 struct TextProperties {
     QString text;
     QString state;
 };
 
+struct ProgressInfo {
+    int8_t start {0}; // All in the range [0-100]
+    int8_t total {0};
+    int8_t used  {0};
+};
+
+using muibCbFn = QString (*)(const QString &name, void *data);
+struct muibCbInfo
+{
+    muibCbFn fn   {nullptr};
+    void*    data {nullptr};
+};
+
 class MUI_PUBLIC MythUIButtonListItem
 {
   public:
-    enum CheckState {
+    enum CheckState : std::int8_t {
         CantCheck = -1,
         NotChecked = 0,
-        HalfChecked,
-        FullChecked
+        HalfChecked = 1,
+        FullChecked = 2
     };
 
     MythUIButtonListItem(MythUIButtonList *lbtype, QString text,
@@ -41,11 +55,11 @@ class MUI_PUBLIC MythUIButtonListItem
     MythUIButtonListItem(MythUIButtonList *lbtype, const QString& text,
                          QVariant data, int listPosition = -1);
     template <typename SLOT>
-    MythUIButtonListItem(typename std::enable_if<FunctionPointerTest<SLOT>::MemberFunction, MythUIButtonList *>::type lbtype,
+    MythUIButtonListItem(std::enable_if_t<FunctionPointerTest<SLOT>::MemberFunction, MythUIButtonList *>lbtype,
                          const QString& text, SLOT slot, int listPosition = -1)
         : MythUIButtonListItem(lbtype, text, QVariant::fromValue(static_cast<MythUICallbackMF>(slot)), listPosition) { }
     template <typename SLOT>
-    MythUIButtonListItem(typename std::enable_if<FunctionPointerTest<SLOT>::MemberConstFunction, MythUIButtonList *>::type lbtype,
+    MythUIButtonListItem(std::enable_if_t<FunctionPointerTest<SLOT>::MemberConstFunction, MythUIButtonList *>lbtype,
                          const QString& text, SLOT slot, int listPosition = -1)
         : MythUIButtonListItem(lbtype, text, QVariant::fromValue(static_cast<MythUICallbackMFc>(slot)), listPosition) { }
     virtual ~MythUIButtonListItem();
@@ -56,7 +70,9 @@ class MUI_PUBLIC MythUIButtonListItem
                  const QString &state="");
     void SetTextFromMap(const InfoMap &infoMap, const QString &state="");
     void SetTextFromMap(const QMap<QString, TextProperties> &stringMap);
+    void SetTextCb(muibCbFn fn, void *data);
     QString GetText(const QString &name="") const;
+    TextProperties GetTextProp(const QString &name = "") const;
 
     bool FindText(const QString &searchStr, const QString &fieldList = "**ALL**",
                   bool startsWith = false) const;
@@ -91,10 +107,16 @@ class MUI_PUBLIC MythUIButtonListItem
     void SetImage(const QString &filename, const QString &name="",
                   bool force_reload = false);
     void SetImageFromMap(const InfoMap &imageMap);
+    void SetImageCb(muibCbFn fn, void *data);
     QString GetImageFilename(const QString &name="") const;
+
+    void SetProgress1(int start, int total, int used);
+    void SetProgress2(int start, int total, int used);
 
     void DisplayState(const QString &state, const QString &name);
     void SetStatesFromMap(const InfoMap &stateMap);
+    void SetStateCb(muibCbFn fn, void *data);
+    QString GetState(const QString &name);
 
     bool isVisible() const { return m_isVisible; }
     void setVisible(bool flag) { m_isVisible = flag; }
@@ -117,6 +139,18 @@ class MUI_PUBLIC MythUIButtonListItem
 
     virtual void SetToRealButton(MythUIStateType *button, bool selected);
 
+  private:
+    void DoButtonText(MythUIText *buttontext);
+    void DoButtonImage(MythUIImage *buttonimage);
+    void DoButtonArrow(MythUIImage *buttonarrow) const;
+    void DoButtonCheck(MythUIStateType *buttoncheck);
+    void DoButtonProgress1(MythUIProgressBar *buttonprogress) const;
+    void DoButtonProgress2(MythUIProgressBar *buttonprogress) const;
+    void DoButtonLookupText(MythUIText *text, const TextProperties& textprop);
+    static void DoButtonLookupFilename(MythUIImage *image, const QString& filename);
+    static void DoButtonLookupImage(MythUIImage *uiimage, MythImage *image);
+    static void DoButtonLookupState(MythUIStateType *statetype, const QString& name);
+
   protected:
     MythUIButtonList *m_parent      {nullptr};
     QString         m_text;
@@ -129,11 +163,17 @@ class MUI_PUBLIC MythUIButtonListItem
     bool            m_showArrow     {false};
     bool            m_isVisible     {false};
     bool            m_enabled       {true};
+    bool            m_debugme       {false};
+    ProgressInfo    m_progress1      {0,0,0};
+    ProgressInfo    m_progress2      {0,0,0};
 
     QMap<QString, TextProperties> m_strings;
     QMap<QString, MythImage*> m_images;
     InfoMap m_imageFilenames;
     InfoMap m_states;
+    muibCbInfo m_textCb;
+    muibCbInfo m_imageCb;
+    muibCbInfo m_stateCb;
 
     friend class MythUIButtonList;
     friend class MythGenericTree;
@@ -162,9 +202,11 @@ class MUI_PUBLIC MythUIButtonList : public MythUIType
     bool gestureEvent(MythGestureEvent *event) override; // MythUIType
     void customEvent(QEvent *event) override; // MythUIType
 
-    enum MovementUnit { MoveItem, MoveColumn, MoveRow, MovePage, MoveMax,
+    enum MovementUnit : std::uint8_t
+                      { MoveItem, MoveColumn, MoveRow, MovePage, MoveMax,
                         MoveMid, MoveByAmount };
-    enum LayoutType  { LayoutVertical, LayoutHorizontal, LayoutGrid };
+    enum LayoutType : std::uint8_t
+                     { LayoutVertical, LayoutHorizontal, LayoutGrid };
 
     void SetDrawFromBottom(bool draw);
 
@@ -232,10 +274,13 @@ class MUI_PUBLIC MythUIButtonList : public MythUIType
     void itemLoaded(MythUIButtonListItem* item);
 
   protected:
-    enum ScrollStyle { ScrollFree, ScrollCenter, ScrollGroupCenter };
-    enum ArrangeType { ArrangeFixed, ArrangeFill, ArrangeSpread, ArrangeStack };
-    enum WrapStyle   { WrapCaptive = -1, WrapNone = 0, WrapSelect, WrapItems,
-                       WrapFlowing };
+    enum ScrollStyle : std::uint8_t
+                     { ScrollFree, ScrollCenter, ScrollGroupCenter };
+    enum ArrangeType : std::uint8_t
+                     { ArrangeFixed, ArrangeFill, ArrangeSpread, ArrangeStack };
+    enum WrapStyle   : std::int8_t
+                     { WrapCaptive = -1, WrapNone = 0, WrapSelect = 1,
+                       WrapItems = 2, WrapFlowing = 3 };
 
     void DrawSelf(MythPainter *p, int xoffset, int yoffset,
                   int alphaMod, QRect clipRect) override; // MythUIType

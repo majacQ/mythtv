@@ -1,4 +1,7 @@
-// MythTV
+// libmythbase
+#include "libmythbase/mythlogging.h"
+
+// libmythui
 #include "mythvrr.h"
 #ifdef USING_DRM
 #include "platforms/mythdisplaydrm.h"
@@ -9,7 +12,6 @@
 #include "platforms/mythnvcontrol.h"
 #endif
 #include "mythdisplay.h"
-#include "mythlogging.h"
 
 // Qt
 #include <QObject>
@@ -51,15 +53,15 @@ MythVRR::MythVRR(bool Controllable, VRRType Type, bool Enabled, MythVRRRange Ran
 
 /*! \brief Create a concrete implementation of MythVRR suitable for the given Display
 */
-MythVRRPtr MythVRR::Create(MythDisplay* _Display)
+MythVRRPtr MythVRR::Create(MythDisplay* MDisplay)
 {
-    if (!_Display)
+    if (!MDisplay)
         return nullptr;
 
     MythVRRPtr result = nullptr;
 
 #if defined (USING_X11) || defined (USING_DRM)
-    const auto range = _Display->GetEDID().GetVRRRange();
+    const auto range = MDisplay->GetEDID().GetVRRRange();
 
 #ifdef USING_X11
     // GSync is only available with X11 over Display Port
@@ -72,7 +74,7 @@ MythVRRPtr MythVRR::Create(MythDisplay* _Display)
     // FreeSync is only currently *controllable* via DRM with an AMD GPU/APU and Display Port
     if (!result)
     {
-        if (auto * display = dynamic_cast<MythDisplayDRM*>(_Display); display && display->GetDevice())
+        if (auto * display = dynamic_cast<MythDisplayDRM*>(MDisplay); display && display->GetDevice())
             if (auto freesync = MythDRMVRR::CreateFreeSync(display->GetDevice(), range); freesync)
                 result =  freesync;
     }
@@ -81,7 +83,7 @@ MythVRRPtr MythVRR::Create(MythDisplay* _Display)
     // tell us if it is available/enabled - which is still useful
     if (!result)
     {
-        if (auto drm = MythDRMDevice::Create(_Display->GetCurrentScreen(), DRM_QUIET); drm)
+        if (auto drm = MythDRMDevice::Create(MDisplay->GetCurrentScreen(), DRM_QUIET); drm)
             if (auto freesync = MythDRMVRR::CreateFreeSync(drm, range); freesync)
                 result = freesync;
     }

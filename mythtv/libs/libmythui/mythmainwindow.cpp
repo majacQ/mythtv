@@ -19,6 +19,7 @@
 #include <QEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QInputMethodEvent>
 #include <QSize>
 #include <QWindow>
 
@@ -26,15 +27,15 @@
 #include "unistd.h"
 
 // libmythbase headers
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythevent.h"
-#include "mythdirs.h"
-#include "compat.h"
-#include "mythcorecontext.h"
-#include "mythmedia.h"
-#include "mythmiscutil.h"
-#include "mythdate.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmedia.h"
+#include "libmythbase/mythmiscutil.h"
 
 // libmythui headers
 #include "myththemebase.h"
@@ -53,12 +54,11 @@
 #include "mythscreensaver.h"
 #include "devices/mythinputdevicehandler.h"
 
-#ifdef _WIN32
-#include "mythpainter_d3d9.h"
-#endif
 
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #ifdef Q_OS_ANDROID
 #include <QtAndroid>
+#endif
 #endif
 
 static constexpr std::chrono::milliseconds GESTURE_TIMEOUT    { 1s    };
@@ -67,8 +67,8 @@ static constexpr std::chrono::milliseconds LONGPRESS_INTERVAL { 1s    };
 
 #define LOC QString("MythMainWindow: ")
 
-static MythMainWindow *mainWin = nullptr;
-static QMutex mainLock;
+static MythMainWindow *s_mainWin = nullptr;
+static QMutex s_mainLock;
 
 /**
  * \brief Return the existing main window, or create one
@@ -79,26 +79,26 @@ static QMutex mainLock;
  */
 MythMainWindow *MythMainWindow::getMainWindow(const bool UseDB)
 {
-    if (mainWin)
-        return mainWin;
+    if (s_mainWin)
+        return s_mainWin;
 
-    QMutexLocker lock(&mainLock);
+    QMutexLocker lock(&s_mainLock);
 
-    if (!mainWin)
+    if (!s_mainWin)
     {
-        mainWin = new MythMainWindow(UseDB);
-        gCoreContext->SetGUIObject(mainWin);
+        s_mainWin = new MythMainWindow(UseDB);
+        gCoreContext->SetGUIObject(s_mainWin);
     }
 
-    return mainWin;
+    return s_mainWin;
 }
 
 void MythMainWindow::destroyMainWindow(void)
 {
     if (gCoreContext)
         gCoreContext->SetGUIObject(nullptr);
-    delete mainWin;
-    mainWin = nullptr;
+    delete s_mainWin;
+    s_mainWin = nullptr;
 }
 
 MythMainWindow *GetMythMainWindow(void)
@@ -108,7 +108,7 @@ MythMainWindow *GetMythMainWindow(void)
 
 bool HasMythMainWindow(void)
 {
-    return mainWin != nullptr;
+    return s_mainWin != nullptr;
 }
 
 void DestroyMythMainWindow(void)
@@ -123,15 +123,14 @@ MythPainter *GetMythPainter(void)
 
 MythNotificationCenter *GetNotificationCenter(void)
 {
-    if (!mainWin || !mainWin->GetCurrentNotificationCenter())
+    if (!s_mainWin || !s_mainWin->GetCurrentNotificationCenter())
         return nullptr;
-    return mainWin->GetCurrentNotificationCenter();
+    return s_mainWin->GetCurrentNotificationCenter();
 }
 
 MythMainWindow::MythMainWindow(const bool UseDB)
+  : m_display(MythDisplay::Create(this))
 {
-    m_display = MythDisplay::Create(this);
-
     // Switch to desired GUI resolution
     if (m_display->UsingVideoModes())
         m_display->SwitchToGUI(true);
@@ -229,10 +228,11 @@ MythMainWindow::~MythMainWindow()
 
     delete m_themeBase;
 
-    while (!m_priv->m_keyContexts.isEmpty())
+    for (auto iter = m_priv->m_keyContexts.begin();
+         iter != m_priv->m_keyContexts.end();
+         iter = m_priv->m_keyContexts.erase(iter))
     {
-        KeyContext *context = *m_priv->m_keyContexts.begin();
-        m_priv->m_keyContexts.erase(m_priv->m_keyContexts.begin());
+        KeyContext *context = *iter;
         delete context;
     }
 
@@ -321,7 +321,7 @@ MythScreenStack *MythMainWindow::GetMainStack()
 
 MythScreenStack *MythMainWindow::GetStack(const QString& Stackname)
 {
-    for (auto * widget : qAsConst(m_priv->m_stackList))
+    for (auto * widget : std::as_const(m_priv->m_stackList))
         if (widget->objectName() == Stackname)
             return widget;
     return nullptr;
@@ -351,7 +351,7 @@ void MythMainWindow::Animate(void)
         QVector<MythScreenType *> drawList;
         (*it)->GetDrawOrder(drawList);
 
-        for (auto *screen : qAsConst(drawList))
+        for (auto *screen : std::as_const(drawList))
         {
             screen->Pulse();
 
@@ -368,7 +368,7 @@ void MythMainWindow::Animate(void)
     if (redraw && !m_painterWin->RenderIsShared())
         m_painterWin->update(m_repaintRegion);
 
-    for (auto *widget : qAsConst(m_priv->m_stackList))
+    for (auto *widget : std::as_const(m_priv->m_stackList))
         widget->ScheduleInitIfNeeded();
 }
 
@@ -399,7 +399,7 @@ void MythMainWindow::drawScreen(QPaintEvent* Event)
             QVector<MythScreenType *> redrawList;
             (*it)->GetDrawOrder(redrawList);
 
-            for (const auto *screen : qAsConst(redrawList))
+            for (const auto *screen : std::as_const(redrawList))
             {
                 if (screen->NeedsRedraw())
                 {
@@ -458,7 +458,7 @@ void MythMainWindow::Draw(MythPainter* Painter)
         {
             QVector<MythScreenType *> redrawList;
             (*it)->GetDrawOrder(redrawList);
-            for (auto *screen : qAsConst(redrawList))
+            for (auto *screen : std::as_const(redrawList))
                 screen->Draw(Painter, 0, 0, 255, rect);
         }
     }
@@ -522,7 +522,7 @@ void MythMainWindow::DoRemoteScreenShot(const QString& Filename, int Width, int 
     args << QString::number(Width);
     args << QString::number(Height);
     args << Filename;
-    MythEvent me(MythEvent::MythEventMessage, ACTION_SCREENSHOT, args);
+    MythEvent me(MythEvent::kMythEventMessage, ACTION_SCREENSHOT, args);
     QCoreApplication::sendEvent(this, &me);
 }
 
@@ -633,6 +633,7 @@ bool MythMainWindow::event(QEvent *Event)
 void MythMainWindow::LoadQtConfig()
 {
     gCoreContext->ResetLanguage();
+    gCoreContext->ResetAudioLanguage();
     GetMythUI()->ClearThemeCacheDir();
     QApplication::setStyle("Windows");
 }
@@ -715,21 +716,17 @@ void MythMainWindow::Init(bool MayReInit)
 
     move(m_screenRect.topLeft());
 
-    if (m_painterWin)
+    if (m_painterWin || m_painter)
     {
-        m_oldPainterWin = m_painterWin;
-        m_painterWin = nullptr;
+        LOG(VB_GENERAL, LOG_INFO, "Destroying painter and painter window");
+        MythPainterWindow::DestroyPainters(m_painterWin, m_painter);
     }
 
-    if (m_painter)
+    QString warningmsg = MythPainterWindow::CreatePainters(this, m_painterWin, m_painter);
+    if (!warningmsg.isEmpty())
     {
-        m_oldPainter = m_painter;
-        m_painter = nullptr;
+        LOG(VB_GENERAL, LOG_WARNING, warningmsg);
     }
-
-    QString warningmsg;
-    if (!m_painter && !m_painterWin)
-        warningmsg = MythPainterWindow::CreatePainters(this, m_painterWin, m_painter);
 
     if (!m_painterWin)
     {
@@ -742,6 +739,7 @@ void MythMainWindow::Init(bool MayReInit)
         setAttribute(Qt::WA_NoSystemBackground);
         setAutoFillBackground(false);
     }
+    setAttribute(Qt::WA_InputMethodEnabled);
 
     MoveResize(m_screenRect);
     ShowPainterWindow();
@@ -749,9 +747,9 @@ void MythMainWindow::Init(bool MayReInit)
     // Redraw the window now to avoid race conditions in EGLFS (Qt5.4) if a
     // 2nd window (e.g. TVPlayback) is created before this is redrawn.
 #ifdef Q_OS_ANDROID
-#   define EARLY_SHOW_PLATFORM_NAME_CHECK "android"
+    static const QLatin1String EARLY_SHOW_PLATFORM_NAME_CHECK { "android" };
 #else
-#   define EARLY_SHOW_PLATFORM_NAME_CHECK "egl"
+    static const QLatin1String EARLY_SHOW_PLATFORM_NAME_CHECK { "egl" };
 #endif
     if (QGuiApplication::platformName().contains(EARLY_SHOW_PLATFORM_NAME_CHECK))
         QCoreApplication::processEvents();
@@ -783,7 +781,11 @@ void MythMainWindow::DelayedAction()
     Show();
 
 #ifdef Q_OS_ANDROID
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     QtAndroid::hideSplashScreen();
+#else
+    QNativeInterface::QAndroidApplication::hideSplashScreen();
+#endif
 #endif
 }
 
@@ -806,13 +808,13 @@ void MythMainWindow::InitKeys()
     RegisterKey("Global", "BACKSPACE", QT_TRANSLATE_NOOP("MythControls",
         "Backspace"),       "Backspace");
     RegisterKey("Global", "ESCAPE", QT_TRANSLATE_NOOP("MythControls",
-        "Escape"),                "Esc");
+        "Escape"),                "Esc,Back");
     RegisterKey("Global", "MENU", QT_TRANSLATE_NOOP("MythControls",
-        "Pop-up menu"),             "M,Meta+Enter");
+        "Pop-up menu"),             "M,Meta+Enter,Ctrl+M,Menu");
     RegisterKey("Global", "INFO", QT_TRANSLATE_NOOP("MythControls",
-        "More information"),        "I");
+        "More information"),        "I,Ctrl+I,Home Page");
     RegisterKey("Global", "DELETE", QT_TRANSLATE_NOOP("MythControls",
-        "Delete"),                  "D");
+        "Delete"),                  "D,Ctrl+E");
     RegisterKey("Global", "EDIT", QT_TRANSLATE_NOOP("MythControls",
         "Edit"),                    "E");
     RegisterKey("Global", ACTION_SCREENSHOT, QT_TRANSLATE_NOOP("MythControls",
@@ -832,9 +834,9 @@ void MythMainWindow::InitKeys()
         "Page to bottom of list"),   "");
 
     RegisterKey("Global", "PREVVIEW", QT_TRANSLATE_NOOP("MythControls",
-        "Previous View"),        "Home");
+        "Previous View"),        "Home,Media Previous");
     RegisterKey("Global", "NEXTVIEW", QT_TRANSLATE_NOOP("MythControls",
-        "Next View"),             "End");
+        "Next View"),             "End,Media Next");
 
     RegisterKey("Global", "HELP", QT_TRANSLATE_NOOP("MythControls",
         "Help"),                   "F1");
@@ -854,7 +856,7 @@ void MythMainWindow::InitKeys()
     RegisterKey("Global", "REDO", QT_TRANSLATE_NOOP("MythControls",
         "Redo"), "Ctrl+Y");
     RegisterKey("Global", "SEARCH", QT_TRANSLATE_NOOP("MythControls",
-        "Show incremental search dialog"), "Ctrl+S");
+        "Show incremental search dialog"), "Ctrl+S,Search");
 
     RegisterKey("Global", ACTION_0, QT_TRANSLATE_NOOP("MythControls","0"), "0");
     RegisterKey("Global", ACTION_1, QT_TRANSLATE_NOOP("MythControls","1"), "1");
@@ -895,9 +897,9 @@ void MythMainWindow::InitKeys()
 
     // these are for the html viewer widget (MythUIWebBrowser)
     RegisterKey("Browser", "ZOOMIN",          QT_TRANSLATE_NOOP("MythControls",
-        "Zoom in on browser window"),           ".,>");
+        "Zoom in on browser window"),           ".,>,Ctrl+F,Media Fast Forward");
     RegisterKey("Browser", "ZOOMOUT",         QT_TRANSLATE_NOOP("MythControls",
-        "Zoom out on browser window"),          ",,<");
+        "Zoom out on browser window"),          ",,<,Ctrl+B,Media Rewind");
     RegisterKey("Browser", "TOGGLEINPUT",     QT_TRANSLATE_NOOP("MythControls",
         "Toggle where keyboard input goes to"),  "F1");
 
@@ -933,7 +935,7 @@ void MythMainWindow::InitKeys()
         "Go forward to previous page"),     "F");
 
     RegisterKey("Main Menu",    "EXITPROMPT", QT_TRANSLATE_NOOP("MythControls",
-        "Display System Exit Prompt"),      "Esc");
+        "Display System Exit Prompt"),      "Esc,Back");
     RegisterKey("Main Menu",    "EXIT",       QT_TRANSLATE_NOOP("MythControls",
         "System Exit"),                     "");
     RegisterKey("Main Menu",    "STANDBYMODE",QT_TRANSLATE_NOOP("MythControls",
@@ -954,13 +956,6 @@ void MythMainWindow::ReloadKeys()
     ClearKeyContext("Browser");
     ClearKeyContext("Main Menu");
     InitKeys();
-}
-
-void MythMainWindow::ReinitDone()
-{
-    MythPainterWindow::DestroyPainters(m_oldPainterWin, m_oldPainter);
-    ShowPainterWindow();
-    MoveResize(m_screenRect);
 }
 
 void MythMainWindow::Show()
@@ -1032,7 +1027,7 @@ void MythMainWindow::SetDrawEnabled(bool Enable)
 
 void MythMainWindow::SetEffectsEnabled(bool Enable)
 {
-    for (auto *widget : qAsConst(m_priv->m_stackList))
+    for (auto *widget : std::as_const(m_priv->m_stackList))
     {
         if (Enable)
             widget->EnableEffects();
@@ -1120,7 +1115,9 @@ bool MythMainWindow::TranslateKeyPress(const QString& Context, QKeyEvent* Event,
 
     // Special case for custom QKeyEvent where the action is embedded directly
     // in the QKeyEvent text property. Used by MythFEXML http extension
-    if (Event->key() == 0 && !Event->text().isEmpty() && Event->modifiers() == Qt::NoModifier)
+    if (Event && Event->key() == 0 &&
+        !Event->text().isEmpty() &&
+        Event->modifiers() == Qt::NoModifier)
     {
         QString action = Event->text();
         // check if it is a jumppoint
@@ -1692,8 +1689,8 @@ bool MythMainWindow::eventFilter(QObject* Watched, QEvent* Event)
             }
 #endif
 
-            // NOLINTNEXTLINE(readability-qualified-auto) // qt6
-            for (auto it = m_priv->m_stackList.end() - 1; it != m_priv->m_stackList.begin() - 1; --it)
+            QVector<MythScreenStack *>::const_reverse_iterator it;
+            for (it = m_priv->m_stackList.rbegin(); it != m_priv->m_stackList.rend(); it++)
             {
                 if (auto * top = (*it)->GetTopScreen(); top)
                 {
@@ -1704,6 +1701,35 @@ bool MythMainWindow::eventFilter(QObject* Watched, QEvent* Event)
                     if ((*it)->objectName() == "popup stack")
                         break;
                 }
+            }
+            break;
+        }
+        case QEvent::InputMethod:
+        {
+            ResetIdleTimer();
+            auto *ie = dynamic_cast<QInputMethodEvent*>(Event);
+            if (!ie)
+                return MythUIScreenBounds::eventFilter(Watched, Event);
+            QWidget *widget = QApplication::focusWidget();
+            if (widget)
+            {
+                ie->accept();
+                if (widget->isEnabled())
+                    QCoreApplication::instance()->notify(widget, ie);
+                break;
+            }
+            QVector<MythScreenStack *>::const_reverse_iterator it;
+            for (it = m_priv->m_stackList.rbegin(); it != m_priv->m_stackList.rend(); it++)
+            {
+                MythScreenType *top = (*it)->GetTopScreen();
+                if (top == nullptr)
+                    continue;
+                if (top->inputMethodEvent(ie))
+                    return true;
+                // Note:  The following break prevents keypresses being
+                //        sent to windows below popups
+                if ((*it)->objectName() == "popup stack")
+                    break;
             }
             break;
         }
@@ -1749,8 +1775,8 @@ bool MythMainWindow::eventFilter(QObject* Watched, QEvent* Event)
                     if (!mouseevent)
                         return MythUIScreenBounds::eventFilter(Watched, Event);
 
-                    // NOLINTNEXTLINE(readability-qualified-auto) // qt6
-                    for (auto it = m_priv->m_stackList.end() - 1; it != m_priv->m_stackList.begin() - 1; --it)
+                    QVector<MythScreenStack *>::const_reverse_iterator it;
+                    for (it = m_priv->m_stackList.rbegin(); it != m_priv->m_stackList.rend(); it++)
                     {
                         auto * screen = (*it)->GetTopScreen();
                         if (!screen || !screen->ContainsPoint(point))
@@ -1780,8 +1806,8 @@ bool MythMainWindow::eventFilter(QObject* Watched, QEvent* Event)
                         return true;
                     }
                     
-                    // NOLINTNEXTLINE(readability-qualified-auto) // qt6
-                    for (auto it = m_priv->m_stackList.end() - 1; it != m_priv->m_stackList.begin() - 1; --it)
+                    QVector<MythScreenStack *>::const_reverse_iterator it;
+                    for (it = m_priv->m_stackList.rbegin(); it != m_priv->m_stackList.rend(); it++)
                     {
                         MythScreenType *screen = (*it)->GetTopScreen();
                         if (!screen || !screen->ContainsPoint(point))
@@ -1912,11 +1938,11 @@ void MythMainWindow::customEvent(QEvent* Event)
         // actions which would not be appropriate when the screen doesn't have
         // focus. It is the programmers responsibility to ignore events when
         // necessary.
-        for (auto * widget : qAsConst(m_priv->m_stackList))
+        for (auto * widget : std::as_const(m_priv->m_stackList))
         {
             QVector<MythScreenType*> screenList;
             widget->GetScreenList(screenList);
-            for (auto * screen : qAsConst(screenList))
+            for (auto * screen : std::as_const(screenList))
                 if (screen)
                     screen->mediaEvent(me);
         }
@@ -1954,7 +1980,7 @@ void MythMainWindow::customEvent(QEvent* Event)
     {
         MythUDP::EnableUDPListener(true);
     }
-    else if (Event->type() == MythEvent::MythEventMessage)
+    else if (Event->type() == MythEvent::kMythEventMessage)
     {
         auto * event = dynamic_cast<MythEvent *>(Event);
         if (event == nullptr)
@@ -2040,7 +2066,7 @@ void MythMainWindow::customEvent(QEvent* Event)
             gCoreContext->AllowShutdown();
         }
     }
-    else if (Event->type() == MythEvent::MythUserMessage)
+    else if (Event->type() == MythEvent::kMythUserMessage)
     {
         if (auto * event = dynamic_cast<MythEvent *>(Event); event != nullptr)
             if (const QString& message = event->Message(); !message.isEmpty())
@@ -2098,7 +2124,8 @@ void MythMainWindow::HideMouseTimeout()
 */
 void MythMainWindow::DisableIdleTimer(bool DisableIdle)
 {
-    if ((m_priv->m_disableIdle = DisableIdle))
+    m_priv->m_disableIdle = DisableIdle;
+    if (m_priv->m_disableIdle)
         m_idleTimer.stop();
     else
         m_idleTimer.start();

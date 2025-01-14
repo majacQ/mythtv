@@ -1,24 +1,30 @@
 #ifndef SYNAETHESIA
 #define SYNAETHESIA
 
+// C++
 #include <array>
-#include <visual.h>
-#include "polygon.h"
+
+// MythTV
+#include <libmyth/visual.h>
+
+// MythMusic
 #include "mainvisual.h"
-#include "config.h"
+#include "polygon.h"
 
 class QImage;
 
-#define LogSize 10
-#define Brightness 150
-#define NumSamples (1<<LogSize)
+static constexpr size_t  LogSize    {         10 };
+static constexpr size_t  NumSamples { 1<<LogSize };
+static constexpr uint8_t Brightness {        150 };
 
 using samp_dbl_array = std::array<double,NumSamples>;
 using samp_int_array = std::array<int,NumSamples>;
 
-#define Flame 0
-#define Wave 1
-#define Stars 2
+enum Mode : std::uint8_t {
+    Flame = 0,
+    Wave  = 1,
+    Stars = 2
+};
 
 class Synaesthesia : public VisualBase
 {
@@ -29,8 +35,7 @@ public:
     void resize(const QSize &size) override; // VisualBase
     bool process(VisualNode *node) override; // VisualBase
     bool draw(QPainter *p, const QColor &back) override; // VisualBase
-    void handleKeyPress(const QString &action) override // VisualBase
-        {(void) action;}
+    void handleKeyPress([[maybe_unused]] const QString &action) override {}; // VisualBase
 
 private:
     void setupPalette(void);

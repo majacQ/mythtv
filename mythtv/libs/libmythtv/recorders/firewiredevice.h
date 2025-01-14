@@ -11,21 +11,21 @@
 #include <vector>
 
 // Qt headers
-#include <QString>
 #include <QMutex>
+#include <QString>
 
 // MythTV headers
-#include "streamlisteners.h"
-#include "avcinfo.h"
+#include "libmythtv/mpeg/streamlisteners.h"
+#include "libmythtv/recorders/avcinfo.h"
 
 class TSPacket;
 
-class FirewireDevice
+class MTV_PUBLIC FirewireDevice
 {
   public:
 
     // Public enums
-    enum PowerState
+    enum PowerState : std::uint8_t
     {
         kAVCPowerOn,
         kAVCPowerOff,
@@ -34,7 +34,7 @@ class FirewireDevice
     };
 
     // AVC commands
-    enum IEEE1394Command
+    enum IEEE1394Command : std::uint8_t
     {
         kAVCControlCommand         = 0x00,
         kAVCStatusInquiryCommand   = 0x01,
@@ -54,7 +54,7 @@ class FirewireDevice
     };
 
     // AVC unit addresses
-    enum IEEE1394UnitAddress
+    enum IEEE1394UnitAddress : std::uint8_t
     {
         kAVCSubunitId0                = 0x00,
         kAVCSubunitId1                = 0x01,
@@ -82,7 +82,7 @@ class FirewireDevice
     };
 
     // AVC opcode
-    enum IEEE1394Opcode
+    enum IEEE1394Opcode : std::uint8_t
     {
         // Unit
         kAVCUnitPlugInfoOpcode               = 0x02,
@@ -117,14 +117,14 @@ class FirewireDevice
     };
 
     // AVC param 0
-    enum IEEE1394UnitPowerParam0
+    enum IEEE1394UnitPowerParam0 : std::uint8_t
     {
         kAVCPowerStateOn           = 0x70,
         kAVCPowerStateOff          = 0x60,
         kAVCPowerStateQuery        = 0x7f,
     };
 
-    enum IEEE1394PanelPassThroughParam0
+    enum IEEE1394PanelPassThroughParam0 : std::uint8_t
     {
         kAVCPanelKeySelect          = 0x00,
         kAVCPanelKeyUp              = 0x01,

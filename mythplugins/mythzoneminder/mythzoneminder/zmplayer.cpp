@@ -12,11 +12,10 @@
  *
  * ============================================================ */
 
-// C
-#include <cstdlib>
-
 // C++
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 
 // Qt
@@ -24,11 +23,11 @@
 #include <QTimer>
 
 // MythTV
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythuihelper.h>
-#include <mythmainwindow.h>
-#include <mythdate.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuihelper.h>
 
 // zoneminder
 #include "zmclient.h"
@@ -184,7 +183,7 @@ bool ZMPlayer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "PAUSE")
@@ -252,7 +251,9 @@ bool ZMPlayer::keyPressEvent(QKeyEvent *event)
             }
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -296,8 +297,7 @@ void ZMPlayer::deletePressed()
             zm->deleteEvent(event->eventID());
 
         m_eventList->erase(m_eventList->begin() + *m_currentEvent);
-        if (*m_currentEvent > (m_eventList->size() - 1))
-            *m_currentEvent = (m_eventList->size() - 1);
+        *m_currentEvent = std::min(*m_currentEvent, m_eventList->size() - 1);
 
         getEventInfo();
 
@@ -333,8 +333,7 @@ void ZMPlayer::prevPressed()
     if (*m_currentEvent == 0)
         return;
 
-    if (*m_currentEvent > m_eventList->size())
-        *m_currentEvent = m_eventList->size();
+    *m_currentEvent = std::min(*m_currentEvent, m_eventList->size());
 
     (*m_currentEvent)--;
 
@@ -389,13 +388,14 @@ void ZMPlayer::getFrame(void)
                                m_frameList->at(m_curFrame - 1)->delta;
 
             // FIXME: this is a bit of a hack to try to not swamp the cpu
-                if (delta < 0.1)
-                    delta = 0.1;
+                delta = std::max(delta, 0.1);
 
                 m_frameTimer->start((int) (1000 * delta));
             }
             else
+            {
                 m_frameTimer->start(10ms);
+            }
         }
     }
 }

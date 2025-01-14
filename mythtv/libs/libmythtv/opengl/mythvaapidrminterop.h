@@ -17,9 +17,10 @@ class MythVAAPIInteropDRM : public MythVAAPIInterop, public MythEGLDMABUF
   public:
     MythVAAPIInteropDRM(MythPlayerUI* Player, MythRenderOpenGL* Context, InteropType Type);
    ~MythVAAPIInteropDRM() override;
-    vector<MythVideoTextureOpenGL*> Acquire(MythRenderOpenGL* Context,
-                                            MythVideoColourSpace* ColourSpace,
-                                            MythVideoFrame* Frame, FrameScanType Scan) override;
+    std::vector<MythVideoTextureOpenGL*>
+    Acquire(MythRenderOpenGL* Context,
+            MythVideoColourSpace* ColourSpace,
+            MythVideoFrame* Frame, FrameScanType Scan) override;
     static bool    IsSupported(MythRenderOpenGL* Context);
     void           DeleteTextures() override;
 
@@ -31,21 +32,24 @@ class MythVAAPIInteropDRM : public MythVAAPIInterop, public MythEGLDMABUF
     static VideoFrameType VATypeToMythType(uint32_t Fourcc);
     void           CleanupReferenceFrames();
     void           RotateReferenceFrames(AVBufferRef* Buffer);
-    vector<MythVideoTextureOpenGL*> GetReferenceFrames();
+    std::vector<MythVideoTextureOpenGL*> GetReferenceFrames();
 
   private:
-    QFile                 m_drmFile         { };
-    QVector<AVBufferRef*> m_referenceFrames { };
+    QFile                 m_drmFile;
+    QVector<AVBufferRef*> m_referenceFrames;
 
-    vector<MythVideoTextureOpenGL*> AcquireVAAPI(VASurfaceID Id, MythRenderOpenGL* Context,
-                                                 MythVideoFrame* Frame);
-    vector<MythVideoTextureOpenGL*> AcquirePrime(VASurfaceID Id, MythRenderOpenGL* Context,
-                                                 MythVideoFrame* Frame);
+    std::vector<MythVideoTextureOpenGL*>
+    AcquireVAAPI(VASurfaceID Id, MythRenderOpenGL* Context,
+                 MythVideoFrame* Frame);
+    std::vector<MythVideoTextureOpenGL*>
+    AcquirePrime(VASurfaceID Id, MythRenderOpenGL* Context,
+                 MythVideoFrame* Frame);
+
     AVDRMFrameDescriptor*     GetDRMFrameDescriptor(VASurfaceID Id);
     void                      CleanupDRMPRIME();
     bool                      TestPrimeInterop();
     bool                      m_usePrime { false };
-    QHash<unsigned long long, AVDRMFrameDescriptor*> m_drmFrames { };
+    QHash<unsigned long long, AVDRMFrameDescriptor*> m_drmFrames;
 
 #ifdef USING_DRM_VIDEO
     bool HandleDRMVideo(MythVideoColourSpace* ColourSpace, VASurfaceID Id, MythVideoFrame* Frame);

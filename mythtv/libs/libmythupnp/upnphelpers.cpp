@@ -1,8 +1,8 @@
 
 #include "upnphelpers.h"
 
-#include "mythlogging.h"
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 
 namespace UPnPDateTime
 {
@@ -89,7 +89,7 @@ QString resDurationFormat(std::chrono::milliseconds msec)
     // S = Seconds (2 digits, 0 prefix)
     // FS = Fractional Seconds (milliseconds)
     QTime time = QTime::fromMSecsSinceStartOfDay(msec.count());
-    return time.toString("H:mm:ss:zzz");
+    return time.toString("H:mm:ss.zzz");
 }
 
 };
@@ -121,7 +121,9 @@ QString DLNAProfileName(const QString &mimeType, const QSize resolution,
             // Fallthough, no DLNA profiles
         }
         else if (audioCodec == "DTS")
+        {
             sProfileName = "MPEG_PS_SD_DTS";
+        }
         else
         {
             if (isNorthAmerica)

@@ -18,8 +18,9 @@
    Or, point your browser to http://www.gnu.org/copyleft/gpl.html
 
 */
-
-#include "mythchrono.h"
+#include <algorithm>
+#include <limits>
+#include <random>
 
 #include "Programs.h"
 #include "Ingredients.h"
@@ -30,24 +31,13 @@
 #include "Engine.h"
 #include "Logging.h"
 #include "freemheg.h"
-#include "mythmiscutil.h"
 
 #include <QDateTime>
 #include <QLocale>
 #include <QStringList>
+#include <QTimeZone>
 #include <QUrl>
 #include <QUrlQuery>
-#if HAVE_GETTIMEOFDAY == 0
-#include <sys/timeb.h>
-#endif
-#ifdef __FreeBSD__
-#include <sys/time.h>
-#else
-#include <ctime>
-#endif
-
-#include "config.h"
-#include "compat.h"
 
 /*
  * Resident programs are subroutines to provide various string and date functions
@@ -160,6 +150,39 @@ static void GetString(MHParameter *parm, MHOctetString &str, MHEngine *engine)
     str.Copy(un.m_strVal);
 }
 
+/** @brief Midnight on 17 November 1858, the epoch of the modified Julian day.
+
+This is Qt::LocalTime, to match GetCurrentDate's use of local time.
+
+ETSI ES 202 184 V2.4.1 (2016-06) does not mention timezones.
+§11.10.4.2 GetCurrentDate "Retrieves the current @e local date and time."
+Emphasis mine.
+
+Therefore, for consistency, I will assume all dates are in the local timezone.
+Thus, the meaning of FormatDate using the output of GetCurrentDate is equivalent
+to QDateTime::currentDateTime().toString(…) with a suitably converted format string.
+*/
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+static const QDateTime k_mJD_epoch = QDateTime(QDate(1858, 11, 17), QTime(0, 0), Qt::LocalTime);
+#else
+static const QDateTime k_mJD_epoch = QDateTime(QDate(1858, 11, 17), QTime(0, 0),
+                                               QTimeZone(QTimeZone::LocalTime));
+#endif
+
+// match types with Qt
+static inline QDateTime recoverDateTime(int64_t mJDN, int64_t seconds)
+{
+    QDateTime dt = k_mJD_epoch;
+    return dt.addDays(mJDN).addSecs(seconds);
+}
+
+static void GetCurrentDate(int64_t& mJDN, int& seconds)
+{
+    auto dt = QDateTime::currentDateTime();
+    mJDN    = k_mJD_epoch.daysTo(dt); // returns a qint64
+    seconds = dt.time().msecsSinceStartOfDay() / 1000;
+}
+
 void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, const MHSequence<MHParameter *> &args, MHEngine *engine)
 {
     if (! m_fAvailable)
@@ -178,13 +201,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
         {
             if (args.Size() == 2)
             {
-                // Adjust the time to local.  TODO: Check this.
-                auto epochSeconds = nowAsDuration<std::chrono::seconds>(true);
-                // Time as seconds since midnight.
-                int nTimeAsSecs = (epochSeconds % 24h).count();
-                // Modified Julian date as number of days since 17th November 1858.
-                // 1st Jan 1970 was date 40587.
-                int nModJulianDate = 40587 + epochSeconds / 24h;
+                int64_t mJDN = 0;
+                int nTimeAsSecs = 0;
+                GetCurrentDate(mJDN, nTimeAsSecs);
+                int nModJulianDate = std::clamp<int64_t>(mJDN, 0, std::numeric_limits<int>::max());
 
                 engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(nModJulianDate);
                 engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(nTimeAsSecs);
@@ -205,9 +225,8 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 GetString(args.GetAt(0), format, engine);
                 int date = GetInt(args.GetAt(1), engine); // As produced in GCD
                 int time = GetInt(args.GetAt(2), engine);
-                // Convert to a Unix date (secs since 1st Jan 1970) but adjusted for time zone.
-                time_t timet = (date - 40587) * (24 * 60 * 60) + time;
-                QDateTime dt = QDateTime::fromMSecsSinceEpoch(timet);
+
+                QDateTime dt = recoverDateTime(date, time);
                 MHOctetString result;
 
                 for (int i = 0; i < format.Size(); i++)
@@ -278,11 +297,17 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
             if (args.Size() == 2)
             {
                 int date = GetInt(args.GetAt(0), engine); // Date as produced in GCD
-                // Convert to a Unix date (secs since 1st Jan 1970) but adjusted for time zone.
-                time_t timet = (date - 40587) * (24 * 60 * 60);
-                struct tm *timeStr = gmtime(&timet);
-                // 0 => Sunday, 1 => Monday etc.
-                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(timeStr->tm_wday);
+                QDateTime dt = recoverDateTime(date, 0);
+                // ETSI ES 202 184 V2.4.1 (2016-06) §11.10.4.4 GetDayOfWeek
+                // specifies "0 represents Sunday, 1 Monday, etc."
+
+                int dayOfWeek = dt.date().dayOfWeek();
+                // Gregorian calendar, returns 0 if invalid, 1 = Monday to 7 = Sunday
+                if (dayOfWeek == 7)
+                {
+                    dayOfWeek = 0;
+                }
+                engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(dayOfWeek);
                 SetSuccessFlag(success, true, engine);
             }
             else
@@ -297,7 +322,13 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
             {
                 int nLimit = GetInt(args.GetAt(0), engine);
                 MHParameter *pResInt = args.GetAt(1);
-                int r = static_cast<int>(MythRandom() % (nLimit + 1));
+                // ETSI ES 202 184 V2.4.1 (2016-06) §11.10.5 Random number function
+                // specifies "The returned value is undefined if the num parameter < 1."
+                // so this is fine.
+                static std::random_device rd;
+                static std::mt19937 generator {rd()};
+                std::uniform_int_distribution<int> distrib {0, nLimit};
+                int r = distrib(generator);
                 engine->FindObject(
                     *(pResInt->GetReference()))->SetVariableValue(r);
                 SetSuccessFlag(success, true, engine);
@@ -369,25 +400,8 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 int nBeginExtract = GetInt(args.GetAt(1), engine);
                 int nEndExtract = GetInt(args.GetAt(2), engine);
 
-                if (nBeginExtract < 1)
-                {
-                    nBeginExtract = 1;
-                }
-
-                if (nBeginExtract > string.Size())
-                {
-                    nBeginExtract = string.Size();
-                }
-
-                if (nEndExtract < 1)
-                {
-                    nEndExtract = 1;
-                }
-
-                if (nEndExtract > string.Size())
-                {
-                    nEndExtract = string.Size();
-                }
+                nBeginExtract = std::clamp(nBeginExtract, 1, string.Size());
+                nEndExtract = std::clamp(nEndExtract, 1, string.Size());
 
                 MHParameter *pResString = args.GetAt(3);
                 // Returns beginExtract to endExtract inclusive.
@@ -411,10 +425,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 GetString(args.GetAt(0), string, engine);
                 int nStart = GetInt(args.GetAt(1), engine);
 
-                if (nStart < 1)
-                {
-                    nStart = 1;
-                }
+                nStart = std::max(nStart, 1);
 
                 GetString(args.GetAt(2), searchString, engine);
                 // Strings are indexed from one.
@@ -469,10 +480,7 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 GetString(args.GetAt(0), string, engine);
                 int nStart = GetInt(args.GetAt(1), engine);
 
-                if (nStart < 1)
-                {
-                    nStart = 1;
-                }
+                nStart = std::max(nStart, 1);
 
                 GetString(args.GetAt(2), searchString, engine);
                 // Strings are indexed from one.
@@ -681,7 +689,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 // TODO Notify player
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
 
         else if (m_name.Equal("WAI"))   // WhoAmI
@@ -760,7 +771,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 // Nothing todo at present
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
 
         // InteractionChannelExtension
@@ -774,7 +788,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(ICstatus);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("RDa")) { // ReturnData
             if (args.Size() >= 3)
@@ -814,7 +831,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
 
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("SHF")) { // SetHybridFileSystem
             if (args.Size() == 2)
@@ -829,7 +849,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                     .arg(str, str2));
                 SetSuccessFlag(success, false, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("PST")) { // PersistentStorageInfo
             if (args.Size() == 1)
@@ -837,7 +860,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(0)->GetReference()))->SetVariableValue(true);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("SCk")) { // SetCookie
             if (args.Size() == 4)
@@ -853,7 +879,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 MHLOG(MHLogNotifications, QString("NOTE SetCookie id=%1 MJD=%2 value=%3 secure=%4")
                     .arg(id).arg(iExpiry).arg(val).arg(bSecure) );
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("GCk")) { // GetCookie
             MHERROR("GetCookie ResidentProgram is not implemented");
@@ -874,7 +903,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(-1);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("PFG")) { // PromptForGuidance
             if (args.Size() == 2)
@@ -887,7 +919,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(true);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
 
         }
         else if (m_name.Equal("GAP") || // GetAudioDescPref
@@ -897,7 +932,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(false);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
         else if (m_name.Equal("GPS")) { // GetPINSupport
             if (args.Size() == 1)
@@ -908,7 +946,10 @@ void MHResidentProgram::CallProgram(bool fIsFork, const MHObjectRef &success, co
                 engine->FindObject(*(args.GetAt(1)->GetReference()))->SetVariableValue(0);
                 SetSuccessFlag(success, true, engine);
             }
-            else SetSuccessFlag(success, false, engine);
+            else
+            {
+                SetSuccessFlag(success, false, engine);
+            }
         }
 
         // Undocumented functions

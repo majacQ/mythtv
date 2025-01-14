@@ -17,13 +17,14 @@ QObject::customEvent to receive event notifications for subscribed services.
 #endif
 #include <utility>
 
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "mythtypes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtypes.h"
+
 #include "bufferedsocketdevice.h"
 
 // default requested time for subscription (actual is dictated by server)
-#define SUBSCRIPTION_TIME 1800
+static constexpr uint16_t SUBSCRIPTION_TIME { 1800 };
 // maximum time to wait for responses to subscription requests (UPnP spec. 30s)
 static constexpr std::chrono::milliseconds MAX_WAIT { 30s };
 
@@ -33,7 +34,7 @@ class Subscription
 {
   public:
     Subscription(QUrl url, QString path)
-      : m_url(std::move(url)), m_path(std::move(path)), m_uuid(QString()) { }
+      : m_url(std::move(url)), m_path(std::move(path)) { }
     QUrl    m_url;
     QString m_path;
     QString m_uuid;
@@ -229,6 +230,7 @@ bool UPNPSubscription::ProcessRequest(HTTPRequest *pRequest)
 
     pRequest->m_nResponseStatus = 400;
     QDomDocument body;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString error;
     int errorCol = 0;
     int errorLine = 0;
@@ -239,6 +241,19 @@ bool UPNPSubscription::ProcessRequest(HTTPRequest *pRequest)
                 .arg(errorLine).arg(errorCol).arg(error));
         return true;
     }
+#else
+    auto parseResult =
+        body.setContent(payload,
+                        QDomDocument::ParseOption::UseNamespaceProcessing);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("Failed to parse event: Line: %1 Col: %2 Error: '%3'")
+                .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                .arg(parseResult.errorMessage));
+        return true;
+    }
+#endif
 
     LOG(VB_UPNP, LOG_DEBUG, LOC + "/n/n" + body.toString(4) + "/n/n");
 
@@ -360,8 +375,11 @@ std::chrono::seconds UPNPSubscription::SendSubscribeRequest(const QString &callb
             .arg(callback, usn);
         data << "NT: upnp:event\r\n";
     }
-    else // renewal
+    else
+    {
+        // renewal
         data << QString("SID: uuid:%1\r\n").arg(uuidin);
+    }
 
     data << QString("TIMEOUT: Second-%1\r\n").arg(SUBSCRIPTION_TIME);
     data << "\r\n";

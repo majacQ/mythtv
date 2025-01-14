@@ -22,36 +22,27 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
+#include "eldutils.h"
 
+#include <algorithm>
 #include <cinttypes>
+#include <limits> // workaround QTBUG-90395
 #include <sys/types.h>
 
 #include <QString>
+#include <QtEndian>
 
-#include "mythconfig.h"
-#include "eldutils.h"
-#include "bswap.h"
 #include "audiooutputbase.h"
 
 #define LOC QString("ELDUTILS: ")
 
-#if HAVE_BIGENDIAN
-#define LE_SHORT(v)      bswap_16(*((uint16_t *)v))
-#define LE_INT(v)        bswap_32(*((uint32_t *)v))
-#define LE_INT64(v)      bswap_64(*((uint64_t *)v))
-#else
-#define LE_SHORT(v)      (*((uint16_t *)(v)))
-#define LE_INT(v)        (*((uint32_t *)(v)))
-#define LE_INT64(v)      (*((uint64_t *)(v)))
-#endif
-
-enum eld_versions
+enum eld_versions : std::uint8_t
 {
     ELD_VER_CEA_861D    = 2,
     ELD_VER_PARTIAL     = 31,
 };
 
-enum cea_edid_versions
+enum cea_edid_versions : std::uint8_t
 {
     CEA_EDID_VER_NONE      = 0,
     CEA_EDID_VER_CEA861    = 1,
@@ -81,7 +72,7 @@ static const std::array<const QString,4> eld_connection_type_names {
     "3-reserved"
 };
 
-enum cea_audio_coding_xtypes
+enum cea_audio_coding_xtypes : std::uint8_t
 {
     XTYPE_HE_REF_CT      = 0,
     XTYPE_HE_AAC         = 1,
@@ -120,19 +111,21 @@ static const std::array<const QString,18> audiotype_names {
 /*
  * SF2:SF1:SF0 index => sampling frequency
  */
-#define SNDRV_PCM_RATE_5512             (1<<0)          /* 5512Hz */
-#define SNDRV_PCM_RATE_8000             (1<<1)          /* 8000Hz */
-#define SNDRV_PCM_RATE_11025            (1<<2)          /* 11025Hz */
-#define SNDRV_PCM_RATE_16000            (1<<3)          /* 16000Hz */
-#define SNDRV_PCM_RATE_22050            (1<<4)          /* 22050Hz */
-#define SNDRV_PCM_RATE_32000            (1<<5)          /* 32000Hz */
-#define SNDRV_PCM_RATE_44100            (1<<6)          /* 44100Hz */
-#define SNDRV_PCM_RATE_48000            (1<<7)          /* 48000Hz */
-#define SNDRV_PCM_RATE_64000            (1<<8)          /* 64000Hz */
-#define SNDRV_PCM_RATE_88200            (1<<9)          /* 88200Hz */
-#define SNDRV_PCM_RATE_96000            (1<<10)         /* 96000Hz */
-#define SNDRV_PCM_RATE_176400           (1<<11)         /* 176400Hz */
-#define SNDRV_PCM_RATE_192000           (1<<12)         /* 192000Hz */
+enum : std::uint16_t {
+    SNDRV_PCM_RATE_5512   = (1<<0),          /* 5512Hz */
+    SNDRV_PCM_RATE_8000   = (1<<1),          /* 8000Hz */
+    SNDRV_PCM_RATE_11025  = (1<<2),          /* 11025Hz */
+    SNDRV_PCM_RATE_16000  = (1<<3),          /* 16000Hz */
+    SNDRV_PCM_RATE_22050  = (1<<4),          /* 22050Hz */
+    SNDRV_PCM_RATE_32000  = (1<<5),          /* 32000Hz */
+    SNDRV_PCM_RATE_44100  = (1<<6),          /* 44100Hz */
+    SNDRV_PCM_RATE_48000  = (1<<7),          /* 48000Hz */
+    SNDRV_PCM_RATE_64000  = (1<<8),          /* 64000Hz */
+    SNDRV_PCM_RATE_88200  = (1<<9),          /* 88200Hz */
+    SNDRV_PCM_RATE_96000  = (1<<10),         /* 96000Hz */
+    SNDRV_PCM_RATE_176400 = (1<<11),         /* 176400Hz */
+    SNDRV_PCM_RATE_192000 = (1<<12),         /* 192000Hz */
+};
 
 static const std::array<const int,8> cea_sampling_frequencies {
     0,                       /* 0: Refer to Stream Header */
@@ -145,20 +138,14 @@ static const std::array<const int,8> cea_sampling_frequencies {
     SNDRV_PCM_RATE_192000,   /* 7: 192000Hz */
 };
 
-#define GRAB_BITS(buf, byte, lowbit, bits)            \
-(                                                    \
-    ((buf)[byte] >> (lowbit)) & ((1 << (bits)) - 1)  \
-)
+static inline int
+GRAB_BITS(const char* buf, size_t byte, uint8_t lowbit, uint8_t bits)
+    { return (buf[byte] >> lowbit) & ((1 << bits) - 1); };
 
 eld::eld(const char *buf, int size)
 {
     m_e.formats = 0LL;
     update_eld(buf, size);
-}
-
-eld::eld(const eld &rhs)
-{
-    m_e = rhs.m_e;
 }
 
 eld::eld()
@@ -268,11 +255,11 @@ int eld::update_eld(const char *buf, int size)
     m_e.aud_synch_delay = GRAB_BITS(buf, 6, 0, 8) * 2;
     m_e.spk_alloc       = GRAB_BITS(buf, 7, 0, 7);
 
-    m_e.port_id         = LE_INT64(buf + 8);
+    m_e.port_id         = qFromLittleEndian<quint64>(buf + 8);
 
     /* not specified, but the spec's tendency is little endian */
-    m_e.manufacture_id  = LE_SHORT(buf + 16);
-    m_e.product_id      = LE_SHORT(buf + 18);
+    m_e.manufacture_id  = qFromLittleEndian<quint16>(buf + 16);
+    m_e.product_id      = qFromLittleEndian<quint16>(buf + 18);
 
     if (ELD_FIXED_BYTES + mnl > size)
     {
@@ -292,7 +279,7 @@ int eld::update_eld(const char *buf, int size)
             VBAUDIO(QString("out of range SAD %1").arg(i));
             goto out_fail;
         }
-        update_sad(i, buf + ELD_FIXED_BYTES + mnl + 3 * i);
+        update_sad(i, buf + ELD_FIXED_BYTES + mnl + (3 * static_cast<ptrdiff_t>(i)));
     }
 
     /*
@@ -467,8 +454,7 @@ int eld::maxLPCMChannels()
         struct cea_sad *a = m_e.sad + i;
         if (a->format == TYPE_LPCM)
         {
-            if (a->channels > channels)
-                channels = a->channels;
+            channels = std::max(a->channels, channels);
         }
     }
     return channels;
@@ -480,8 +466,7 @@ int eld::maxChannels()
     for (int i = 0; i < m_e.sad_count; i++)
     {
         struct cea_sad *a = m_e.sad + i;
-        if (a->channels > channels)
-            channels = a->channels;
+        channels = std::max(a->channels, channels);
     }
     return channels;
 }

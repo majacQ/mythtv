@@ -1,14 +1,15 @@
 // Mythtv
-#include "mythmainwindow.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/opengl/mythrenderopengl.h"
+
+#include "avformatdecoder.h"
 #include "mythcodecid.h"
 #include "mythframe.h"
-#include "avformatdecoder.h"
-#include "opengl/mythrenderopengl.h"
-#include "videobuffers.h"
-#include "mythvtbinterop.h"
 #include "mythplayerui.h"
 #include "mythvtbcontext.h"
+#include "opengl/mythvtbinterop.h"
+#include "videobuffers.h"
 
 // FFmpeg
 extern "C" {
@@ -73,7 +74,7 @@ int MythVTBContext::HwDecoderInit(AVCodecContext *Context)
 }
 
 MythCodecID MythVTBContext::GetSupportedCodec(AVCodecContext **Context,
-                                              AVCodec ** Codec,
+                                              const AVCodec ** Codec,
                                               const QString &Decoder,
                                               uint StreamType)
 {
@@ -107,7 +108,7 @@ MythCodecID MythVTBContext::GetSupportedCodec(AVCodecContext **Context,
     if (mythprofile == MythCodecContext::NoProfile)
         return failure;
 
-    QString codec   = ff_codec_id_string((*Context)->codec_id);
+    QString codec   = avcodec_get_name((*Context)->codec_id);
     QString profile = avcodec_profile_name((*Context)->codec_id, (*Context)->profile);
     QString pixfmt  = av_get_pix_fmt_name((*Context)->pix_fmt);
 
@@ -200,11 +201,7 @@ enum AVPixelFormat MythVTBContext::GetFormat(struct AVCodecContext* Context, con
 
 const VTBProfiles& MythVTBContext::GetProfiles(void)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static VTBProfiles s_profiles;
 
@@ -238,11 +235,7 @@ const VTBProfiles& MythVTBContext::GetProfiles(void)
 
 bool MythVTBContext::HaveVTB(bool Reinit /*=false*/)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     QMutexLocker locker(&lock);
     static bool s_checked = false;
     static bool s_available = false;
@@ -328,7 +321,6 @@ void MythVTBContext::InitFramesContext(AVCodecContext *Context)
     if (codec_is_vtb(m_codecID) && m_parent->GetPlayer())
         m_parent->GetPlayer()->DiscardVideoFrames(true, true);
 
-    av_videotoolbox_default_free(Context);
     av_buffer_unref(&m_framesContext);
 
     AVBufferRef* framesref = av_hwframe_ctx_alloc(Context->hw_device_ctx);

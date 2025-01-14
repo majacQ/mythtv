@@ -6,12 +6,14 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef SOAPSERIALIZER_H
 #define SOAPSERIALIZER_H
+
+#include <utility>
 
 #include "upnpexp.h"
 #include "xmlSerializer.h"
@@ -29,10 +31,11 @@ class UPNP_PUBLIC SoapSerializer : public XmlSerializer
     public:
 
         SoapSerializer( QIODevice     *pDevice, 
-                        const QString &sNamespace, 
-                        const QString &sRequestName ) : XmlSerializer( pDevice, sRequestName ) 
+                        QString sNamespace,
+                        const QString &sRequestName )
+          : XmlSerializer( pDevice, sRequestName ),
+            m_sNamespace(std::move(sNamespace))
         {
-            m_sNamespace = sNamespace;
         }
 
         ~SoapSerializer() override = default;

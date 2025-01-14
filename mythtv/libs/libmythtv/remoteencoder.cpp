@@ -2,14 +2,15 @@
 
 #include <QStringList>
 
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/programinfo.h"
+
+#include "recorders/signalmonitor.h"
 #include "remoteencoder.h"
-#include "programinfo.h"
-#include "mythdate.h"
-#include "mythcorecontext.h"
-#include "signalmonitor.h"
-#include "mythdb.h"
-#include "mythsocket.h"
-#include "mythlogging.h"
 
 #define LOC QString("RemoteEncoder(%1): ").arg(m_recordernum)
 
@@ -494,7 +495,7 @@ std::chrono::milliseconds RemoteEncoder::SetSignalMonitoringRate(std::chrono::mi
     QStringList strlist( QString("QUERY_RECORDER %1").arg(m_recordernum) );
     strlist << "SET_SIGNAL_MONITORING_RATE";
     strlist << QString::number(rate.count());
-    strlist << QString::number((int)notifyFrontend);
+    strlist << QString::number(notifyFrontend);
 
     if (SendReceiveStringList(strlist, 1))
         return std::chrono::milliseconds(strlist[0].toInt());

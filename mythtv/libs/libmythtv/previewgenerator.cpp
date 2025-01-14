@@ -19,22 +19,23 @@
 #include <QUrl>
 
 // MythTV headers
-#include "mythconfig.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/storagegroup.h"
+
 #include "io/mythmediabuffer.h"
 #include "mythpreviewplayer.h"
+#include "playercontext.h"
 #include "previewgenerator.h"
 #include "tv_rec.h"
-#include "mythsocket.h"
-#include "remotefile.h"
-#include "storagegroup.h"
-#include "mythdate.h"
-#include "playercontext.h"
-#include "mythdirs.h"
-#include "remoteutil.h"
-#include "mythsystemlegacy.h"
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "mythmiscutil.h"
 
 #define LOC QString("Preview: ")
 
@@ -410,7 +411,7 @@ bool PreviewGenerator::RemotePreviewRun(void)
     // wait up to 35 seconds for the preview to complete
     // The backend waits 30s for creation
     if (!m_gotReply)
-        m_previewWaitCondition.wait(&m_previewLock, 35 * 1000);
+        m_previewWaitCondition.wait(&m_previewLock, 35UL * 1000);
 
     if (!m_gotReply)
         LOG(VB_GENERAL, LOG_NOTICE, LOC + "RemotePreviewRun() -- no reply..");
@@ -422,7 +423,7 @@ bool PreviewGenerator::RemotePreviewRun(void)
 
 bool PreviewGenerator::event(QEvent *e)
 {
-    if (e->type() != MythEvent::MythEventMessage)
+    if (e->type() != MythEvent::kMythEventMessage)
         return QObject::event(e);
 
     auto *me = dynamic_cast<MythEvent*>(e);
@@ -634,7 +635,6 @@ bool PreviewGenerator::LocalPreviewRun(void)
 {
     m_programInfo.MarkAsInUse(true, kPreviewGeneratorInUseID);
     m_programInfo.SetIgnoreProgStart(true);
-    m_programInfo.SetAllowLastPlayPos(false);
 
     float aspect = 0;
     std::chrono::seconds captime = m_captureTime;
@@ -646,7 +646,7 @@ bool PreviewGenerator::LocalPreviewRun(void)
         LOG(VB_GENERAL, LOG_INFO, "Preview from time spec");
     else
     {
-        capframe = m_programInfo.QueryBookmark();
+        capframe = m_programInfo.QueryStartMark();
         if (capframe > 0)
         {
             LOG(VB_GENERAL, LOG_INFO,
@@ -811,7 +811,7 @@ char *PreviewGenerator::GetScreenGrab(
     if (filename.startsWith("/"))
     {
         QFileInfo info(filename);
-        bool invalid = (!info.exists() || !info.isReadable() || (info.isFile() && (info.size() < 8*1024)));
+        bool invalid = (!info.exists() || !info.isReadable() || (info.isFile() && (info.size() < 8LL*1024)));
         if (invalid)
         {
             LOG(VB_GENERAL, LOG_ERR, LOC + QString("Previewer file '%1' is not valid.")

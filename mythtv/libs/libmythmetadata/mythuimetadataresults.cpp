@@ -1,14 +1,14 @@
 
 #include "mythuimetadataresults.h"
 
-#include "mythuiimage.h"
-#include "mythuitext.h"
-#include "mythuistatetype.h"
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-#include "mythdate.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
 
 #include "metadatadownload.h"
 #include "metadataimagedownload.h"
@@ -18,9 +18,9 @@ MetadataResultsDialog::MetadataResultsDialog(
     const MetadataLookupList &results) :
 
     MythScreenType(lparent, "metadataresultspopup"),
-    m_results(results)
+    m_results(results),
+    m_imageDownload(new MetadataImageDownload(this))
 {
-    m_imageDownload = new MetadataImageDownload(this);
 }
 
 MetadataResultsDialog::~MetadataResultsDialog()

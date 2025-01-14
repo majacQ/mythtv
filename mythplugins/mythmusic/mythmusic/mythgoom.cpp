@@ -1,18 +1,23 @@
 #include "mythgoom.h"
 
+// C++
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 
+// Qt
 #include <QCoreApplication>
 #include <QPainter>
 
-#include <compat.h>
-#include <mythcontext.h>
-#include <mythlogging.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/compat.h>
+#include <libmythbase/mythlogging.h>
 
-#include "goom_tools.h"
-#include "goom_core.h"
+// Goom
+#include "libmythtv/visualisations/goom/goom_tools.h"
+#include "libmythtv/visualisations/goom/goom_core.h"
 
 Goom::Goom()
 {
@@ -26,13 +31,11 @@ Goom::Goom()
     // we allow 1, 2 or 4 for the scale since goom likes its resolution to be a multiple of 2
     if (m_scaleh == 3 || m_scaleh > 4)
         m_scaleh = 4;
-    if (m_scaleh < 1)
-        m_scaleh = 1;
+    m_scaleh = std::max(m_scaleh, 1);
 
     if (m_scalew == 3 || m_scalew > 4)
         m_scalew = 4;
-    if (m_scalew < 1)
-        m_scalew = 1;
+    m_scalew = std::max(m_scalew, 1);
 }
 
 Goom::~Goom()
@@ -122,10 +125,9 @@ static class GoomFactory : public VisFactory
         return 1;
     }
 
-    VisualBase *create(MainVisual *parent, const QString &pluginName) const override // VisFactory
+    VisualBase *create([[maybe_unused]] MainVisual *parent,
+                       [[maybe_unused]] const QString &pluginName) const override // VisFactory
     {
-        (void)parent;
-        (void)pluginName;
         return new Goom();
     }
 }GoomFactory;

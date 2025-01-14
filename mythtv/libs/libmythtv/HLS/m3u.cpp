@@ -1,8 +1,8 @@
 #include <QStringList>
 #include <QUrl>
 
+#include "libmythbase/mythlogging.h"
 #include "HLS/m3u.h"
-#include "mythlogging.h"
 
 namespace M3U
 {
@@ -28,10 +28,10 @@ namespace M3U
     {
         int p = line.indexOf(QLatin1String(":"));
         if (p < 0)
-            return QString();
+            return {};
 
         QStringList list = line.mid(p + 1).split(',');
-        for (const auto & it : qAsConst(list))
+        for (const auto & it : std::as_const(list))
         {
             QString arg = it.trimmed();
             if (arg.startsWith(attr))
@@ -42,7 +42,7 @@ namespace M3U
                 return arg.mid(pos+1);
             }
         }
-        return QString();
+        return {};
     }
 
     /**
@@ -54,8 +54,10 @@ namespace M3U
         int p = line.indexOf(QLatin1String(":"));
         if (p < 0)
             return false;
-        int i = p;
-        while (++i < line.size() && line[i].isNumber());
+        int i = p + 1;
+        for ( ; i < line.size(); i++)
+            if (!line[i].isNumber())
+                break;
         if (i == p + 1)
             return false;
         target = line.mid(p + 1, i - p - 1).toInt();
@@ -71,8 +73,10 @@ namespace M3U
         int p = line.indexOf(QLatin1String(":"));
         if (p < 0)
             return false;
-        int i = p;
-        while (++i < line.size() && line[i].isNumber());
+        int i = p + 1;
+        for ( ; i < line.size(); i++)
+            if (!line[i].isNumber())
+                break;
         if (i == p + 1)
             return false;
         target = line.mid(p + 1, i - p - 1).toInt();
@@ -101,10 +105,10 @@ namespace M3U
             return false;
         }
 
-        if (version <= 0 || version > 3)
+        if (version < 1 || version > 7)
         {
             LOG(VB_RECORD, LOG_ERR, loc +
-                QString("#EXT-X-VERSION is %1, but we only understand 0 through 3")
+                QString("#EXT-X-VERSION is %1, but we only understand 1 to 7")
                 .arg(version));
             return false;
         }
@@ -126,12 +130,15 @@ namespace M3U
          */
         QString attr;
 
+        /* The PROGRAM-ID attribute of the EXT-X-STREAM-INF and the EXT-X-I-
+         * FRAME-STREAM-INF tags was removed in protocol version 6.
+         */
         attr = ParseAttributes(line, "PROGRAM-ID");
         if (attr.isNull())
         {
             LOG(VB_RECORD, LOG_INFO, loc +
-                "#EXT-X-STREAM-INF: expected PROGRAM-ID=<value>, using -1");
-            id = -1;
+                "#EXT-X-STREAM-INF: No PROGRAM-ID=<value>, using 1");
+            id = 1;
         }
         else
         {
@@ -213,7 +220,7 @@ namespace M3U
             return false;
         }
 
-        QString val = list[0];
+        const QString& val = list[0];
 
         if (version < 3)
         {
@@ -269,13 +276,15 @@ namespace M3U
         if (!ParseDecimalValue(line, sequence_num))
         {
             LOG(VB_RECORD, LOG_ERR, loc + "expected #EXT-X-MEDIA-SEQUENCE:<s>");
+            sequence_num = 0;
             return false;
         }
 
         return true;
     }
 
-    bool ParseKey(int version, const QString& line, bool& aesmsg,
+    bool ParseKey(int version, const QString& line,
+                  [[maybe_unused]] bool& aesmsg,
                   const QString& loc, QString &path, QString &iv)
     {
         /*
@@ -284,10 +293,6 @@ namespace M3U
          * The METHOD attribute specifies the encryption method.  Two encryption
          * methods are defined: NONE and AES-128.
          */
-
-#ifndef USING_LIBCRYPTO
-        Q_UNUSED(aesmsg);
-#endif
 
         path.clear();
         iv.clear();
@@ -340,6 +345,11 @@ namespace M3U
             path = DecodedURI(uri.remove(QChar(QLatin1Char('"'))));
             iv = ParseAttributes(line, "IV");
         }
+        else if (attr.startsWith(QLatin1String("SAMPLE-AES")))
+        {
+            LOG(VB_RECORD, LOG_ERR, loc + "encryption SAMPLE-AES not supported.");
+            return false;
+        }
 #endif
         else
         {
@@ -385,6 +395,8 @@ namespace M3U
          * #EXT-X-ALLOW-CACHE:<YES|NO>
          */
 
+        /* The EXT-X-ALLOW-CACHE tag was removed in protocol version 7.
+         */
         int pos = line.indexOf(QLatin1String(":"));
         if (pos < 0)
         {
@@ -404,6 +416,30 @@ namespace M3U
         return true;
     }
 
+    bool ParseDiscontinuitySequence(const QString& line, const QString& loc, int &discontinuity_sequence)
+    {
+        /*
+         * The EXT-X-DISCONTINUITY-SEQUENCE tag allows synchronization between
+         * different Renditions of the same Variant Stream or different Variant
+         * Streams that have EXT-X-DISCONTINUITY tags in their Media Playlists.
+         *
+         * Its format is:
+         *
+         * #EXT-X-DISCONTINUITY-SEQUENCE:<number>
+         *
+         * where number is a decimal-integer
+         */
+        if (!ParseDecimalValue(line, discontinuity_sequence))
+        {
+            LOG(VB_RECORD, LOG_ERR, loc + "expected #EXT-X-DISCONTINUITY-SEQUENCE:<s>");
+            return false;
+        }
+
+        LOG(VB_RECORD, LOG_DEBUG, loc + QString("#EXT-X-DISCONTINUITY-SEQUENCE %1")
+            .arg(line));
+        return true;
+    }
+
     bool ParseDiscontinuity(const QString& line, const QString& loc)
     {
         /* Not handled, never seen so far */
@@ -420,8 +456,27 @@ namespace M3U
          * file; it MUST NOT occur more than once.  Its format is:
          */
         is_vod = true;
-        LOG(VB_RECORD, LOG_INFO, loc + "video on demand (vod) mode");
+        LOG(VB_RECORD, LOG_INFO, loc + " video on demand (vod) mode");
         return true;
     }
 
-} // Namespace M3U
+    bool ParseIndependentSegments(const QString& line, const QString& loc)
+    {
+        /* #EXT-X-INDEPENDENT-SEGMENTS
+         *
+         * The EXT-X-INDEPENDENT-SEGMENTS tag indicates that all media samples
+         * in a Media Segment can be decoded without information from other
+         * segments.  It applies to every Media Segment in the Playlist.
+         *
+         * Its format is:
+         *
+         * #EXT-X-INDEPENDENT-SEGMENTS
+         */
+
+        // Not handled yet
+        LOG(VB_RECORD, LOG_DEBUG, loc + QString("#EXT-X-INDEPENDENT-SEGMENTS %1")
+            .arg(line));
+        return true;
+    }
+
+} // namespace M3U

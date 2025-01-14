@@ -124,7 +124,10 @@ class MTV_PUBLIC ChannelUtil
                                  QString format  = "Default",
                                  const QString& xmltvid = QString(),
                                  const QString& default_authority = QString(),
-                                 uint service_type = 0);
+                                 uint service_type = 0,
+                                 int  recpriority = 0,
+                                 int  tmOffset = 0,
+                                 int commMethod = -1);
 
     static bool    UpdateChannel(uint db_mplexid,
                                  uint source_id,
@@ -142,7 +145,12 @@ class MTV_PUBLIC ChannelUtil
                                  QString format  = QString(),
                                  const QString& xmltvid = QString(),
                                  const QString& default_authority = QString(),
-                                 uint service_type = 0);
+                                 uint service_type = 0,
+                                 // note INT_MIN is invalid for these fields
+                                 // to indicate that they are not to be updated
+                                 int  recpriority = INT_MIN,
+                                 int  tmOffset = INT_MIN,
+                                 int commMethod = INT_MIN);
 
     static bool    CreateIPTVTuningData(
         uint channel_id, const IPTVTuningData &tuning)
@@ -195,14 +203,14 @@ class MTV_PUBLIC ChannelUtil
     // Are there any other possibly useful sort orders?
     // e.g. Sorting by sourceid would probably be better done by two distinct
     // calls to LoadChannels specifying the sourceid
-    enum OrderBy
+    enum OrderBy : std::uint8_t
     {
         kChanOrderByChanNum,
         kChanOrderByName,
         kChanOrderByLiveTV,
     };
 
-    enum GroupBy
+    enum GroupBy : std::uint8_t
     {
         kChanGroupByCallsign,
         kChanGroupByCallsignAndChannum,
@@ -280,6 +288,9 @@ class MTV_PUBLIC ChannelUtil
     static int     GetChannelValueInt(const QString &channel_field,
                                       uint           sourceid,
                                       const QString &channum);
+
+    static QString GetChannelNumber(uint           sourceid,
+                                    const QString &channel_name);
 
     static bool    IsOnSameMultiplex(uint srcid,
                                      const QString &new_channum,

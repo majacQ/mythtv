@@ -4,20 +4,21 @@
 #include <QRunnable>
 #include <utility>
 
-#include "dbaccess.h"  // for FileAssociations
-#include "mthreadpool.h"
-#include "mythdate.h"
-#include "mythmediamonitor.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythdate.h"
+#include "libmythui/mediamonitor.h"
 
+#include "dbaccess.h"  // for FileAssociations
 
 #define LOC QString("ImageManager: ")
 #define DBLOC QString("ImageDb(%1): ").arg(m_table)
 
 // Must be empty as it's prepended to path
-#define STORAGE_GROUP_MOUNT  ""
+static constexpr const char* STORAGE_GROUP_MOUNT { "" };
 
-#define DB_TABLE "gallery_files"
+static constexpr const char* DB_TABLE { "gallery_files" };
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define RESULT_ERR(ERR, MESG) \
 {   LOG(VB_GENERAL, LOG_ERR, LOC + (MESG)); \
     return QStringList("ERROR") << (ERR); }
@@ -25,8 +26,9 @@
 #define RESULT_OK(MESG) \
 {   LOG(VB_FILE, LOG_DEBUG, LOC + (MESG)); \
     return QStringList("OK"); }
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
-#define IMPORTDIR "Import"
+static constexpr const char* IMPORTDIR { "Import" };
 
 
 //! A device containing images (ie. USB stick, CD, storage group etc)
@@ -35,7 +37,7 @@ class Device
 public:
     Device(QString name, QString mount,
            MythMediaDevice *media = nullptr, QTemporaryDir *import = nullptr)
-        : m_present(true), m_name(std::move(name)), m_mount(std::move(mount)),
+        : m_name(std::move(name)), m_mount(std::move(mount)),
           m_media(media), m_dir(import)
     {
         // Path relative to TEMP storage group
@@ -73,7 +75,9 @@ public:
                 MediaMonitor::GetMediaMonitor()->EjectMedia(m_media->getDevicePath());
             }
             else
+            {
                 LOG(VB_MEDIA, LOG_DEBUG, LOC + QString("Unlocked '%1'").arg(m_name));
+            }
 
             MediaMonitor::GetMediaMonitor()->Unlock(m_media);
             m_media = nullptr;
@@ -95,7 +99,8 @@ public:
     void RemoveThumbs(void) const
     {
         // Remove thumbnails
-        QString dir = QString("%1/" TEMP_SUBDIR "/%2").arg(GetConfDir(), m_thumbs);
+        QString dirFmt = QString("%1/") % TEMP_SUBDIR % "/%2";
+        QString dir = dirFmt.arg(GetConfDir(), m_thumbs);
         LOG(VB_FILE, LOG_INFO, LOC + QString("Removing thumbnails in %1").arg(dir));
         RemoveDirContents(dir);
         QDir::root().rmpath(dir);
@@ -107,12 +112,12 @@ public:
     void setPresent(MythMediaDevice *media)  { m_present = true; m_media = media; }
 
     //! True when gallery UI is running & device is useable. Always true for imports
-    bool             m_present;
+    bool             m_present { true };
     QString          m_name;   //!< Device model/volume/id
     QString          m_mount;  //!< Mountpoint
     QString          m_thumbs; //!< Dir sub-path of device thumbnails
-    MythMediaDevice *m_media;  //!< Set for MediaMonitor devices only
-    QTemporaryDir   *m_dir;    //!< Dir path of images: import devices only
+    MythMediaDevice *m_media { nullptr }; //!< Set for MediaMonitor devices only
+    QTemporaryDir   *m_dir   { nullptr }; //!< Dir path of images: import devices only
 };
 
 
@@ -169,8 +174,12 @@ int DeviceManager::OpenDevice(const QString &name, const QString &mount,
         id = m_devices.isEmpty() ? 0 : m_devices.lastKey() + 1;
         m_devices.insert(id, new Device(name, mount, media, dir));
     }
-    else if (m_devices.value(id))
-        m_devices.value(id)->setPresent(media);
+    else
+    {
+        Device *dev = m_devices.value(id);
+        if (dev)
+            dev->setPresent(media);
+    }
 
     LOG(VB_GENERAL, LOG_INFO, LOC +
         QString("%1 device %2 mounted at '%3' [Id %4]")
@@ -193,14 +202,14 @@ QStringList DeviceManager::CloseDevices(int devId, const QString &action)
     if (action == "DEVICE CLOSE ALL")
     {
         // Close all devices but retain their thumbnails
-        for (auto *dev : qAsConst(m_devices))
+        for (auto *dev : std::as_const(m_devices))
             if (dev)
                 dev->Close();
     }
     else if (action == "DEVICE CLEAR ALL")
     {
         // Remove all thumbnails but retain devices
-        for (const auto *dev : qAsConst(m_devices)) {
+        for (const auto *dev : std::as_const(m_devices)) {
             if (dev)
             {
                 clear << dev->m_mount;
@@ -246,28 +255,12 @@ int DeviceManager::LocateMount(const QString &mount) const
 StringMap DeviceManager::GetDeviceDirs() const
 {
     StringMap paths;
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    for (int id : m_devices.keys())
-    {
-        Device *dev = m_devices.value(id);
-        if (dev)
-            paths.insert(id, dev->m_mount);
-    }
-#elif QT_VERSION < QT_VERSION_CHECK(5,15,0)
-    for (auto it = m_devices.constKeyValueBegin();
-         it != m_devices.constKeyValueEnd(); ++it)
-    {
-        if ((*it).second)
-            paths.insert((*it).first, (*it).second->m_mount);
-    }
-#else
     for (auto it = m_devices.constKeyValueBegin();
          it != m_devices.constKeyValueEnd(); ++it)
     {
         if (it->second)
             paths.insert(it->first, it->second->m_mount);
     }
-#endif
     return paths;
 }
 
@@ -276,22 +269,6 @@ StringMap DeviceManager::GetDeviceDirs() const
 QList<int> DeviceManager::GetAbsentees()
 {
     QList<int> absent;
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    for (int id : m_devices.keys())
-    {
-        Device *dev = m_devices.value(id);
-        if (dev && !dev->isPresent())
-            absent << id;
-    }
-#elif QT_VERSION < QT_VERSION_CHECK(5,15,0)
-    for (auto it = m_devices.constKeyValueBegin();
-         it != m_devices.constKeyValueEnd(); it++)
-    {
-        Device *dev = (*it).second;
-        if (dev && !dev->isPresent())
-            absent << (*it).first;
-    }
-#else
     for (auto it = m_devices.constKeyValueBegin();
          it != m_devices.constKeyValueEnd(); it++)
     {
@@ -299,7 +276,6 @@ QList<int> DeviceManager::GetAbsentees()
         if (dev && !dev->isPresent())
             absent << it->first;
     }
-#endif
     return absent;
 }
 
@@ -314,7 +290,7 @@ ImageAdapterBase::ImageAdapterBase() :
     // Generate glob list from supported extensions
     QStringList glob;
     QStringList allExt = m_imageFileExt + m_videoFileExt;
-    for (const auto& ext : qAsConst(allExt))
+    for (const auto& ext : std::as_const(allExt))
         glob << "*." + ext;
 
     // Apply filters to only detect image files
@@ -336,7 +312,7 @@ QStringList ImageAdapterBase::SupportedImages()
     // Determine supported picture formats from Qt
     QStringList formats;
     QList<QByteArray> supported = QImageReader::supportedImageFormats();
-    for (const auto& ext : qAsConst(supported))
+    for (const auto& ext : std::as_const(supported))
         formats << QString(ext);
     return formats;
 }
@@ -500,7 +476,7 @@ StringMap ImageAdapterSg::GetScanDirs() const
     StringMap map;
     int i = 0;
     QStringList paths = m_sg.GetDirList();
-    for (const auto& path : qAsConst(paths))
+    for (const auto& path : std::as_const(paths))
         map.insert(i++, path);
     return map;
 }
@@ -522,12 +498,12 @@ QString ImageAdapterSg::GetAbsFilePath(const ImagePtrK &im) const
 
 
 // Database fields used by several image queries
-#define DB_COLUMNS \
-"file_id, filename, name, dir_id, type, modtime, size, " \
+static constexpr const char* kDBColumns {
+"file_id, filename, name, dir_id, type, modtime, size, "
 "extension, date, hidden, orientation, angle, path, zoom"
 // Id, filepath, basename, parentId, type, modtime, size,
 // extension, image date, hidden, orientation, cover id, comment, device id
-
+};
 
 /*!
 \brief Create image from Db query data
@@ -539,7 +515,7 @@ ImageItem *ImageDb<FS>::CreateImage(const MSqlQuery &query) const
 {
     auto *im = new ImageItem(FS::ImageId(query.value(0).toInt()));
 
-    // Ordered as per DB_COLUMNS
+    // Ordered as per kDBColumns
     im->m_filePath      = query.value(1).toString();
     im->m_baseName      = query.value(2).toString();
     im->m_parentId      = FS::ImageId(query.value(3).toInt());
@@ -621,9 +597,9 @@ int ImageDb<FS>::GetDirectory(int id, ImagePtr &parent,
                               const QString &refine) const
 {
     MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(QString("SELECT " DB_COLUMNS " FROM %1 "
+    query.prepare(QString("SELECT %1 FROM %2 "
                           "WHERE (dir_id = :ID1 OR file_id = :ID2) "
-                          "%2;").arg(m_table, refine));
+                          "%3;").arg(kDBColumns, m_table, refine));
 
     // Qt < 5.4 won't bind multiple occurrences
     int dbId = FS::DbId(id);
@@ -669,13 +645,13 @@ bool ImageDb<FS>::GetDescendants(const QString &ids,
 
     MSqlQuery query(MSqlQuery::InitCon());
     QString sql =
-            QString("SELECT " DB_COLUMNS
+            QString("SELECT %1"
                     ", LENGTH(filename) - LENGTH(REPLACE(filename, '/', ''))"
                     " AS depth "
-                    "FROM %1 WHERE filename LIKE :PREFIX "
-                    "ORDER BY depth;").arg(m_table);
+                    "FROM %2 WHERE filename LIKE :PREFIX "
+                    "ORDER BY depth;").arg(kDBColumns,m_table);
 
-    for (const auto& im1 : qAsConst(dirs))
+    for (const auto& im1 : std::as_const(dirs))
     {
         query.prepare(sql);
         query.bindValue(":PREFIX", im1->m_filePath + "/%");
@@ -714,7 +690,7 @@ bool ImageDb<FS>::GetImageTree(int id, ImageList &files, const QString &refine) 
     if (GetChildren(QString::number(id), files, dirs, refine) < 0)
         return false;
 
-    for (const auto& im : qAsConst(dirs))
+    for (const auto& im : std::as_const(dirs))
         if (!GetImageTree(im->m_id, files, refine))
             return false;
     return true;
@@ -730,7 +706,7 @@ template <class FS>
 bool ImageDb<FS>::ReadAllImages(ImageHash &files, ImageHash &dirs) const
 {
     MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(QString("SELECT " DB_COLUMNS " FROM %1").arg(m_table));
+    query.prepare(QString("SELECT %1 FROM %2").arg(kDBColumns, m_table));
 
     if (!query.exec())
     {
@@ -819,22 +795,22 @@ int ImageDb<FS>::InsertDbImage(ImageItemK &im, bool checkForDuplicate) const
         }
     }
 
-    query.prepare(QString("INSERT INTO %1 (" DB_COLUMNS ") VALUES (0, "
+    query.prepare(QString("INSERT INTO %1 (%2) VALUES (0, "
                           ":FILEPATH, :NAME,      :PARENT, :TYPE,   :MODTIME, "
                           ":SIZE,     :EXTENSION, :DATE,   :HIDDEN, :ORIENT, "
-                          ":COVER,    :COMMENT,   :FS);").arg(m_table));
+                          ":COVER,    :COMMENT,   :FS);").arg(m_table, kDBColumns));
 
-    query.bindValue(":FILEPATH",  im.m_filePath);
-    query.bindValue(":NAME",      FS::BaseNameOf(im.m_filePath));
+    query.bindValueNoNull(":FILEPATH",  im.m_filePath);
+    query.bindValueNoNull(":NAME",      FS::BaseNameOf(im.m_filePath));
     query.bindValue(":FS",        im.m_device);
     query.bindValue(":PARENT",    FS::DbId(im.m_parentId));
     query.bindValue(":TYPE",      im.m_type);
     query.bindValue(":MODTIME",   static_cast<qint64>(im.m_modTime.count()));
     query.bindValue(":SIZE",      im.m_size);
-    query.bindValue(":EXTENSION", im.m_extension);
+    query.bindValueNoNull(":EXTENSION", im.m_extension);
     query.bindValue(":DATE",      static_cast<qint64>(im.m_date.count()));
     query.bindValue(":ORIENT",    im.m_orientation);
-    query.bindValue(":COMMENT",   im.m_comment.isNull() ? "" : im.m_comment);
+    query.bindValueNoNull(":COMMENT",   im.m_comment);
     query.bindValue(":HIDDEN",    im.m_isHidden);
     query.bindValue(":COVER",     FS::DbId(im.m_userThumbnail));
 
@@ -878,7 +854,7 @@ bool ImageDb<FS>::UpdateDbImage(ImageItemK &im) const
     query.bindValue(":HIDDEN",    im.m_isHidden);
     query.bindValue(":ORIENT",    im.m_orientation);
     query.bindValue(":COVER",     FS::DbId(im.m_userThumbnail));
-    query.bindValue(":COMMENT",   im.m_comment.isNull() ? "" : im.m_comment);
+    query.bindValueNoNull(":COMMENT", im.m_comment);
 
     if (query.exec())
         return true;
@@ -900,7 +876,7 @@ QStringList ImageDb<FS>::RemoveFromDB(const ImageList &imList) const
     QStringList ids;
     if (!imList.isEmpty())
     {
-        for (const auto& im : qAsConst(imList))
+        for (const auto& im : std::as_const(imList))
             ids << QString::number(FS::DbId(im->m_id));
 
         QString idents = ids.join(",");
@@ -911,7 +887,7 @@ QStringList ImageDb<FS>::RemoveFromDB(const ImageList &imList) const
         if (!query.exec())
         {
             MythDB::DBError(DBLOC, query);
-            return QStringList();
+            return {};
         }
     }
     return ids;
@@ -1005,8 +981,8 @@ int ImageDb<FS>::ReadImages(ImageList &dirs, ImageList &files,
                             const QString &selector) const
 {
     MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(QString("SELECT " DB_COLUMNS " FROM %1 WHERE %2")
-                  .arg(m_table, selector));
+    query.prepare(QString("SELECT %1 FROM %2 WHERE %3")
+                  .arg(kDBColumns, m_table, selector));
     if (!query.exec())
     {
         MythDB::DBError(DBLOC, query);
@@ -1120,7 +1096,7 @@ bool ImageDbLocal::CreateTable()
     MSqlQuery query(MSqlQuery::InitCon());
 
     // Create temporary table
-    query.prepare(QString("CREATE TABLE %1 LIKE " DB_TABLE ";").arg(m_table));
+    query.prepare(QString("CREATE TABLE %1 LIKE %2;").arg(m_table, DB_TABLE));
     if (query.exec())
     {
         // Store it in memory only
@@ -1367,7 +1343,7 @@ QStringList ImageHandler<DBFS>::HandleDbCreate(QStringList defs) const
     // Create skeleton Db images using copied settings.
     // Scanner will update other attributes
     ImageItem im;
-    for (const auto& def : qAsConst(defs))
+    for (const auto& def : std::as_const(defs))
     {
         QStringList aDef = def.split(separator);
 
@@ -1432,7 +1408,7 @@ QStringList ImageHandler<DBFS>::HandleDbMove(const QString &ids,
         destPath.append("/");
 
     // Update path of images only. Scanner will repair parentId
-    for (const auto& im : qAsConst(images))
+    for (const auto& im : std::as_const(images))
     {
         QString old = im->m_filePath;
 
@@ -1511,7 +1487,7 @@ QStringList ImageHandler<DBFS>::HandleTransform(int transform,
         RESULT_ERR("Image not found", QString("Images %1 not in Db").arg(ids))
 
     // Update db
-    for (const auto& im : qAsConst(files))
+    for (const auto& im : std::as_const(files))
     {
         int old           = im->m_orientation;
         im->m_orientation = Orientation(im->m_orientation).Transform(transform);
@@ -1565,7 +1541,7 @@ QStringList ImageHandler<DBFS>::HandleDirs(const QString &destId,
 
     QDir destDir(destPath);
     bool succeeded = false;
-    for (const auto& relPath : qAsConst(relPaths))
+    for (const auto& relPath : std::as_const(relPaths))
     {
         // Validate dir name
         if (relPath.isEmpty() || relPath.contains("..") || relPath.startsWith(QChar('/')))
@@ -1705,7 +1681,7 @@ QStringList ImageHandler<DBFS>::HandleCreateThumbnails
     ImageList dirs;
     DBFS::GetImages(message.at(1), files, dirs);
 
-    for (const auto& im : qAsConst(files))
+    for (const auto& im : std::as_const(files))
         // notify clients when done; highest priority
         m_thumbGen->CreateThumbnail(im, priority, true);
 
@@ -2256,7 +2232,7 @@ QString ImageManagerFe::CreateImages(int destId, const ImageListK &images)
     const QString seperator("...");
     QStringList imageDefs(seperator);
     ImageIdList ids;
-    for (const auto& im : qAsConst(images))
+    for (const auto& im : std::as_const(images))
     {
         ids << im->m_id;
 
@@ -2295,7 +2271,7 @@ QString ImageManagerFe::MoveDbImages(const ImagePtrK& destDir, ImageListK &image
                                      const QString &srcPath)
 {
     QStringList idents;
-    for (const auto& im : qAsConst(images))
+    for (const auto& im : std::as_const(images))
         idents << QString::number(im->m_id);
 
     // Images are either all local or all remote
@@ -2362,7 +2338,9 @@ QString ImageManagerFe::LongDateOf(const ImagePtrK& im)
         format |= MythDate::kTime;
     }
     else
+    {
         secs = im->m_modTime;
+    }
 
     return MythDate::toString(QDateTime::fromSecsSinceEpoch(secs.count()), format);
 }
@@ -2430,9 +2408,11 @@ QString ImageManagerFe::CrumbName(ImageItemK &im, bool getPath) const
 
 void ImageManagerFe::CloseDevices(int devId, bool eject)
 {
-    QString reason = (devId == DEVICE_INVALID)
-            ? "DEVICE CLOSE ALL"
-            : eject ? "DEVICE EJECT" : "DEVICE REMOVE";
+    QString reason { "DEVICE REMOVE" };
+    if (devId == DEVICE_INVALID)
+        reason = "DEVICE CLOSE ALL";
+    else if (eject)
+        reason = "DEVICE EJECT";
     HandleScanRequest(reason, devId);
 }
 
@@ -2451,7 +2431,7 @@ bool ImageManagerFe::DetectLocalDevices()
     QList<MythMediaDevice*> devices
             = monitor->GetMedias(MEDIATYPE_DATA | MEDIATYPE_MGALLERY);
 
-    for (auto *dev : qAsConst(devices))
+    for (auto *dev : std::as_const(devices))
     {
         if (monitor->ValidateAndLock(dev) && dev->isUsable())
             OpenDevice(dev->getDeviceModel(), dev->getMountPath(), dev);
@@ -2463,7 +2443,7 @@ bool ImageManagerFe::DetectLocalDevices()
     {
         // Close devices that are no longer present
         QList absentees = GetAbsentees();
-        for (int devId : qAsConst(absentees))
+        for (int devId : std::as_const(absentees))
             CloseDevices(devId);
 
         // Start local scan
@@ -2514,7 +2494,9 @@ void ImageManagerFe::DeviceEvent(MythMediaEvent *event)
             ScanImagesAction(true, true);
         }
         else
+        {
             monitor->Unlock(dev);
+        }
         return;
     }
 
@@ -2527,7 +2509,7 @@ void ImageManagerFe::DeviceEvent(MythMediaEvent *event)
 
 QString ImageManagerFe::CreateImport()
 {
-    auto *tmp = new QTemporaryDir(QDir::tempPath() % "/" IMPORTDIR "-XXXXXX");
+    auto *tmp = new QTemporaryDir(QDir::tempPath() % "/" % IMPORTDIR % "-XXXXXX");
     if (!tmp->isValid())
     {
         delete tmp;

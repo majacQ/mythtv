@@ -8,12 +8,12 @@
 #undef Z_NULL
 #define Z_NULL nullptr
 
+#include "libmythbase/mythlogging.h"
+
 #include "dsmccobjcarousel.h"
 #include "dsmccreceiver.h"
 #include "dsmcccache.h"
 #include "dsmcc.h"
-
-#include "mythlogging.h"
 
 // Construct the data for a new module from a DII message.
 DSMCCCacheModuleData::DSMCCCacheModuleData(DsmccDii *dii,
@@ -21,14 +21,13 @@ DSMCCCacheModuleData::DSMCCCacheModuleData(DsmccDii *dii,
                                            unsigned short streamTag)
     : m_carouselId(dii->m_downloadId), m_moduleId(info->m_moduleId),
       m_streamId(streamTag),           m_version(info->m_moduleVersion),
-      m_moduleSize(info->m_moduleSize)
+      m_moduleSize(info->m_moduleSize),
+      // Copy the descriptor information.
+      m_descriptorData(info->m_modInfo.m_descriptorData)
 {
     // The number of blocks needed to hold this module.
     int num_blocks = (m_moduleSize + dii->m_blockSize - 1) / dii->m_blockSize;
     m_blocks.resize(num_blocks, nullptr); // Set it to all zeros
-
-    // Copy the descriptor information.
-    m_descriptorData = info->m_modInfo.m_descriptorData;
 }
 
 DSMCCCacheModuleData::~DSMCCCacheModuleData()

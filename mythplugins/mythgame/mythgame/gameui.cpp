@@ -1,17 +1,19 @@
+// Qt
 #include <QMetaType>
 #include <QStringList>
 #include <QTimer>
 
-#include <mythcontext.h>
-#include <mythuibuttontree.h>
-#include <metadata/mythuimetadataresults.h>
-#include <mythuiimage.h>
-#include <mythuitext.h>
-#include <mythuistatetype.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythgenerictree.h>
-#include <mythdirs.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythmetadata/mythuimetadataresults.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythgenerictree.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibuttontree.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuistatetype.h>
+#include <libmythui/mythuitext.h>
 
 // MythGame headers
 #include "gamehandler.h"
@@ -44,12 +46,11 @@ class GameTreeInfo
 Q_DECLARE_METATYPE(GameTreeInfo *)
 
 GameUI::GameUI(MythScreenStack *parent)
-       : MythScreenType(parent, "GameUI")
+       : MythScreenType(parent, "GameUI"),
+         m_query(new MetadataDownload(this)),
+         m_imageDownload(new MetadataImageDownload(this))
 {
     m_popupStack = GetMythMainWindow()->GetStack("popup stack");
-
-    m_query = new MetadataDownload(this);
-    m_imageDownload = new MetadataImageDownload(this);
 }
 
 bool GameUI::Create()
@@ -122,7 +123,9 @@ void GameUI::BuildTree()
         LOG(VB_GENERAL, LOG_ERR, QString("Couldn't find any game handlers!"));
     }
     else
+    {
         systemFilter += ")";
+    }
 
     m_showHashed = gCoreContext->GetBoolSetting("GameTreeView");
 
@@ -185,7 +188,7 @@ bool GameUI::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -273,12 +276,14 @@ void GameUI::itemClicked(MythUIButtonListItem* /*item*/)
                 chooseSystemPopup->SetReturnEvent(this, "chooseSystemPopup");
                 QString all_systems = romInfo->AllSystems();
                 QStringList players = all_systems.split(',');
-                for (const auto & player : qAsConst(players))
+                for (const auto & player : std::as_const(players))
                     chooseSystemPopup->AddButton(player);
                 popupStack->AddScreen(chooseSystemPopup);
             }
             else
+            {
                 delete chooseSystemPopup;
+            }
         }
     }
 }
@@ -388,7 +393,9 @@ void GameUI::edit(void)
             md_editor->SetReturnEvent(this, "editMetadata");
         }
         else
+        {
             delete md_editor;
+        }
     }
 }
 
@@ -409,7 +416,9 @@ void GameUI::showInfo()
             details_dialog->SetReturnEvent(this, "detailsPopup");
         }
         else
+        {
             delete details_dialog;
+        }
     }
 }
 
@@ -444,7 +453,9 @@ void GameUI::ShowMenu()
         popupStack->AddScreen(showMenuPopup);
     }
     else
+    {
         delete showMenuPopup;
+    }
 }
 
 void GameUI::searchStart(void)
@@ -476,7 +487,9 @@ void GameUI::searchStart(void)
             popupStack->AddScreen(searchDialog);
         }
         else
+        {
             delete searchDialog;
+        }
     }
 }
 
@@ -766,7 +779,7 @@ QString GameUI::getChildLevelString(MythGenericTree *node)
         node = node->getParent();
 
     auto *gi = node->GetData().value<GameTreeInfo *>();
-    return gi->getLevel(this_level - 1);
+    return gi ? gi->getLevel(this_level - 1) : "<invalid>";
 }
 
 QString GameUI::getFilter(MythGenericTree *node)
@@ -774,7 +787,7 @@ QString GameUI::getFilter(MythGenericTree *node)
     while (node->getInt() != 1)
         node = node->getParent();
     auto *gi = node->GetData().value<GameTreeInfo *>();
-    return gi->getFilter();
+    return gi ? gi->getFilter() : "<invalid>";
 }
 
 int GameUI::getLevelsOnThisBranch(MythGenericTree *node)
@@ -783,7 +796,7 @@ int GameUI::getLevelsOnThisBranch(MythGenericTree *node)
         node = node->getParent();
 
     auto *gi = node->GetData().value<GameTreeInfo *>();
-    return gi->getDepth();
+    return gi ? gi->getDepth() : 0;
 }
 
 bool GameUI::isLeaf(MythGenericTree *node)
@@ -886,7 +899,9 @@ void GameUI::updateChangedNode(MythGenericTree *node, RomInfo *romInfo)
         m_gameUITree->SetCurrentNode(m_favouriteNode);
     }
     else
+    {
         nodeChanged(node);
+    }
 }
 
 void GameUI::gameSearch(MythGenericTree *node,
@@ -982,13 +997,13 @@ void GameUI::OnGameSearchDone(MetadataLookup *lookup)
 
     // Imagery
     ArtworkList coverartlist = lookup->GetArtwork(kArtworkCoverart);
-    for (const auto & art : qAsConst(coverartlist))
+    for (const auto & art : std::as_const(coverartlist))
         coverart.prepend(art.url);
     ArtworkList fanartlist = lookup->GetArtwork(kArtworkFanart);
-    for (const auto & art : qAsConst(fanartlist))
+    for (const auto & art : std::as_const(fanartlist))
         fanart.prepend(art.url);
     ArtworkList screenshotlist = lookup->GetArtwork(kArtworkScreenshot);
-    for (const auto & art : qAsConst(screenshotlist))
+    for (const auto & art : std::as_const(screenshotlist))
         screenshot.prepend(art.url);
 
     StartGameImageSet(node, coverart, fanart, screenshot);
@@ -1063,7 +1078,7 @@ void GameUI::handleDownloadedImages(MetadataLookup *lookup)
             i != downloads.end(); ++i)
     {
         VideoArtworkType type = i.key();
-        ArtworkInfo info = i.value();
+        const ArtworkInfo& info = i.value();
         QString filename = info.url;
 
         if (type == kArtworkCoverart)

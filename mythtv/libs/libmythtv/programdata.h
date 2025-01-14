@@ -16,7 +16,7 @@
 // MythTV headers
 #include "mythtvexp.h"
 #include "listingsources.h"
-#include "programinfo.h"
+#include "libmythbase/programinfo.h"
 #include "eithelper.h" /* for FixupValue */
 
 class MSqlQuery;
@@ -25,7 +25,7 @@ class MTV_PUBLIC DBPerson
 {
     friend class TestEITFixups;
   public:
-    enum Role
+    enum Role : std::uint8_t
     {
         kUnknown = 0,
         kActor,

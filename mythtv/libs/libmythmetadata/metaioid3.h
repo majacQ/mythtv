@@ -8,6 +8,11 @@
 // Taglib
 #include <id3v1tag.h>
 #include <id3v2tag.h>
+#ifdef Q_OS_WIN
+// The above indirectly includes winuser.h, which unconditionally
+// redefines the string SendMessage to SendMessageA.
+#undef SendMessage
+#endif
 #include <textidentificationframe.h>
 #include <attachedpictureframe.h>
 #include <popularimeterframe.h>
@@ -76,7 +81,7 @@ class META_PUBLIC MetaIOID3 : public MetaIOTagLib
 
     TagLib::File *m_file {nullptr};
 
-    enum TagType { kMPEG, kFLAC };
+    enum TagType : std::uint8_t { kMPEG, kFLAC };
     TagType m_fileType {kMPEG};
 };
 

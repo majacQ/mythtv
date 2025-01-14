@@ -2,7 +2,7 @@
 #define LOGODETECTORBASE_H
 
 #include <QObject>
-#include "mythframe.h"
+#include "libmythtv/mythframe.h"
 
 class MythCommFlagPlayer;
 
@@ -28,7 +28,8 @@ class LogoDetectorBase : public QObject
 
   protected:
     bool m_foundLogo {false};
-    unsigned int m_width, m_height;
+    size_t m_width;
+    size_t m_height;
 };
 
 #endif // LOGODETECTORBASE_H

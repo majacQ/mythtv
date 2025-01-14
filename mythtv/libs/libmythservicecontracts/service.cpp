@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -35,7 +35,7 @@ QVariant Service::ConvertToVariant( int nType, void *pValue )
     }
 
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-    return QVariant( nType, pValue );
+    return { nType, pValue };
 #else
     return QVariant( QMetaType(nType), pValue );
 #endif
@@ -83,7 +83,11 @@ void* Service::ConvertToParameterPtr( int            nTypeId,
         case QMetaType::QDateTime   :
         {
             QDateTime dt = QDateTime::fromString( sValue, Qt::ISODate );
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
             dt.setTimeSpec( Qt::UTC );
+#else
+            dt.setTimeZone( QTimeZone(QTimeZone::UTC) );
+#endif
             *(( QDateTime      *)pParam) = dt;
             break;
         }
@@ -100,7 +104,9 @@ void* Service::ConvertToParameterPtr( int            nTypeId,
                     *(( QJsonObject *)pParam) = doc.object();
             }
             else
+            {
                 throw QString("Invalid JSON: %1").arg(sValue);
+            }
 
             break;
         }

@@ -3,6 +3,7 @@
 #include "mythvirtualkeyboard.h"
 
 // c++
+#include <array>
 #include <iostream>
 
 // qt
@@ -10,14 +11,16 @@
 #include <QDomDocument>
 #include <QFile>
 
-// myth
+// libmythbase
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+
+// libmythui
 #include "mythmainwindow.h"
-#include "mythlogging.h"
 #include "mythfontproperties.h"
 #include "mythuihelper.h"
 #include "mythuibutton.h"
 #include "mythuitextedit.h"
-#include "mythcorecontext.h"
 
 
 #define LOC      QString("MythUIVirtualKeyboard: ")
@@ -74,10 +77,9 @@ static const std::array<std::array<QString,3>,95> comps {{
 }};
 
 MythUIVirtualKeyboard::MythUIVirtualKeyboard(MythScreenStack *parentStack, MythUITextEdit *parentEdit)
-          : MythScreenType(parentStack, "MythUIVirtualKeyboard")
+          : MythScreenType(parentStack, "MythUIVirtualKeyboard"),
+            m_parentEdit(parentEdit)
 {
-    m_parentEdit = parentEdit;
-
     if (m_parentEdit)
         m_preferredPos = m_parentEdit->GetKeyboardPosition();
     else
@@ -119,38 +121,38 @@ bool MythUIVirtualKeyboard::Create()
         case VK_POSABOVEEDIT:
             if (editArea.y() - area.height() - 5 > 0)
             {
-                newPos = QPoint(editArea.x() + editArea.width() / 2 - area.width() / 2,
+                newPos = QPoint(editArea.x() + (editArea.width() / 2) - (area.width() / 2),
                                 editArea.y() - area.height() - 5);
             }
             else
             {
-                newPos = QPoint(editArea.x() + editArea.width() / 2 - area.width() / 2,
+                newPos = QPoint(editArea.x() + (editArea.width() / 2) - (area.width() / 2),
                                 editArea.y() + editArea.height() + 5);
             }
             break;
 
         case VK_POSTOPDIALOG:
-            newPos = QPoint(screensize.width() / 2 - area.width() / 2, 5);
+            newPos = QPoint((screensize.width() / 2) - (area.width() / 2), 5);
             break;
 
         case VK_POSBOTTOMDIALOG:
-            newPos = QPoint(screensize.width() / 2 - area.width() / 2, screensize.height() - 5 - area.height());
+            newPos = QPoint((screensize.width() / 2) - (area.width() / 2), screensize.height() - 5 - area.height());
             break;
 
         case VK_POSCENTERDIALOG:
-            newPos = QPoint(screensize.width() / 2 - area.width() / 2, screensize.height() / 2 - area.height() / 2);
+            newPos = QPoint((screensize.width() / 2) - (area.width() / 2), (screensize.height() / 2) - (area.height() / 2));
             break;
 
         default:
             // VK_POSBELOWEDIT
             if (editArea.y() + editArea.height() + area.height() + 5 < screensize.height())
             {
-                newPos = QPoint(editArea.x() + editArea.width() / 2 - area.width() / 2,
+                newPos = QPoint(editArea.x() + (editArea.width() / 2) - (area.width() / 2),
                                 editArea.y() + editArea.height() + 5);
             }
             else
             {
-                newPos = QPoint(editArea.x() + editArea.width() / 2 - area.width() / 2,
+                newPos = QPoint(editArea.x() + (editArea.width() / 2) - (area.width() / 2),
                                 editArea.y() - area.height() - 5);
             }
             break;
@@ -259,7 +261,9 @@ void MythUIVirtualKeyboard::parseKey(const QDomElement &element)
                 altshift = e.attribute("altshift");
             }
             else
+            {
                 LOG(VB_GENERAL, LOG_ERR, "Unknown element in key definition");
+            }
         }
         n = n.nextSibling();
     }
@@ -282,7 +286,7 @@ void MythUIVirtualKeyboard::parseKey(const QDomElement &element)
 void MythUIVirtualKeyboard::updateKeys(bool connectSignals)
 {
     QList<MythUIType *> *children = GetAllChildren();
-    for (auto *child : qAsConst(*children))
+    for (auto *child : std::as_const(*children))
     {
         auto *button = dynamic_cast<MythUIButton *>(child);
         if (button)
@@ -305,11 +309,17 @@ void MythUIVirtualKeyboard::updateKeys(bool connectSignals)
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::shiftClicked);
                     }
                     else if (key.type == "char")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::charClicked);
+                    }
                     else if (key.type == "done")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::returnClicked);
+                    }
                     else if (key.type == "del")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::delClicked);
+                    }
                     else if (key.type == "lock")
                     {
                         m_lockButton = button;
@@ -329,11 +339,17 @@ void MythUIVirtualKeyboard::updateKeys(bool connectSignals)
                         connect(m_compButton, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::compClicked);
                     }
                     else if (key.type == "moveleft")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::moveleftClicked);
+                    }
                     else if (key.type == "moveright")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::moverightClicked);
+                    }
                     else if (key.type == "back")
+                    {
                         connect(button, &MythUIButton::Clicked, this, &MythUIVirtualKeyboard::backClicked);
+                    }
                 }
             }
             else
@@ -368,7 +384,7 @@ bool MythUIVirtualKeyboard::keyPressEvent(QKeyEvent *e)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "UP")
@@ -392,7 +408,9 @@ bool MythUIVirtualKeyboard::keyPressEvent(QKeyEvent *e)
                 SetFocusWidget(GetChild(key.right));
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(e))
@@ -539,7 +557,9 @@ void MythUIVirtualKeyboard::returnClicked(void)
         m_parentEdit->keyPressEvent(event);
     }
     else
+    {
         Close();
+    }
 }
 
 void MythUIVirtualKeyboard::moveleftClicked(void)
@@ -604,8 +624,10 @@ QString MythUIVirtualKeyboard::decodeChar(QString c)
                 res += QString(uc);
             }
             else
+            {
                 LOG(VB_GENERAL, LOG_ERR, QString("bad char code (%1)")
                                 .arg(sCode));
+            }
         }
         else
         {
@@ -642,11 +664,7 @@ void MythUIVirtualKeyboard::loadEventKeyDefinitions(
     const QString &action)
 {
     QString keylist = MythMainWindow::GetKey("Global", action);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList keys = keylist.split(',', QString::SkipEmptyParts);
-#else
     QStringList keys = keylist.split(',', Qt::SkipEmptyParts);
-#endif
     if (keys.empty())
         return;
 

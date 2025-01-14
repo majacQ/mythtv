@@ -185,7 +185,7 @@ int MythVAAPIInteropGLX::SetPictureAttribute(PictureAttribute Attribute, int Val
     {
         if (m_vaapiPictureAttributes[i].type == attrib)
         {
-            Value = std::min(std::max(Value, 0), 100);
+            Value = std::clamp(Value, 0, 100);
             int newval = Value + adjustment;
             if (newval > 100) newval -= 100;
             qreal range = (m_vaapiPictureAttributes[i].max_value - m_vaapiPictureAttributes[i].min_value) / 100.0;
@@ -242,10 +242,11 @@ MythVAAPIInteropGLXCopy::~MythVAAPIInteropGLXCopy()
     }
 }
 
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropGLXCopy::Acquire(MythRenderOpenGL* Context,
-                                                                 MythVideoColourSpace* ColourSpace,
-                                                                 MythVideoFrame* Frame,
-                                                                 FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythVAAPIInteropGLXCopy::Acquire(MythRenderOpenGL* Context,
+                                 MythVideoColourSpace* ColourSpace,
+                                 MythVideoFrame* Frame,
+                                 FrameScanType Scan)
 {
     std::vector<MythVideoTextureOpenGL*> result;
     if (!Frame)
@@ -338,10 +339,11 @@ MythVAAPIInteropGLXPixmap::~MythVAAPIInteropGLXPixmap()
         XFreePixmap(display, m_pixmap);
 }
 
-vector<MythVideoTextureOpenGL*> MythVAAPIInteropGLXPixmap::Acquire(MythRenderOpenGL* Context,
-                                                                   MythVideoColourSpace* ColourSpace,
-                                                                   MythVideoFrame* Frame,
-                                                                   FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythVAAPIInteropGLXPixmap::Acquire(MythRenderOpenGL* Context,
+                                   MythVideoColourSpace* ColourSpace,
+                                   MythVideoFrame* Frame,
+                                   FrameScanType Scan)
 {
     std::vector<MythVideoTextureOpenGL*> result;
     if (!Frame)
@@ -392,7 +394,7 @@ vector<MythVideoTextureOpenGL*> MythVAAPIInteropGLXPixmap::Acquire(MythRenderOpe
         }
 
         GLXFBConfig fbconfig = fbs[0];
-        XFree(fbs);
+        XFree(reinterpret_cast<void*>(fbs));
 
         // create pixmaps
         uint width  = static_cast<uint>(m_textureSize.width());

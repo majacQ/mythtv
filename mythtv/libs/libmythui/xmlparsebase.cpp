@@ -14,10 +14,8 @@
 #include <QRadialGradient>
 
 // libmythbase headers
-#include "mythconfig.h"
-
-// libmyth headers
-#include "mythlogging.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
 
 // Mythui headers
 #include "mythmainwindow.h"
@@ -26,6 +24,7 @@
 /* ui type includes */
 #include "mythscreentype.h"
 #include "mythuiimage.h"
+#include "mythuiprocedural.h"
 #include "mythuitext.h"
 #include "mythuitextedit.h"
 #include "mythuiclock.h"
@@ -59,7 +58,7 @@ QString XMLParseBase::getFirstText(QDomElement &element)
         if (!t.isNull())
             return t.data();
     }
-    return QString();
+    return {};
 }
 
 bool XMLParseBase::parseBool(const QString &text)
@@ -76,11 +75,7 @@ bool XMLParseBase::parseBool(QDomElement &element)
 MythPoint XMLParseBase::parsePoint(const QString &text, bool normalize)
 {
     MythPoint retval;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList values = text.split(',', QString::SkipEmptyParts);
-#else
     QStringList values = text.split(',', Qt::SkipEmptyParts);
-#endif
     if (values.size() == 2)
         retval = MythPoint(values[0], values[1]);
 
@@ -137,11 +132,7 @@ QSize XMLParseBase::parseSize(QDomElement &element, bool normalize)
 MythRect XMLParseBase::parseRect(const QString &text, bool normalize)
 {
     MythRect retval;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList values = text.split(',', QString::SkipEmptyParts);
-#else
     QStringList values = text.split(',', Qt::SkipEmptyParts);
-#endif
     if (values.size() == 4)
         retval = MythRect(values[0], values[1], values[2], values[3]);
     if (values.size() == 5)
@@ -248,7 +239,7 @@ QBrush XMLParseBase::parseGradient(const QDomElement &element)
         QDomElement childElem = child.toElement();
         if (childElem.tagName() == "stop")
         {
-            float position = childElem.attribute("position", "0").toFloat();
+            double position = childElem.attribute("position", "0").toDouble();
             QString color = childElem.attribute("color", "");
             int alpha = childElem.attribute("alpha", "-1").toInt();
             if (alpha < 0)
@@ -272,9 +263,9 @@ QBrush XMLParseBase::parseGradient(const QDomElement &element)
     {
         QRadialGradient gradient;
         gradient.setCoordinateMode(QGradient::ObjectBoundingMode);
-        float x1 = 0.5;
-        float y1 = 0.5;
-        float radius = 0.5;
+        double x1 = 0.5;
+        double y1 = 0.5;
+        double radius = 0.5;
         gradient.setCenter(x1,y1);
         gradient.setFocalPoint(x1,y1);
         gradient.setRadius(radius);
@@ -285,10 +276,10 @@ QBrush XMLParseBase::parseGradient(const QDomElement &element)
     {
         QLinearGradient gradient;
         gradient.setCoordinateMode(QGradient::ObjectBoundingMode);
-        float x1 = 0.0;
-        float y1 = 0.0;
-        float x2 = 0.0;
-        float y2 = 0.0;
+        double x1 = 0.0;
+        double y1 = 0.0;
+        double x2 = 0.0;
+        double y2 = 0.0;
         if (direction == "vertical")
         {
             x1 = 0.5;
@@ -399,6 +390,7 @@ void XMLParseBase::ParseChildren(const QString &filename,
                 delete font;
             }
             else if (type == "imagetype" ||
+                     type == "procedural" ||
                      type == "textarea" ||
                      type == "group" ||
                      type == "textedit" ||
@@ -489,6 +481,8 @@ MythUIType *XMLParseBase::ParseUIType(
 
     if (type == "imagetype")
         uitype = new MythUIImage(parent, name);
+    else if (type == "procedural")
+        uitype = new MythUIProcedural(parent, name);
     else if (type == "textarea")
         uitype = new MythUIText(parent, name);
     else if (type == "group")
@@ -603,6 +597,7 @@ MythUIType *XMLParseBase::ParseUIType(
                 delete font;
             }
             else if (info.tagName() == "imagetype" ||
+                     info.tagName() == "procedural" ||
                      info.tagName() == "textarea" ||
                      info.tagName() == "group" ||
                      info.tagName() == "textedit" ||
@@ -642,7 +637,7 @@ bool XMLParseBase::WindowExists(const QString &xmlfile,
                                 const QString &windowname)
 {
     const QStringList searchpath = GetMythUI()->GetThemeSearchPath();
-    for (const auto & dir : qAsConst(searchpath))
+    for (const auto & dir : std::as_const(searchpath))
     {
         QString themefile = dir + xmlfile;
         QFile f(themefile);
@@ -651,6 +646,7 @@ bool XMLParseBase::WindowExists(const QString &xmlfile,
             continue;
 
         QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         QString errorMsg;
         int errorLine = 0;
         int errorColumn = 0;
@@ -665,7 +661,20 @@ bool XMLParseBase::WindowExists(const QString &xmlfile,
             f.close();
             continue;
         }
-
+#else
+        auto parseResult = doc.setContent(&f);
+        if (!parseResult)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC +
+                QString("Location: '%1' @ %2 column: %3"
+                        "\n\t\t\tError: %4")
+                    .arg(qPrintable(themefile)).arg(parseResult.errorLine)
+                    .arg(parseResult.errorColumn)
+                    .arg(qPrintable(parseResult.errorMessage)));
+            f.close();
+            continue;
+        }
+#endif
         f.close();
 
         QDomElement docElem = doc.documentElement();
@@ -697,7 +706,7 @@ bool XMLParseBase::LoadWindowFromXML(const QString &xmlfile,
     bool showWarnings = true;
 
     const QStringList searchpath = GetMythUI()->GetThemeSearchPath();
-    for (const auto & dir : qAsConst(searchpath))
+    for (const auto & dir : std::as_const(searchpath))
     {
         QString themefile = dir + xmlfile;
         LOG(VB_GUI, LOG_INFO, LOC + QString("Loading window %1 from %2").arg(windowname, themefile));
@@ -728,6 +737,7 @@ bool XMLParseBase::doLoad(const QString &windowname,
     if (!f.open(QIODevice::ReadOnly))
         return false;
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
@@ -742,6 +752,20 @@ bool XMLParseBase::doLoad(const QString &windowname,
         f.close();
         return false;
     }
+#else
+    auto parseResult = doc.setContent(&f);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("Location: '%1' @ %2 column: %3"
+                    "\n\t\t\tError: %4")
+                .arg(qPrintable(filename)).arg(parseResult.errorLine)
+                .arg(parseResult.errorColumn)
+                .arg(qPrintable(parseResult.errorMessage)));
+        f.close();
+        return false;
+    }
+#endif
 
     f.close();
 
@@ -798,6 +822,7 @@ bool XMLParseBase::doLoad(const QString &windowname,
                     delete font;
                 }
                 else if (type == "imagetype" ||
+                         type == "procedural" ||
                          type == "textarea" ||
                          type == "group" ||
                          type == "textedit" ||
@@ -847,7 +872,7 @@ bool XMLParseBase::LoadBaseTheme(void)
     bool showWarnings = true;
 
     const QStringList searchpath = GetMythUI()->GetThemeSearchPath();
-    for (const auto & dir : qAsConst(searchpath))
+    for (const auto & dir : std::as_const(searchpath))
     {
         QString themefile = dir + "base.xml";
         if (doLoad(QString(), GetGlobalObjectStore(), themefile,
@@ -887,7 +912,7 @@ bool XMLParseBase::LoadBaseTheme(const QString &baseTheme)
     bool showWarnings = true;
 
     const QStringList searchpath = GetMythUI()->GetThemeSearchPath();
-    for (const auto & dir : qAsConst(searchpath))
+    for (const auto & dir : std::as_const(searchpath))
     {
         QString themefile = dir + baseTheme;
         if (doLoad(QString(), GetGlobalObjectStore(), themefile,

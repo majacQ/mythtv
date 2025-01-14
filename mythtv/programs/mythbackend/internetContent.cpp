@@ -7,22 +7,24 @@
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include <QTextStream>
-#include <QDir>
-#include <QFile>
+// Qt
 #include <QBuffer>
+#include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QImage>
+#include <QTextStream>
 
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/netgrabbermanager.h"
+#include "libmythbase/rssparse.h"
+
+// MythBackend
 #include "internetContent.h"
-
-#include "mythcorecontext.h"
-#include "mythdate.h"
-#include "mythsystemlegacy.h"
-#include "mythdirs.h"
-
-#include "rssparse.h"
-#include "netgrabbermanager.h"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -160,7 +162,7 @@ void InternetContent::GetInternetSources( HTTPRequest *pRequest )
     QDir GrabberPath(GrabberDir);
     QStringList Grabbers = GrabberPath.entryList(QDir::Files | QDir::Executable);
 
-    for (const auto & name : qAsConst(Grabbers))
+    for (const auto & name : std::as_const(Grabbers))
     {
         QString commandline = GrabberDir + name;
         MythSystemLegacy scriptcheck(commandline, QStringList("-v"),

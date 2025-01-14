@@ -1,26 +1,28 @@
-#include <QCoreApplication>
-#include <QRegularExpression>
+// Qt
 #include <QBuffer>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remotefile.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuitextedit.h"
+
+// MythTV Setup
 #include "importicons.h"
-#include "mythdate.h"
-#include "mythdownloadmanager.h"
-#include "remotefile.h"
-#include "mythcorecontext.h"
-
-// MythUI
-#include "mythuitext.h"
-#include "mythuiimage.h"
-#include "mythuibutton.h"
-#include "mythuibuttonlist.h"
-#include "mythuitextedit.h"
-#include "mythdialogbox.h"
-#include "mythprogressdialog.h"
 
 ImportIconsWizard::ImportIconsWizard(MythScreenStack *parent, bool fRefresh,
                                      QString channelname)
@@ -50,7 +52,7 @@ ImportIconsWizard::~ImportIconsWizard()
     if (m_tmpDir.exists())
     {
         QStringList files = m_tmpDir.entryList();
-        for (const QString &file : qAsConst(files))
+        for (const QString &file : std::as_const(files))
             m_tmpDir.remove(file);
         m_tmpDir.rmpath(m_tmpDir.absolutePath());
     }
@@ -411,7 +413,7 @@ bool ImportIconsWizard::initialLoad(const QString& name)
         if (!m_missingEntries.empty())
         {
             message.append("\n");
-            message.append(tr("Could not find %n icon(s).", "", 
+            message.append(tr("Could not find %n icon(s).", "",
                               m_missingEntries.size()));
         }
 
@@ -485,7 +487,7 @@ bool ImportIconsWizard::doLoad()
 
 QString ImportIconsWizard::escape_csv(const QString& str)
 {
-    QRegularExpression rxDblForEscape("\"");
+    static const QRegularExpression rxDblForEscape("\"");
     QString str2 = str;
     str2.replace(rxDblForEscape,"\\\"");
     return "\""+str2+"\"";
@@ -498,7 +500,7 @@ QStringList ImportIconsWizard::extract_csv(const QString &line)
     bool in_comment = false;
     bool in_escape = false;
     int comma_count = 0;
-    for (auto cur : qAsConst(line))
+    for (const auto& cur : std::as_const(line))
     {
         if (in_escape)
         {
@@ -548,10 +550,10 @@ QString ImportIconsWizard::wget(QUrl& url, const QString& strParam )
     if (GetMythDownloadManager()->post(req, &data))
     {
         LOG(VB_CHANNEL, LOG_DEBUG, QString("ImportIconsWizard: result: %1").arg(QString(data)));
-        return QString(data);
+        return {data};
     }
 
-    return QString();
+    return {};
 }
 
 #include <QTemporaryFile>
@@ -687,7 +689,7 @@ bool ImportIconsWizard::search(const QString& strParam)
         QString prevIconName;
         int namei = 1;
 
-        for (const QString& row : qAsConst(strSplit))
+        for (const QString& row : std::as_const(strSplit))
         {
             if (row != "#" )
             {
@@ -755,12 +757,8 @@ bool ImportIconsWizard::findmissing(const QString& strParam)
 
     LOG(VB_CHANNEL, LOG_INFO,
         QString("Icon Import: Working findmissing : %1") .arg(str));
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList strSplit = str.split("\n", QString::SkipEmptyParts);
-#else
     QStringList strSplit = str.split("\n", Qt::SkipEmptyParts);
-#endif
-    for (auto line : qAsConst(strSplit))
+    for (const auto& line : std::as_const(strSplit))
     {
         if (line[0] == QChar('#'))
             continue;
@@ -805,26 +803,18 @@ bool ImportIconsWizard::submit()
 
     LOG(VB_CHANNEL, LOG_INFO, QString("Icon Import: Working submit : %1")
         .arg(str));
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList strSplit = str.split("\n", QString::SkipEmptyParts);
-#else
     QStringList strSplit = str.split("\n", Qt::SkipEmptyParts);
-#endif
     unsigned atsc = 0;
     unsigned dvb = 0;
     unsigned callsign = 0;
     unsigned tv = 0;
     unsigned xmltvid = 0;
-    for (auto line : qAsConst(strSplit))
+    for (const auto& line : std::as_const(strSplit))
     {
         if (line[0] == QChar('#'))
             continue;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList strSplit2=(line).split(":", QString::SkipEmptyParts);
-#else
         QStringList strSplit2=(line).split(":", Qt::SkipEmptyParts);
-#endif
         if (strSplit2.size() < 2)
             continue;
 

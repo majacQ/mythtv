@@ -1,8 +1,8 @@
 #include <map>
 
-#include "mythdb.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythsorthelper.h"
 #include "videometadatalistmanager.h"
-#include "mythsorthelper.h"
 
 class VideoMetadataListManagerImp
 {
@@ -43,7 +43,7 @@ class VideoMetadataListManagerImp
         {
             return *(p->second);
         }
-        return VideoMetadataPtr();
+        return {};
     }
 
     VideoMetadataPtr byID(unsigned int db_id) const
@@ -54,7 +54,7 @@ class VideoMetadataListManagerImp
         {
             return *(p->second);
         }
-        return VideoMetadataPtr();
+        return {};
     }
 
     bool purgeByFilename(const QString &file_name)
@@ -98,8 +98,8 @@ class VideoMetadataListManagerImp
 };
 
 VideoMetadataListManager::VideoMetadataListManager()
+  : m_imp(new VideoMetadataListManagerImp())
 {
-    m_imp = new VideoMetadataListManagerImp();
 }
 
 VideoMetadataListManager::~VideoMetadataListManager()
@@ -118,7 +118,7 @@ VideoMetadataListManager::loadOneFromDatabase(uint id)
         return item.front();
     }
 
-    return VideoMetadataPtr(new VideoMetadata());
+    return {new VideoMetadata()};
 }
 
 /// Load videometadata database into memory
@@ -126,7 +126,8 @@ VideoMetadataListManager::loadOneFromDatabase(uint id)
 /// Query consumed in VideoMetadataImp::fromDBRow
 ///
 void VideoMetadataListManager::loadAllFromDatabase(metadata_list &items,
-                                                   const QString &sql)
+                                                   const QString &sql,
+                                                   const QString &bindValue)
 {
     MSqlQuery query(MSqlQuery::InitCon());
     query.setForwardOnly(true);
@@ -142,6 +143,8 @@ void VideoMetadataListManager::loadAllFromDatabase(metadata_list &items,
         BaseMetadataQuery.append(sql);
 
     query.prepare(BaseMetadataQuery);
+    if (!bindValue.isEmpty())
+        query.bindValue(":BINDVALUE", bindValue);
 
     if (query.exec() && query.isActive())
     {
@@ -366,7 +369,7 @@ smart_dir_node meta_dir_node::getSubDir(const QString &subdir,
         return node;
     }
 
-    return smart_dir_node();
+    return {};
 }
 
 void meta_dir_node::addEntry(const smart_meta_node &entry)
@@ -441,6 +444,8 @@ bool meta_dir_node::has_entries() const
     {
         for (const auto & subdir : m_subdirs)
         {
+            if (subdir == nullptr)
+                continue;
             ret = subdir->has_entries();
             if (ret) break;
         }

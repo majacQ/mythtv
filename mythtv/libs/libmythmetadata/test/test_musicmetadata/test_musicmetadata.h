@@ -18,10 +18,11 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <iostream>
-#include "metaio.h"
-#include "mythcorecontext.h"
+
+#include "libmythbase/mythcorecontext.h"
+#include "libmythmetadata/metaio.h"
 
 class TestMusicMetadata : public QObject
 {

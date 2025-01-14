@@ -107,14 +107,19 @@ HouseKeeperTask::HouseKeeperTask(const QString &dbTag, HouseKeeperScope scope,
 
 bool HouseKeeperTask::CheckRun(const QDateTime& now)
 {
-    LOG(VB_GENERAL, LOG_DEBUG, QString("Checking to run %1").arg(GetTag()));
     bool check = false;
-    if (!m_confirm && !m_running && (check = DoCheckRun(now)))
+    if (!m_confirm && !m_running)
     {
-        // if m_confirm is already set, the task is already in the queue
-        // and should not be queued a second time
-        m_confirm = true;
+        check = DoCheckRun(now);
+        if (check)
+        {
+            // if m_confirm is already set, the task is already in the queue
+            // and should not be queued a second time
+            m_confirm = true;
+        }
     }
+    LOG(VB_GENERAL, LOG_DEBUG, QString("%1 Running? %2/In window? %3.")
+        .arg(GetTag(), m_running ? "Yes" : "No", check ? "Yes" : "No"));
     return check;
 }
 
@@ -227,52 +232,19 @@ QDateTime HouseKeeperTask::UpdateLastRun(const QDateTime& last, bool successful)
         if (!query.isConnected())
             return last;
 
-        if (m_lastRun == MythDate::fromSecsSinceEpoch(0))
-        {
-            // not previously set, perform insert
-
-            if (m_scope == kHKGlobal)
-            {
-                query.prepare("INSERT INTO housekeeping"
-                              "         (tag, lastrun, lastsuccess)"
-                              "     VALUES (:TAG, :TIME, :STIME)");
-            }
-            else
-            {
-                query.prepare("INSERT INTO housekeeping"
-                              "         (tag, hostname, lastrun, lastsuccess)"
-                              "     VALUES (:TAG, :HOST, :TIME, :STIME)");
-            }
-        }
-        else
-        {
-            // previously set, perform update
-
-            if (m_scope == kHKGlobal)
-            {
-                query.prepare("UPDATE housekeeping SET lastrun=:TIME,"
-                              "                        lastsuccess=:STIME"
-                              " WHERE tag = :TAG"
-                              "   AND hostname IS NULL");
-            }
-            else
-            {
-                query.prepare("UPDATE housekeeping SET lastrun=:TIME,"
-                              "                        lastsuccess=:STIME"
-                              " WHERE tag = :TAG"
-                              "   AND hostname = :HOST");
-            }
-        }
-
         if (m_scope == kHKGlobal)
         {
-            LOG(VB_GENERAL, LOG_DEBUG,
-                    QString("Updating global run time for %1").arg(m_dbTag));
+            query.prepare("UPDATE `housekeeping` SET `lastrun`=:TIME,"
+                          "                        `lastsuccess`=:STIME"
+                          " WHERE `tag` = :TAG"
+                          "   AND `hostname` IS NULL");
         }
         else
         {
-            LOG(VB_GENERAL, LOG_DEBUG,
-                    QString("Updating local run time for %1").arg(m_dbTag));
+            query.prepare("UPDATE `housekeeping` SET `lastrun`=:TIME,"
+                          "                        `lastsuccess`=:STIME"
+                          " WHERE `tag` = :TAG"
+                          "   AND `hostname` = :HOST");
         }
 
         if (m_scope == kHKLocal)
@@ -282,7 +254,42 @@ QDateTime HouseKeeperTask::UpdateLastRun(const QDateTime& last, bool successful)
         query.bindValue(":STIME", MythDate::as_utc(m_lastSuccess));
 
         if (!query.exec())
-            MythDB::DBError("HouseKeeperTask::updateLastRun", query);
+            MythDB::DBError("HouseKeeperTask::updateLastRun, UPDATE", query);
+
+        if (VERBOSE_LEVEL_CHECK(VB_GENERAL, LOG_DEBUG) &&
+            query.numRowsAffected() > 0)
+        {
+            LOG(VB_GENERAL, LOG_DEBUG, QString("%1: UPDATEd %2 run time.")
+                .arg(m_dbTag, m_scope == kHKGlobal ? "global" : "local"));
+        }
+
+        if (query.numRowsAffected() == 0)
+        {
+            if (m_scope == kHKGlobal)
+            {
+                query.prepare("INSERT INTO `housekeeping`"
+                              "         (`tag`, `lastrun`, `lastsuccess`)"
+                              "     VALUES (:TAG, :TIME, :STIME)");
+            }
+            else
+            {
+                query.prepare("INSERT INTO `housekeeping`"
+                              "         (`tag`, `hostname`, `lastrun`, `lastsuccess`)"
+                              "     VALUES (:TAG, :HOST, :TIME, :STIME)");
+            }
+
+            if (m_scope == kHKLocal)
+                query.bindValue(":HOST", gCoreContext->GetHostName());
+            query.bindValue(":TAG", m_dbTag);
+            query.bindValue(":TIME", MythDate::as_utc(m_lastRun));
+            query.bindValue(":STIME", MythDate::as_utc(m_lastSuccess));
+
+            if (!query.exec())
+                MythDB::DBError("HouseKeeperTask::updateLastRun INSERT", query);
+
+            LOG(VB_GENERAL, LOG_DEBUG, QString("%1: INSERTed %2 run time.")
+                .arg(m_dbTag, m_scope == kHKGlobal ? "global" : "local"));
+        }
     }
 
     QString msg;
@@ -325,7 +332,7 @@ PeriodicHouseKeeperTask::PeriodicHouseKeeperTask(const QString &dbTag,
             std::chrono::seconds period, float min, float max, std::chrono::seconds retry,
             HouseKeeperScope scope, HouseKeeperStartup startup) :
     HouseKeeperTask(dbTag, scope, startup), m_period(period), m_retry(retry),
-    m_windowPercent(min, max), m_currentProb(1.0)
+    m_windowPercent(min, max)
 {
     PeriodicHouseKeeperTask::CalculateWindow();
     if (m_retry == 0s)
@@ -571,8 +578,8 @@ void HouseKeepingThread::run(void)
  *
  */
 HouseKeeper::HouseKeeper(void)
+  : m_timer(new QTimer(this))
 {
-    m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &HouseKeeper::Run);
     m_timer->setInterval(1min);
     m_timer->setSingleShot(false);
@@ -601,7 +608,7 @@ HouseKeeper::~HouseKeeper(void)
         // issue a terminate call to any long-running tasks
         // this is just a noop unless overwritten by a subclass
         QMutexLocker mapLock(&m_mapLock);
-        for (auto *it : qAsConst(m_taskMap))
+        for (auto *it : std::as_const(m_taskMap))
             it->Terminate();
     }
 
@@ -676,10 +683,10 @@ void HouseKeeper::Start(void)
         return;
 
     MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare("SELECT tag,lastrun"
-                  "  FROM housekeeping"
-                  " WHERE hostname = :HOST"
-                  "    OR hostname IS NULL");
+    query.prepare("SELECT `tag`,`lastrun`"
+                  "  FROM `housekeeping`"
+                  " WHERE `hostname` = :HOST"
+                  "    OR `hostname` IS NULL");
     query.bindValue(":HOST", gCoreContext->GetHostName());
 
     if (!query.exec())
@@ -829,7 +836,7 @@ void HouseKeeper::StartThread(void)
 
 void HouseKeeper::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent*>(e);
         if (me == nullptr)
@@ -837,18 +844,13 @@ void HouseKeeper::customEvent(QEvent *e)
         if ((me->Message().left(20) == "HOUSE_KEEPER_RUNNING") ||
             (me->Message().left(23) == "HOUSE_KEEPER_SUCCESSFUL"))
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList tokens = me->Message()
-                                    .split(" ", QString::SkipEmptyParts);
-#else
             QStringList tokens = me->Message()
                                     .split(" ", Qt::SkipEmptyParts);
-#endif
             if (tokens.size() != 4)
                 return;
 
-            QString hostname = tokens[1];
-            QString tag = tokens[2];
+            const QString& hostname = tokens[1];
+            const QString& tag = tokens[2];
             QDateTime last = MythDate::fromString(tokens[3]);
             bool successful = me->Message().contains("SUCCESSFUL");
 

@@ -1,29 +1,27 @@
+// C++
 #include <set>
 
-#include "mythcontext.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/stringutil.h"
+#include "libmythmetadata/dbaccess.h"
+#include "libmythmetadata/globals.h"
+#include "libmythmetadata/videometadatalistmanager.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuitextedit.h"
 
-#include "mythuibuttonlist.h"
-#include "mythuibutton.h"
-#include "mythuitext.h"
-#include "mythuitextedit.h"
-#include "mythmiscutil.h"
-#include "globals.h"
-#include "dbaccess.h"
-#include "videometadatalistmanager.h"
-#include "videoutils.h"
-#include "mythdate.h"
-
-#include "videolist.h"
+// MythFrontend
 #include "videofilter.h"
+#include "videolist.h"
 
 const QRegularExpression VideoFilterSettings::kReSeason {
     "(\\d+)x(\\d*)", QRegularExpression::CaseInsensitiveOption };
 const QRegularExpression VideoFilterSettings::kReDate {
     "-(\\d+)([dwmy])", QRegularExpression::CaseInsensitiveOption };
-
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
 
 VideoFilterSettings::VideoFilterSettings(bool loaddefaultsettings,
                                          const QString& _prefix)
@@ -316,14 +314,16 @@ bool VideoFilterSettings::matches_filter(const VideoMetadata &mdata) const
 bool VideoFilterSettings::meta_less_than(const VideoMetadata &lhs,
                                          const VideoMetadata &rhs) const
 {
-    bool ret = false;
     switch (m_orderBy)
     {
-        case kOrderByTitle:
-        {
-            ret = lhs.sortBefore(rhs);
-            break;
-        }
+        case kOrderByTitle:                 return lhs.sortBefore(rhs);
+        case kOrderByYearDescending:        return lhs.GetYear()        > rhs.GetYear();
+        case kOrderByUserRatingDescending:  return lhs.GetUserRating()  > rhs.GetUserRating();
+        case kOrderByDateAddedDescending:   return lhs.GetInsertdate()  > rhs.GetInsertdate();
+        case kOrderByLength:                return lhs.GetLength()      < rhs.GetLength();
+        case kOrderByID:                    return lhs.GetID()          < rhs.GetID();
+        case kOrderByFilename:
+            return StringUtil::naturalSortCompare(lhs.GetSortFilename(), rhs.GetSortFilename());
         case kOrderBySeasonEp:
         {
             if ((lhs.GetSeason() == rhs.GetSeason())
@@ -333,55 +333,22 @@ bool VideoFilterSettings::meta_less_than(const VideoMetadata &lhs,
                 && (lhs.GetEpisode() == 0)
                 && (rhs.GetEpisode() == 0))
             {
-                ret = lhs.sortBefore(rhs);
+                return lhs.sortBefore(rhs);
             }
-            else if ((lhs.GetSeason() == rhs.GetSeason())
-                     && (lhs.GetTitle() == rhs.GetTitle()))
-                ret = (lhs.GetEpisode() < rhs.GetEpisode());
-            else
-                ret = (lhs.GetSeason() < rhs.GetSeason());
-            break;
-        }
-        case kOrderByYearDescending:
-        {
-            ret = (lhs.GetYear() > rhs.GetYear());
-            break;
-        }
-        case kOrderByUserRatingDescending:
-        {
-            ret = (lhs.GetUserRating() > rhs.GetUserRating());
-            break;
-        }
-        case kOrderByLength:
-        {
-            ret = (lhs.GetLength() < rhs.GetLength());
-            break;
-        }
-        case kOrderByFilename:
-        {
-            const QString& lhsfn = lhs.GetSortFilename();
-            const QString& rhsfn = rhs.GetSortFilename();
-            ret = naturalCompare(lhsfn, rhsfn) < 0;
-            break;
-        }
-        case kOrderByID:
-        {
-            ret = (lhs.GetID() < rhs.GetID());
-            break;
-        }
-        case kOrderByDateAddedDescending:
-        {
-            ret = (lhs.GetInsertdate() > rhs.GetInsertdate());
-            break;
+            if ((lhs.GetSeason() == rhs.GetSeason())
+                && (lhs.GetTitle() == rhs.GetTitle()))
+            {
+                return (lhs.GetEpisode() < rhs.GetEpisode());
+            }
+            return (lhs.GetSeason() < rhs.GetSeason());
         }
         default:
         {
             LOG(VB_GENERAL, LOG_ERR, QString("Error: unknown sort type %1")
                     .arg(m_orderBy));
+            return false;
         }
     }
-
-    return ret;
 }
 
 void VideoFilterSettings::setTextFilter(const QString& val)
@@ -408,7 +375,7 @@ void VideoFilterSettings::setTextFilter(const QString& val)
     match = kReDate.match(m_textFilter);
     if (match.hasMatch())
     {
-        int modnr = match.capturedView(1).toInt();
+        int64_t modnr = match.capturedView(1).toInt();
         QDate testdate = MythDate::current().date();
         switch(match.capturedView(2).at(0).toLatin1())
         {
@@ -433,9 +400,9 @@ void VideoFilterSettings::setTextFilter(const QString& val)
 /////////////////////////////////
 VideoFilterDialog::VideoFilterDialog(MythScreenStack *lparent, const QString& lname,
         VideoList *video_list) : MythScreenType(lparent, lname),
-    m_videoList(*video_list)
+    m_videoList(*video_list),
+    m_fsp(new BasicFilterSettingsProxy<VideoList>(*video_list))
 {
-    m_fsp = new BasicFilterSettingsProxy<VideoList>(*video_list);
     m_settings = m_fsp->getSettings();
 }
 

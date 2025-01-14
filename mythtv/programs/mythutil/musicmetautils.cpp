@@ -1,20 +1,20 @@
 // qt
 #include <QDir>
-#include <QProcess>
 #include <QDomDocument>
+#include <QProcess>
 
 // libmyth* headers
-#include "mythconfig.h"
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "storagegroup.h"
-#include "musicmetadata.h"
-#include "metaio.h"
-#include "mythchrono.h"
-#include "mythcontext.h"
-#include "musicfilescanner.h"
-#include "musicutils.h"
-#include "mythdirs.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythmetadata/metaio.h"
+#include "libmythmetadata/musicfilescanner.h"
+#include "libmythmetadata/musicmetadata.h"
+#include "libmythmetadata/musicutils.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -22,8 +22,8 @@ extern "C" {
 }
 
 // mythutils headers
-#include "commandlineparser.h"
 #include "musicmetautils.h"
+#include "mythutil_commandlineparser.h"
 
 static int UpdateMeta(const MythUtilCommandLineParser &cmdline)
 {
@@ -133,6 +133,7 @@ static int ExtractImage(const MythUtilCommandLineParser &cmdline)
     if (!image->m_embedded || !tagger->supportsEmbeddedImages())
     {
         LOG(VB_GENERAL, LOG_ERR, QString("Either the image isn't embedded or the tagger doesn't support embedded images"));
+        delete tagger;
         return GENERIC_EXIT_NOT_OK;
     }
 
@@ -150,6 +151,7 @@ static int ExtractImage(const MythUtilCommandLineParser &cmdline)
     if (!QDir(path).exists())
     {
         LOG(VB_GENERAL, LOG_ERR, "Cannot find a directory in the 'MusicArt' storage group to save to");
+        delete tagger;
         return GENERIC_EXIT_NOT_OK;
     }
 
@@ -292,16 +294,22 @@ static int CalcTrackLength(const MythUtilCommandLineParser &cmdline)
         {
             case AVMEDIA_TYPE_AUDIO:
             {
-                AVPacket pkt;
-                av_init_packet(&pkt);
-
-                while (av_read_frame(inputFC, &pkt) >= 0)
+                AVPacket *pkt = av_packet_alloc();
+                if (pkt == nullptr)
                 {
-                    if (pkt.stream_index == (int)i)
-                        time = time + pkt.duration;
-
-                    av_packet_unref(&pkt);
+                    LOG(VB_GENERAL, LOG_ERR, "packet allocation failed");
+                    break;
                 }
+
+                while (av_read_frame(inputFC, pkt) >= 0)
+                {
+                    if (pkt->stream_index == (int)i)
+                        time = time + pkt->duration;
+
+                    av_packet_unref(pkt);
+                }
+
+                av_packet_free(&pkt);
 
                 duration = secondsFromFloat(time * av_q2d(inputFC->streams[i]->time_base));
                 break;
@@ -479,7 +487,7 @@ static int FindLyrics(const MythUtilCommandLineParser &cmdline)
 
     QStringList scripts;
 
-    for (const auto& fi : qAsConst(list))
+    for (const auto& fi : std::as_const(list))
     {
         LOG(VB_GENERAL, LOG_NOTICE, QString("Found lyric script at: %1").arg(fi.filePath()));
         scripts.append(fi.filePath());
@@ -497,6 +505,7 @@ static int FindLyrics(const MythUtilCommandLineParser &cmdline)
         QString result = p.readAllStandardOutput();
 
         QDomDocument domDoc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         QString errorMsg;
         int errorLine = 0;
         int errorColumn = 0;
@@ -508,6 +517,18 @@ static int FindLyrics(const MythUtilCommandLineParser &cmdline)
                 QString("\n\t\t\tError at line: %1  column: %2 msg: %3").arg(errorLine).arg(errorColumn).arg(errorMsg));
             continue;
         }
+#else
+        auto parseResult = domDoc.setContent(result);
+        if (!parseResult)
+        {
+            LOG(VB_GENERAL, LOG_ERR,
+                QString("FindLyrics: Could not parse version from %1").arg(scripts.at(x)) +
+                QString("\n\t\t\tError at line: %1  column: %2 msg: %3")
+                .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                .arg(parseResult.errorMessage));
+            continue;
+        }
+#endif
 
         QDomNodeList itemList = domDoc.elementsByTagName("grabber");
         QDomNode itemNode = itemList.item(0);
@@ -537,10 +558,10 @@ static int FindLyrics(const MythUtilCommandLineParser &cmdline)
 
         QProcess p;
         QStringList args { grabber.m_filename,
-                           QString(R"(--artist="%1")").arg(artist),
-                           QString(R"(--album="%1")").arg(album),
-                           QString(R"(--title="%1")").arg(title),
-                           QString(R"(--filename="%1")").arg(filename) };
+                           QString("--artist=%1").arg(artist),
+                           QString("--album=%1").arg(album),
+                           QString("--title=%1").arg(title),
+                           QString("--filename=%1").arg(filename) };
         p.start(PYTHON_EXE, args);
         p.waitForFinished(-1);
         QString result = p.readAllStandardOutput();

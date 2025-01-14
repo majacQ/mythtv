@@ -1,29 +1,32 @@
+// C++
+#include <iostream>
+
+// Qt
 #include <QString>
 #include <QDir>
 #include <QSqlError>
 
-#include <iostream>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythui/schemawizard.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdbcheck.h>
+#include <libmythmetadata/musicmetadata.h>
 
-#include <musicmetadata.h>
-#include <mythcontext.h>
-#include <mythdbcheck.h>
-#include <mythtv/mythdb.h>
-#include <mythtv/schemawizard.h>
-
+// MythMusic
 #include "musicdbcheck.h"
 
 const QString currentDatabaseVersion = "1025";
 const QString MythMusicVersionName = "MusicDBSchemaVer";
 
 static bool doUpgradeMusicDatabaseSchema(QString &dbver);
+static bool tryUpgradeMusicDatabaseSchema();
 
 bool UpgradeMusicDatabaseSchema(void)
 {
 #ifdef IGNORE_SCHEMA_VER_MISMATCH
     return true;
 #endif
-    SchemaUpgradeWizard *schema_wizard = nullptr;
-
     // Suppress DB messages and turn of the settings cache,
     // These are likely to confuse the users and the code, respectively.
     GetMythDB()->SetSuppressDBMessages(true);
@@ -42,32 +45,45 @@ bool UpgradeMusicDatabaseSchema(void)
     if (!locked)
     {
         LOG(VB_GENERAL, LOG_INFO, "Failed to get schema upgrade lock");
-        goto upgrade_error_exit;
+        GetMythDB()->SetSuppressDBMessages(false);
+        gCoreContext->ActivateSettingsCache(true);
+        return false;
     }
 
-    schema_wizard = SchemaUpgradeWizard::Get(
+    bool success = tryUpgradeMusicDatabaseSchema();
+
+    // On any exit we want to re-enable the DB messages so errors
+    // are reported and we want to make sure the setting cache is
+    // enabled for good performance and we must unlock the schema
+    // lock.
+    GetMythDB()->SetSuppressDBMessages(false);
+    gCoreContext->ActivateSettingsCache(true);
+    DBUtil::UnlockSchema(query);
+    return success;
+}
+
+static bool tryUpgradeMusicDatabaseSchema()
+{
+    SchemaUpgradeWizard* schema_wizard = SchemaUpgradeWizard::Get(
         "MusicDBSchemaVer", "MythMusic", currentDatabaseVersion);
 
     if (schema_wizard->Compare() == 0) // DB schema is what we need it to be..
-        goto upgrade_ok_exit;
+        return true;
 
     if (schema_wizard->m_DBver.isEmpty())
     {
         // We need to create a database from scratch
-        if (doUpgradeMusicDatabaseSchema(schema_wizard->m_DBver))
-            goto upgrade_ok_exit;
-        else
-            goto upgrade_error_exit;
+        return doUpgradeMusicDatabaseSchema(schema_wizard->m_DBver);
     }
 
     // Pop up messages, questions, warnings, et c.
     switch (schema_wizard->PromptForUpgrade("Music", true, false))
     {
         case MYTH_SCHEMA_USE_EXISTING:
-            goto upgrade_ok_exit;
+            return true;
         case MYTH_SCHEMA_ERROR:
         case MYTH_SCHEMA_EXIT:
-            goto upgrade_error_exit;
+            return false;
         case MYTH_SCHEMA_UPGRADE:
             break;
     }
@@ -75,31 +91,13 @@ bool UpgradeMusicDatabaseSchema(void)
     if (!doUpgradeMusicDatabaseSchema(schema_wizard->m_DBver))
     {
         LOG(VB_GENERAL, LOG_ERR, "Database schema upgrade failed.");
-        goto upgrade_error_exit;
+        return false;
     }
 
     LOG(VB_GENERAL, LOG_INFO, "MythMusic database schema upgrade complete.");
 
-    // On any exit we want to re-enable the DB messages so errors
-    // are reported and we want to make sure the setting cache is
-    // enabled for good performance and we must unlock the schema
-    // lock. We use gotos with labels so it's impossible to miss
-    // these steps.
-  upgrade_ok_exit:
-    GetMythDB()->SetSuppressDBMessages(false);
-    gCoreContext->ActivateSettingsCache(true);
-    if (locked)
-        DBUtil::UnlockSchema(query);
     return true;
-
-  upgrade_error_exit:
-    GetMythDB()->SetSuppressDBMessages(false);
-    gCoreContext->ActivateSettingsCache(true);
-    if (locked)
-        DBUtil::UnlockSchema(query);
-    return false;
 }
-
 
 static bool doUpgradeMusicDatabaseSchema(QString &dbver)
 {
@@ -678,7 +676,7 @@ static bool doUpgradeMusicDatabaseSchema(QString &dbver)
         DBUpdates updates
         {
             qPrintable(QString("ALTER DATABASE %1 DEFAULT CHARACTER SET latin1;")
-                       .arg(gContext->GetDatabaseParams().m_dbName)),
+                       .arg(GetMythDB()->GetDatabaseName())),
             // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
             "ALTER TABLE music_albumart"
             "  MODIFY filename varbinary(255) NOT NULL default '';",
@@ -728,7 +726,7 @@ static bool doUpgradeMusicDatabaseSchema(QString &dbver)
         DBUpdates updates
         {
             qPrintable(QString("ALTER DATABASE %1 DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci;")
-                    .arg(gContext->GetDatabaseParams().m_dbName)),
+                    .arg(GetMythDB()->GetDatabaseName())),
             // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
             "ALTER TABLE music_albumart"
             "  DEFAULT CHARACTER SET utf8,"

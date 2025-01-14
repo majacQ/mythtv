@@ -1,9 +1,11 @@
 #ifndef RECORDINGPROFILE_H
 #define RECORDINGPROFILE_H
 
+#include <array>
+
+#include "libmythui/standardsettings.h"
+#include "libmythbase/mythdbcon.h"
 #include "mythtvexp.h"
-#include "standardsettings.h"
-#include "mythdbcon.h"
 
 const std::array<QString,4> kAvailProfiles
       {"Default", "Live TV", "High Quality", "Low Quality" };
@@ -102,7 +104,7 @@ class MTV_PUBLIC RecordingProfile : public GroupSetting
     static QString getName(int id);
 
     // Hardcoded DB group values
-    enum RecProfileGroup
+    enum RecProfileGroup : std::uint8_t
     {
         AllGroups            =  0,
         SoftwareEncoderGroup =  1,

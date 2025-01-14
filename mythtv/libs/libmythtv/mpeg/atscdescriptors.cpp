@@ -3,23 +3,24 @@
 
 #include <algorithm>
 
+#include "libmythbase/iso639.h"
+#include "libmythbase/mythlogging.h"
+
 #include "atscdescriptors.h"
-#include "mythlogging.h"
-#include "iso639.h"
 #include "atsc_huffman.h"
 
 QString MultipleStringStructure::CompressionTypeString(uint i, uint j) const
 {
     uint ct = CompressionType(i, j);
     if (0 == ct)
-        return QString("no compression");
+        return {"no compression"};
     if (1 == ct)
-        return QString("Huffman Coding using C.4, C.5");
+        return {"Huffman Coding using C.4, C.5"};
     if (2 == ct)
-        return QString("Huffman Coding using C.6, C.7");
+        return {"Huffman Coding using C.6, C.7"};
     if (ct < 0xaf)
-        return QString("reserved");
-    return QString("compression not used by ATSC in North America, unknown");
+        return {"reserved"};
+    return {"compression not used by ATSC in North America, unknown"};
 }
 
 QString MultipleStringStructure::toString() const
@@ -56,7 +57,7 @@ QString MultipleStringStructure::toString() const
 static uint maxPriority(const QMap<uint,uint> &langPrefs)
 {
     uint max_pri = 0;
-    for (uint pref : qAsConst(langPrefs))
+    for (uint pref : std::as_const(langPrefs))
         max_pri = std::max(max_pri, pref);
     return max_pri;
 }
@@ -91,7 +92,7 @@ QString MultipleStringStructure::GetBestMatch(QMap<uint,uint> &langPrefs) const
 {
     if (StringCount())
         return GetFullString(GetIndexOfBestMatch(langPrefs));
-    return QString();
+    return {};
 }
 
 QString MultipleStringStructure::GetSegment(uint i, uint j) const
@@ -147,12 +148,13 @@ QString MultipleStringStructure::Uncompressed(
         const auto* ustr = reinterpret_cast<const unsigned short*>(buf);
         for (int j=0; j<(len>>1); j++)
             str.append( QChar( (ustr[j]<<8) | (ustr[j]>>8) ) );
-    } else if (0x40<=mode && mode<=0x41)
+    } else if (0x40<=mode && mode<=0x41) {
         str = QString("TODO Tawain Characters");
-    else if (0x48==mode)
+    } else if (0x48==mode) {
         str = QString("TODO South Korean Characters");
-    else
+    } else {
         str = QString("unknown character encoding mode(%0)").arg(mode);
+    }
     return str;
 }
 
@@ -262,7 +264,7 @@ QString AC3AudioStreamDescriptor::BitRateCodeString(void) const
         return QString::fromStdString(s_ebr[BitRateCode()]);
     if ((BitRateCode() >= 32) && (BitRateCode() <= 50))
         return QString::fromStdString(s_ubr[BitRateCode()-32]);
-    return QString("Unknown Bit Rate Code");
+    return {"Unknown Bit Rate Code"};
 }
 
 QString AC3AudioStreamDescriptor::SurroundModeString(void) const

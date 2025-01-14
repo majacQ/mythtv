@@ -2,8 +2,8 @@
 #define CUTTER_H
 
 #include <cstdint>                      // for int64_t
-#include "deletemap.h"                  // for DeleteMap
-#include "programtypes.h"               // for frm_dir_map_t
+#include "libmythbase/programtypes.h"   // for frm_dir_map_t
+#include "libmythtv/deletemap.h"        // for DeleteMap
 
 // Cutter object is used in performing clean cutting. The
 // act of cutting is shared between the player and the
@@ -31,12 +31,8 @@ class Cutter
     int64_t       m_videoFramesToCut {0};
     int64_t       m_audioFramesToCut {0};
     float         m_audioFramesPerVideoFrame {0.0};
-    enum
-    {
-        MAXLEADIN  = 200,
-        MINCUT     = 20
-    };
-
+    static constexpr uint8_t kMaxLeadIn { 200 };
+    static constexpr uint8_t kMinCut { 20 };
 };
 
 #endif

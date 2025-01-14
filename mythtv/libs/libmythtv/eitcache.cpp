@@ -7,11 +7,12 @@
 
 #include <QDateTime>
 
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
 #include "eitcache.h"
-#include "mythcontext.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythdate.h"
 
 #define LOC QString("EITCache: ")
 
@@ -46,15 +47,18 @@ void EITCache::ResetStatistics(void)
 QString EITCache::GetStatistics(void) const
 {
     QMutexLocker locker(&m_eventMapLock);
-    return QString(
-        "EITCache Access:%1 Hits:%2 "
-        "Table:%3 Version:%4 Endtime:%5 New:%6 "
-        "Pruned:%7 Pruned Hits:%8 Future:%9 Wrong Channel:%10 "
-        "Hit Ratio:%11")
-        .arg(m_accessCnt).arg(m_hitCnt)
-        .arg(m_tblChgCnt).arg(m_verChgCnt).arg(m_endChgCnt).arg(m_entryCnt)
-        .arg(m_pruneCnt).arg(m_prunedHitCnt).arg(m_futureHitCnt).arg(m_wrongChannelHitCnt)
-        .arg((m_hitCnt+m_prunedHitCnt+m_futureHitCnt+m_wrongChannelHitCnt)/(double)m_accessCnt);
+    return
+        QString("Access:%1 ").arg(m_accessCnt) +
+        QString("HitRatio:%1 ").arg((m_hitCnt+m_prunedHitCnt+m_futureHitCnt+m_wrongChannelHitCnt)/(double)m_accessCnt) +
+        QString("Hits:%1 ").arg(m_hitCnt) +
+        QString("Table:%1 ").arg(m_tblChgCnt) +
+        QString("Version:%1 ").arg(m_verChgCnt) +
+        QString("Endtime:%1 ").arg(m_endChgCnt) +
+        QString("New:%1 ").arg(m_entryCnt) +
+        QString("Pruned:%1 ").arg(m_pruneCnt) +
+        QString("PrunedHits:%1 ").arg(m_prunedHitCnt) +
+        QString("Future:%1 ").arg(m_futureHitCnt) +
+        QString("WrongChannel:%1").arg(m_wrongChannelHitCnt);
 }
 
 /*
@@ -113,10 +117,12 @@ static void delete_in_db(uint endtime)
         MythDB::DBError("Error deleting old eitcache entries.", query);
 }
 
-
-#define EITDATA      0
-#define CHANNEL_LOCK 1
-#define STATISTIC    2
+enum channel_status : std::uint8_t
+{
+    EITDATA      = 0,
+    CHANNEL_LOCK = 1,
+    STATISTIC    = 2
+};
 
 static bool lock_channel(uint chanid, uint endtime)
 {
@@ -201,9 +207,14 @@ static void unlock_channel(uint chanid, uint updated)
         MythDB::DBError("Error inserting eit statistics", query);
 }
 
-
 event_map_t * EITCache::LoadChannel(uint chanid)
 {
+    // Event map is empty when we do not backup the cache in the database
+    if (!m_persistent)
+    {
+        return new event_map_t();
+    }
+
     if (!lock_channel(chanid, m_lastPruneTime))
         return nullptr;
 
@@ -240,7 +251,7 @@ event_map_t * EITCache::LoadChannel(uint chanid)
     }
 
     if (!eventMap->empty())
-        LOG(VB_EIT, LOG_INFO, LOC + QString("Loaded %1 entries for channel %2")
+        LOG(VB_EIT, LOG_DEBUG, LOC + QString("Loaded %1 entries for chanid %2")
                 .arg(eventMap->size()).arg(chanid));
 
     m_entryCnt += eventMap->size();
@@ -265,9 +276,13 @@ bool EITCache::WriteChannelToDB(QStringList &value_clauses, uint chanid)
         {
             if (modified(*it))
             {
-                replace_in_db(value_clauses, chanid, it.key(), *it);
+                if (m_persistent)
+                {
+                    replace_in_db(value_clauses, chanid, it.key(), *it);
+                }
+
                 updated++;
-                *it &= ~(uint64_t)0 >> 1; // mark as synced
+                *it &= ~(uint64_t)0 >> 1; // Mark as synced
             }
             ++it;
         }
@@ -278,18 +293,31 @@ bool EITCache::WriteChannelToDB(QStringList &value_clauses, uint chanid)
             removed++;
         }
     }
-    unlock_channel(chanid, updated);
+
+    if (m_persistent)
+    {
+        unlock_channel(chanid, updated);
+    }
 
     if (updated)
     {
-        LOG(VB_EIT, LOG_INFO, LOC + QString("Writing %1 modified entries of %2 "
-                                      "for channel %3 to database.")
-                .arg(updated).arg(size).arg(chanid));
+        if (m_persistent)
+        {
+            LOG(VB_EIT, LOG_DEBUG, LOC +
+                QString("Writing %1 modified entries of %2 for chanid %3 to database.")
+                    .arg(updated).arg(size).arg(chanid));
+        }
+        else
+        {
+            LOG(VB_EIT, LOG_DEBUG, LOC +
+                QString("Updated %1 modified entries of %2 for chanid %3 in cache.")
+                    .arg(updated).arg(size).arg(chanid));
+        }
     }
     if (removed)
     {
-        LOG(VB_EIT, LOG_INFO, LOC + QString("Removed %1 old entries of %2 "
-                                      "for channel %3 from cache.")
+        LOG(VB_EIT, LOG_DEBUG, LOC + QString("Removed %1 old entries of %2 "
+                                      "for chanid %3 from cache.")
                 .arg(removed).arg(size).arg(chanid));
     }
     m_pruneCnt += removed;
@@ -311,18 +339,21 @@ void EITCache::WriteToDB(void)
             ++it;
     }
 
-    if(value_clauses.isEmpty())
+    if (m_persistent)
     {
-        return;
-    }
+        if(value_clauses.isEmpty())
+        {
+            return;
+        }
 
-    MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(QString("REPLACE INTO eit_cache "
-                          "(chanid, eventid, tableid, version, endtime) "
-                          "VALUES %1").arg(value_clauses.join(",")));
-    if (!query.exec())
-    {
-        MythDB::DBError("Error updating eitcache", query);
+        MSqlQuery query(MSqlQuery::InitCon());
+        query.prepare(QString("REPLACE INTO eit_cache "
+                            "(chanid, eventid, tableid, version, endtime) "
+                            "VALUES %1").arg(value_clauses.join(",")));
+        if (!query.exec())
+        {
+            MythDB::DBError("Error updating eitcache", query);
+        }
     }
 }
 
@@ -331,22 +362,20 @@ bool EITCache::IsNewEIT(uint chanid,  uint tableid,   uint version,
 {
     m_accessCnt++;
 
-    if ((m_accessCnt <  100000 && (m_accessCnt %  10000 == 0)) ||
-        (m_accessCnt < 1000000 && (m_accessCnt % 100000 == 0)) ||
-        (m_accessCnt % 1000000 == 0))
+    if (m_accessCnt %  10000 == 0)
     {
-        LOG(VB_EIT, LOG_INFO, GetStatistics());
-        WriteToDB();
+        LOG(VB_EIT, LOG_INFO, LOC + GetStatistics());
+        ResetStatistics();
     }
 
-    // don't re-add pruned entries
+    // Don't re-add pruned entries
     if (endtime < m_lastPruneTime)
     {
         m_prunedHitCnt++;
         return false;
     }
 
-    // validity check, reject events with endtime over 7 weeks in the future
+    // Validity check, reject events with endtime over 7 weeks in the future
     if (endtime > m_lastPruneTime + 50 * 86400)
     {
         m_futureHitCnt++;
@@ -405,7 +434,7 @@ bool EITCache::IsNewEIT(uint chanid,  uint tableid,   uint version,
  */
 uint EITCache::PruneOldEntries(uint timestamp)
 {
-    if (VERBOSE_LEVEL_CHECK(VB_EIT, LOG_INFO))
+    if (VERBOSE_LEVEL_CHECK(VB_EIT, LOG_DEBUG))
     {
         QDateTime tmptime = MythDate::fromSecsSinceEpoch(timestamp);
         LOG(VB_EIT, LOG_INFO,
@@ -419,7 +448,10 @@ uint EITCache::PruneOldEntries(uint timestamp)
     WriteToDB();
 
     // Prune old entries in the DB
-    delete_in_db(timestamp);
+    if (m_persistent)
+    {
+        delete_in_db(timestamp);
+    }
 
     return 0;
 }

@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -19,11 +19,10 @@
 #include <QMap>
 #include <QDomDocument>
 
-#include "upnpexp.h"
-#include "upnp.h"
-
-#include "servicehost.h"
-#include "xsd.h"
+#include "libmythupnp/upnpexp.h"
+#include "libmythupnp/upnp.h"
+#include "libmythupnp/servicehost.h"
+#include "libmythupnp/xsd.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -59,7 +58,7 @@ class UPNP_PUBLIC Wsdl : public QDomDocument
                                             QString       sTypeName,
                                             bool          bReturnType = false );
 
-        static bool        IsCustomType          ( QString &sTypeName );
+        static bool        IsCustomType          ( const QString &sTypeName );
 
         static QString     ReadClassInfo         ( const QMetaObject *pMeta, 
                                             const QString     &sKey );

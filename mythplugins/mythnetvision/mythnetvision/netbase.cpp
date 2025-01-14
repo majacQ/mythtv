@@ -1,18 +1,17 @@
 #include <QDir>
 
-#include <mythdate.h>
-#include <mythdirs.h>
-#include <mythdate.h>
-#include <mythdialogbox.h>
-#include <mythcontext.h>
-#include <remotefile.h>
-#include <mythcoreutil.h>
-#include <mythscreenstack.h>
-#include <mythuihelper.h>
-#include <mythmainwindow.h>
-#include <mythprogressdialog.h>
-#include <metadata/metadataimagedownload.h>
-#include <metadata/videoutils.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/remotefile.h>
+#include <libmythbase/remoteutil.h>
+#include <libmythmetadata/metadataimagedownload.h>
+#include <libmythmetadata/videoutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythscreenstack.h>
+#include <libmythui/mythuihelper.h>
 
 #include "netbase.h"
 
@@ -193,7 +192,9 @@ void NetBase::SlotDeleteVideo()
                 this, &NetBase::DoDeleteVideo);
     }
     else
+    {
         delete confirmdialog;
+    }
 }
 
 void NetBase::DoDeleteVideo(bool remove)
@@ -220,16 +221,12 @@ void NetBase::DoDeleteVideo(bool remove)
 
 void NetBase::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (tokens.isEmpty())
             return;

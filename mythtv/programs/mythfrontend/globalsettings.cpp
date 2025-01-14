@@ -2,10 +2,10 @@
 // -*- Mode: c++ -*-
 
 // Standard UNIX C headers
-#include <unistd.h>
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 // Qt headers
 #include <QApplication>
@@ -17,42 +17,44 @@
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QImage>
-#include <QTextCodec>
+#include <QtGlobal>
 
 // MythTV headers
-#include "mythconfig.h"
-#include "mythcorecontext.h"
-#include "mythdbcon.h"
-#include "mythlogging.h"
-#include "dbsettings.h"
-#include "mythtranslation.h"
-#include "iso639.h"
-#include "playbackbox.h"
-#include "globalsettings.h"
-#include "recordingprofile.h"
-#include "mythdisplay.h"
-#include "cardutil.h"
-#include "themeinfo.h"
-#include "mythdirs.h"
-#include "mythuihelper.h"
-#include "langsettings.h"
-#include "decoders/mythcodeccontext.h"
-#include "mythsorthelper.h"
-#include "visualisations/videovisual.h"
+#include "libmyth/dbsettings.h"
+#include "libmythui/langsettings.h"
+#include "libmythbase/iso639.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythpower.h"
+#include "libmythbase/mythsorthelper.h"
+#include "libmythbase/mythsystem.h"
+#include "libmythbase/mythtranslation.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/channelgroup.h"
+#include "libmythtv/decoders/mythcodeccontext.h"
+#include "libmythtv/playgroup.h" //Used for playBackGroup, to be remove at one point
+#include "libmythtv/recordingprofile.h"
+#include "libmythtv/visualisations/videovisual.h"
+#include "libmythui/mythdisplay.h"
+#include "libmythui/mythpainterwindow.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/themeinfo.h"
 #ifdef USING_OPENGL
-#include "opengl/mythrenderopengl.h"
+#include "libmythui/opengl/mythrenderopengl.h"
 #endif
 #ifdef USING_AIRPLAY
-#include "AirPlay/mythraopconnection.h"
+#include "libmythtv/AirPlay/mythraopconnection.h"
 #endif
 #ifdef USING_VAAPI
-#include "decoders/mythvaapicontext.h"
+#include "libmythtv/decoders/mythvaapicontext.h"
 #endif
-#include "mythpower.h"
-#include "mythpainterwindow.h"
 
-//Use for playBackGroup, to be remove at one point
-#include "playgroup.h"
+// MythFrontend
+#include "globalsettings.h"
+#include "playbackbox.h"
 
 static HostSpinBoxSetting *AudioReadAhead()
 // was previously *DecodeExtraAudio()
@@ -117,7 +119,7 @@ static HostTextEditSetting *VAAPIDevice()
     ge->setHelpText(help);
 
     // update VideoDisplayProfile statics if this changes
-    QObject::connect(ge, &HostTextEditSetting::ChangeSaved,
+    QObject::connect(ge, &HostTextEditSetting::ChangeSaved, ge,
         []()
         {
             QString device = gCoreContext->GetSetting("VAAPIDevice");
@@ -274,7 +276,7 @@ static GlobalComboBoxSetting *CommercialSkipMethod()
                                         "MythTV to detect when commercials "
                                         "start and end."));
 
-    deque<int> tmp = GetPreferredSkipTypeCombinations();
+    std::deque<int> tmp = GetPreferredSkipTypeCombinations();
 
     for (int pref : tmp)
         bc->addSelection(SkipTypeToString(pref), QString::number(pref));
@@ -733,23 +735,25 @@ static GroupSetting *CategoryOverTimeSettings()
 
 PlaybackProfileItemConfig::PlaybackProfileItemConfig(
     PlaybackProfileConfig *parent, uint idx, MythVideoProfileItem &_item) :
-    m_item(_item), m_parentConfig(parent), m_index(idx)
+    m_item(_item),
+    m_widthRange(new TransTextEditSetting()),
+    m_heightRange(new TransTextEditSetting()),
+    m_codecs(new TransMythUIComboBoxSetting(true)),
+    m_framerate(new TransTextEditSetting()),
+    m_decoder(new TransMythUIComboBoxSetting()),
+    m_skipLoop(new TransMythUICheckBoxSetting()),
+    m_vidRend(new TransMythUIComboBoxSetting()),
+    m_upscaler(new TransMythUIComboBoxSetting()),
+    m_singleDeint(new TransMythUIComboBoxSetting()),
+    m_singleShader(new TransMythUICheckBoxSetting()),
+    m_singleDriver(new TransMythUICheckBoxSetting()),
+    m_doubleDeint(new TransMythUIComboBoxSetting()),
+    m_doubleShader(new TransMythUICheckBoxSetting()),
+    m_doubleDriver(new TransMythUICheckBoxSetting()),
+    m_parentConfig(parent),
+    m_index(idx)
 {
-    m_widthRange   = new TransTextEditSetting();
-    m_heightRange  = new TransTextEditSetting();
-    m_codecs       = new TransMythUIComboBoxSetting(true);
-    m_framerate    = new TransTextEditSetting();
-    m_decoder      = new TransMythUIComboBoxSetting();
     m_maxCpus      = new TransMythUISpinBoxSetting(1, HAVE_THREADS ? VIDEO_MAX_CPUS : 1, 1, 1);
-    m_skipLoop     = new TransMythUICheckBoxSetting();
-    m_vidRend      = new TransMythUIComboBoxSetting();
-    m_upscaler     = new TransMythUIComboBoxSetting();
-    m_singleDeint  = new TransMythUIComboBoxSetting();
-    m_singleShader = new TransMythUICheckBoxSetting();
-    m_singleDriver = new TransMythUICheckBoxSetting();
-    m_doubleDeint  = new TransMythUIComboBoxSetting();
-    m_doubleShader = new TransMythUICheckBoxSetting();
-    m_doubleDriver = new TransMythUICheckBoxSetting();
 
     const QString rangeHelp(tr(" Valid formats for the setting are "
         "[nnnn - nnnn], [> nnnn], [>= nnnn], [< nnnn], "
@@ -828,7 +832,7 @@ PlaybackProfileItemConfig::PlaybackProfileItemConfig(
     m_doubleDriver->setEnabled(false);
 
     const QList<QPair<QString,QString> >& options = MythVideoProfile::GetDeinterlacers();
-    for (const auto & option : qAsConst(options))
+    for (const auto & option : std::as_const(options))
     {
         m_singleDeint->addSelection(option.second, option.first);
         m_doubleDeint->addSelection(option.second, option.first);
@@ -1046,13 +1050,13 @@ void PlaybackProfileItemConfig::decoderChanged(const QString &dec)
     QStringList renderers = MythVideoProfile::GetVideoRenderers(dec);
 
     QString prenderer;
-    for (const auto & rend : qAsConst(renderers))
+    for (const auto & rend : std::as_const(renderers))
         prenderer = (rend == vrenderer) ? vrenderer : prenderer;
     if (prenderer.isEmpty())
         prenderer = MythVideoProfile::GetPreferredVideoRenderer(dec);
 
     m_vidRend->clearSelections();
-    for (const auto & rend : qAsConst(renderers))
+    for (const auto & rend : std::as_const(renderers))
     {
         if ((!rend.contains("null")))
             m_vidRend->addSelection(MythVideoProfile::GetVideoRendererName(rend),
@@ -1173,7 +1177,9 @@ void PlaybackProfileItemConfig::ShowDeleteDialog() const
         popupStack->AddScreen(confirmDelete);
     }
     else
+    {
         delete confirmDelete;
+    }
 }
 
 void PlaybackProfileItemConfig::DoDeleteSlot(bool doDelete)
@@ -1265,7 +1271,7 @@ void PlaybackProfileConfig::Save(void)
         return;
     }
 
-    for (PlaybackProfileItemConfig *profile : qAsConst(m_profiles))
+    for (PlaybackProfileItemConfig *profile : std::as_const(m_profiles))
     {
         profile->Save();
     }
@@ -1290,7 +1296,7 @@ void PlaybackProfileConfig::Save(void)
 void PlaybackProfileConfig::DeleteProfileItem(
     PlaybackProfileItemConfig *profileToDelete)
 {
-    for (PlaybackProfileItemConfig *profile : qAsConst(m_profiles))
+    for (PlaybackProfileItemConfig *profile : std::as_const(m_profiles))
         profile->Save();
 
     uint i = profileToDelete->GetIndex();
@@ -1302,9 +1308,9 @@ void PlaybackProfileConfig::DeleteProfileItem(
 
 void PlaybackProfileConfig::AddNewEntry(void)
 {
-    for (PlaybackProfileItemConfig *profile : qAsConst(m_profiles))
+    for (PlaybackProfileItemConfig *profile : std::as_const(m_profiles))
         profile->Save();
-    m_items.emplace_back(MythVideoProfileItem {});
+    m_items.emplace_back();
     ReloadSettings();
 }
 
@@ -1313,20 +1319,22 @@ void PlaybackProfileConfig::ReloadSettings(void)
     getParent()->removeTargetedChild(m_profileName, m_markForDeletion);
     getParent()->removeTargetedChild(m_profileName, m_addNewEntry);
 
-    for (StandardSetting *setting : qAsConst(m_profiles))
+    for (StandardSetting *setting : std::as_const(m_profiles))
         getParent()->removeTargetedChild(m_profileName, setting);
     m_profiles.clear();
 
     InitUI(getParent());
-    for (StandardSetting *setting : qAsConst(m_profiles))
+    for (StandardSetting *setting : std::as_const(m_profiles))
         setting->Load();
     emit getParent()->settingsChanged();
     setChanged(true);
 }
 
+// This function doesn't guarantee that no exceptions will be thrown.
+// NOLINTNEXTLINE(performance-noexcept-swap)
 void PlaybackProfileConfig::swap(int indexA, int indexB)
 {
-    for (PlaybackProfileItemConfig *profile : qAsConst(m_profiles))
+    for (PlaybackProfileItemConfig *profile : std::as_const(m_profiles))
         profile->Save();
 
     QString pri_i = QString::number(m_items[indexA].GetPriority());
@@ -1360,7 +1368,7 @@ static HostComboBoxSetting * CurrentPlaybackProfile()
         MythVideoProfile::SetDefaultProfileName(profile, host);
     }
 
-    for (const auto & prof : qAsConst(profiles))
+    for (const auto & prof : std::as_const(profiles))
     {
         grouptrigger->addSelection(ProgramInfo::i18n(prof), prof);
         grouptrigger->addTargetedChild(prof,
@@ -1386,7 +1394,9 @@ void PlaybackSettings::NewPlaybackProfileSlot() const
         popupStack->AddScreen(settingdialog);
     }
     else
+    {
         delete settingdialog;
+    }
 }
 
 void PlaybackSettings::CreateNewPlaybackProfileSlot(const QString &name)
@@ -1568,13 +1578,25 @@ static HostComboBoxSetting *DecodeVBIFormat()
 
 static HostComboBoxSetting *SubtitleCodec()
 {
+    static const QRegularExpression crlf { "[\r\n]" };
+    static const QRegularExpression suffix { "(//.*)" };
+
     auto *gc = new HostComboBoxSetting("SubtitleCodec");
 
     gc->setLabel(OSDSettings::tr("Subtitle Codec"));
 
-    QList<QByteArray> list = QTextCodec::availableCodecs();
+    // Translations are now done via FFmpeg(iconv).  Get the list of
+    // encodings that iconv supports.
+    QScopedPointer<MythSystem>
+        cmd(MythSystem::Create({"iconv", "-l"},
+                               kMSStdOut | kMSDontDisableDrawing));
+    cmd->Wait();
+    QString results = cmd->GetStandardOutputStream()->readAll();
+    QStringList list = results.toLower().split(crlf, Qt::SkipEmptyParts);
+    list.replaceInStrings(suffix, "");
+    list.sort();
 
-    for (const auto & codec : qAsConst(list))
+    for (const auto & codec : std::as_const(list))
     {
         QString val = QString(codec);
         gc->addSelection(val, val, val.toLower() == "utf-8");
@@ -1703,7 +1725,7 @@ static HostComboBoxSetting *Visualiser()
                                        "is no video. Defaults to none."));
     combo->addSelection("None", "");
     QStringList visuals = VideoVisual::GetVisualiserList(RenderType::kRenderOpenGL);
-    for (const auto & visual : qAsConst(visuals))
+    for (const auto & visual : std::as_const(visuals))
         combo->addSelection(visual, visual);
     return combo;
 }
@@ -1738,23 +1760,6 @@ static HostCheckBoxSetting *BrowseAllTuners()
     return gc;
 }
 
-static HostCheckBoxSetting *ClearSavedPosition()
-{
-    auto *gc = new HostCheckBoxSetting("ClearSavedPosition");
-
-    gc->setLabel(PlaybackSettings::tr("Clear bookmark on playback"));
-
-    gc->setValue(true);
-
-    gc->setHelpText(PlaybackSettings::tr("If enabled, automatically clear the "
-                                         "bookmark on a recording when the "
-                                         "recording is played back. If "
-                                         "disabled, you can mark the "
-                                         "beginning with rewind then save "
-                                         "position."));
-    return gc;
-}
-
 static HostCheckBoxSetting *UseProgStartMark()
 {
     auto *gc = new HostCheckBoxSetting("UseProgStartMark");
@@ -1779,7 +1784,7 @@ static HostComboBoxSetting *PlaybackExitPrompt()
     gc->setLabel(PlaybackSettings::tr("Action on playback exit"));
 
     gc->addSelection(PlaybackSettings::tr("Just exit"), "0");
-    gc->addSelection(PlaybackSettings::tr("Save position and exit"), "2");
+    gc->addSelection(PlaybackSettings::tr("Clear last played position and exit"), "16");
     gc->addSelection(PlaybackSettings::tr("Always prompt (excluding Live TV)"),
                      "1");
     gc->addSelection(PlaybackSettings::tr("Always prompt (including Live TV)"),
@@ -1789,9 +1794,8 @@ static HostComboBoxSetting *PlaybackExitPrompt()
     gc->setHelpText(PlaybackSettings::tr("If set to prompt, a menu will be "
                                          "displayed when you exit playback "
                                          "mode. The options available will "
-                                         "allow you to save your position, "
-                                         "delete the recording, or continue "
-                                         "watching."));
+                                         "allow you delete the recording, "
+                                         "continue watching, or exit."));
     return gc;
 }
 
@@ -1876,6 +1880,22 @@ static HostCheckBoxSetting *AutomaticSetWatched()
                                          "this setting if you don't want an "
                                          "unwatched recording marked as "
                                          "watched."));
+    return gc;
+}
+
+static HostCheckBoxSetting *AlwaysShowWatchedProgress()
+{
+    auto *gc = new HostCheckBoxSetting("AlwaysShowWatchedProgress");
+
+    gc->setLabel(PlaybackSettings::tr("Always show watched percent progress bar"));
+
+    gc->setValue(false);
+
+    gc->setHelpText(PlaybackSettings::tr("If enabled, shows the watched percent "
+                                         "progress bar even if the recording or "
+                                         "video is marked as watched. "
+                                         "Having a watched percent progress bar at "
+                                         "all depends on the currently used theme."));
     return gc;
 }
 
@@ -2101,6 +2121,23 @@ static HostTextEditSetting *LircDaemonDevice()
     return ge;
 }
 
+static HostTextEditSetting *CECDevice()
+{
+    auto *ge = new HostTextEditSetting("libCECDevice");
+
+    ge->setLabel(MainGeneralSettings::tr("CEC Device"));
+
+    ge->setValue("/dev/cec0");
+
+    QString help = MainGeneralSettings::tr("CEC Device. Default is /dev/cec0 "
+                                           "if you have only 1 HDMI output "
+                                           "port.");
+    ge->setHelpText(help);
+
+    return ge;
+}
+
+
 static HostTextEditSetting *ScreenShotPath()
 {
     auto *ge = new HostTextEditSetting("ScreenShotPath");
@@ -2165,6 +2202,7 @@ static HostComboBoxSetting *ScreenAspectRatio()
     gc->addSelection(AppearanceSettings::tr("32:10 (16:10 Side by side)"),    "3.2");
     gc->addSelection(AppearanceSettings::tr("16:20 (16:10 Above and below)"), "0.8");
     gc->setHelpText(AppearanceSettings::tr(
+            "This setting applies to video playback only, not to the GUI. "
             "Most modern displays have square pixels and the aspect ratio of the screen can be "
             "computed from the resolution (default). "
             "The aspect ratio can also be automatically detected from the connected display "
@@ -2195,7 +2233,7 @@ static HostCheckBoxSetting* StereoDiscard()
 {
     auto * cb = new HostCheckBoxSetting("DiscardStereo3D");
     cb->setValue(true);
-    cb->setLabel("Discard 3D stereoscopic fields");
+    cb->setLabel(PlaybackSettings::tr("Discard 3D stereoscopic fields"));
     cb->setHelpText(PlaybackSettings::tr(
         "If 'Side by Side' or 'Top and Bottom' 3D material is detected, "
         "enabling this setting will discard one field (enabled by default)."));
@@ -2307,6 +2345,21 @@ static HostCheckBoxSetting *GuiSizeForTV()
 
     gc->setHelpText(AppearanceSettings::tr("If enabled, use the above size for "
                                            "TV, otherwise use full screen."));
+    return gc;
+}
+
+static HostCheckBoxSetting *ForceFullScreen()
+{
+    auto *gc = new HostCheckBoxSetting("ForceFullScreen");
+
+    gc->setLabel(AppearanceSettings::tr("Force Full Screen for GUI and TV playback"));
+
+    gc->setValue(false);
+
+    gc->setHelpText(AppearanceSettings::tr(
+        "Use Full Screen for GUI and TV playback independent of the settings for "
+        "the GUI dimensions. This does not change the values of the GUI dimensions "
+        "so it is easy to switch from window mode to full screen and back."));
     return gc;
 }
 
@@ -2637,6 +2690,19 @@ static HostCheckBoxSetting *AlwaysOnTop()
     return gc;
 }
 
+static HostCheckBoxSetting *SmoothTransitions()
+{
+    auto *gc = new HostCheckBoxSetting("SmoothTransitions");
+
+    gc->setLabel(AppearanceSettings::tr("Smooth Transitions"));
+
+    gc->setValue(true);
+
+    gc->setHelpText(AppearanceSettings::tr("Enable smooth transitions with fade-in and fade-out of menu pages and enable GUI animations. "
+                                           "Disabling this can make the GUI respond faster especially on low-powered machines."));
+    return gc;
+}
+
 static HostSpinBoxSetting *StartupScreenDelay()
 {
     auto *gs = new HostSpinBoxSetting("StartupScreenDelay", -1, 60, 1, 1,
@@ -2807,10 +2873,11 @@ static HostCheckBoxSetting *GUIRGBLevels()
     auto *rgb = new HostCheckBoxSetting("GUIRGBLevels");
     rgb->setLabel(AppearanceSettings::tr("Use full range RGB output"));
     rgb->setValue(true);
-    rgb->setHelpText("Enable (recommended) to supply full range RGB output to your display device. "
+    rgb->setHelpText(AppearanceSettings::tr(
+                    "Enable (recommended) to supply full range RGB output to your display device. "
                      "Disable to supply limited range RGB output. This setting applies to both the "
                      "GUI and media playback. Ideally the value of this setting should match a "
-                     "similar setting on your TV or monitor.");
+                     "similar setting on your TV or monitor."));
     return rgb;
 }
 
@@ -2890,7 +2957,7 @@ static HostComboBoxSetting *ChannelGroupDefault()
                                              "shown in the EPG.  Pressing "
                                              "GUIDE key will toggle channel "
                                              "group."));
-    gc->setValue(false);
+    gc->setValue(0);
 
     return gc;
 }
@@ -2954,6 +3021,19 @@ static GlobalTextEditSetting *SortPrefixExceptions()
                         "the common prefixes (The, A, An) from a title or "
                         "filename.   Enter multiple names separated by "
                         "semicolons."));
+    return gc;
+}
+
+static GlobalComboBoxSetting *ManualRecordStartChanType()
+{
+    auto *gc = new GlobalComboBoxSetting("ManualRecordStartChanType");
+
+    gc->setLabel(GeneralSettings::tr("Starting channel for Manual Record"));
+    gc->addSelection(GeneralSettings::tr("Guide Starting Channel"), "1", true);
+    gc->addSelection(GeneralSettings::tr("Last Manual Record Channel"), "2");
+    gc->setHelpText(GeneralSettings::tr(
+                        "When entering a new Manual Record Rule, "
+                        "the starting channel will default to this."));
     return gc;
 }
 
@@ -3153,7 +3233,7 @@ static GlobalComboBoxSetting *MythLanguage()
 {
     auto *gc = new GlobalComboBoxSetting("Language");
 
-    gc->setLabel(AppearanceSettings::tr("Language"));
+    gc->setLabel(AppearanceSettings::tr("Menu Language"));
 
     QMap<QString, QString> langMap = MythTranslation::getLanguages();
     QStringList langs = langMap.values();
@@ -3165,7 +3245,7 @@ static GlobalComboBoxSetting *MythLanguage()
 
     gc->clearSelections();
 
-    for (const auto & label : qAsConst(langs))
+    for (const auto & label : std::as_const(langs))
     {
         QString value = langMap.key(label);
         gc->addSelection(label, value, (value.toLower() == langCode));
@@ -3173,6 +3253,36 @@ static GlobalComboBoxSetting *MythLanguage()
 
     gc->setHelpText(AppearanceSettings::tr("Your preferred language for the "
                                            "user interface."));
+    return gc;
+}
+
+static GlobalComboBoxSetting *AudioLanguage()
+{
+    auto *gc = new GlobalComboBoxSetting("AudioLanguage");
+
+    gc->setLabel(AppearanceSettings::tr("Audio Language"));
+
+    QMap<QString, QString> langMap = MythTranslation::getLanguages();
+    QStringList langs = langMap.values();
+    langs.sort();
+    QString langCode = gCoreContext->GetSetting("AudioLanguage").toLower();
+
+    if (langCode.isEmpty())
+    {
+        auto menuLangCode = gCoreContext->GetSetting("Language").toLower();
+        langCode = menuLangCode.isEmpty() ? "en_US" : menuLangCode;
+    }
+
+    gc->clearSelections();
+
+    for (const auto & label : std::as_const(langs))
+    {
+        QString value = langMap.key(label);
+        gc->addSelection(label, value, (value.toLower() == langCode));
+    }
+
+    gc->setHelpText(AppearanceSettings::tr("Preferred language for the "
+                                           "audio track."));
     return gc;
 }
 
@@ -3803,7 +3913,7 @@ static HostCheckBoxSetting *LCDEnable()
 }
 
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 static HostCheckBoxSetting *MacGammaCorrect()
 {
     HostCheckBoxSetting *gc = new HostCheckBoxSetting("MacGammaCorrect");
@@ -4137,6 +4247,7 @@ MainGeneralSettings::MainGeneralSettings()
         general->addChild(stripPrefixes);
         stripPrefixes->addTargetedChild("1", SortPrefixExceptions());
     }
+    general->addChild(ManualRecordStartChanType());
     addChild(general);
 
     addChild(EnableMediaMon());
@@ -4152,6 +4263,7 @@ MainGeneralSettings::MainGeneralSettings()
 #ifdef USING_LIBCEC
     HostCheckBoxSetting *cec = CECEnabled();
     remotecontrol->addChild(cec);
+    cec->addTargetedChild("1",CECDevice());
     m_cecPowerOnTVAllowed = CECPowerOnTVAllowed();
     m_cecPowerOffTVAllowed = CECPowerOffTVAllowed();
     m_cecPowerOnTVOnStart = CECPowerOnTVOnStart();
@@ -4360,9 +4472,9 @@ void PlaybackSettings::Load(void)
     auto *general = new GroupSetting();
     general->setLabel(tr("General Playback"));
     general->addChild(JumpToProgramOSD());
-    general->addChild(ClearSavedPosition());
     general->addChild(UseProgStartMark());
     general->addChild(AutomaticSetWatched());
+    general->addChild(AlwaysShowWatchedProgress());
     general->addChild(ContinueEmbeddedTVPlay());
     general->addChild(LiveTVIdleTimeout());
 
@@ -4446,7 +4558,7 @@ void PlaybackSettings::Load(void)
 
     addChild(comms);
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
     GroupSetting* mac = new GroupSetting();
     mac->setLabel(tr("Mac OS X Video Settings"));
     mac->addChild(MacGammaCorrect());
@@ -4494,7 +4606,7 @@ OSDSettings::OSDSettings()
     //cc->addChild(DecodeVBIFormat());
     //addChild(cc);
 
-#if defined(Q_OS_MACX)
+#ifdef Q_OS_MACOS
     // Any Mac OS-specific OSD stuff would go here.
 #endif
 }
@@ -4665,7 +4777,7 @@ void AppearanceSettings::PopulateScreens(int Screens)
 {
     m_screen->clearSelections();
     QList screens = QGuiApplication::screens();
-    for (QScreen *qscreen : qAsConst(screens))
+    for (QScreen *qscreen : std::as_const(screens))
     {
         QString extra = MythDisplay::GetExtraScreenInfo(qscreen);
         m_screen->addSelection(qscreen->name() + extra, qscreen->name());
@@ -4675,6 +4787,9 @@ void AppearanceSettings::PopulateScreens(int Screens)
 }
 
 AppearanceSettings::AppearanceSettings()
+  : m_screen(ScreenSelection()),
+    m_screenAspect(ScreenAspectRatio()),
+    m_display(GetMythMainWindow()->GetDisplay())
 {
     auto *screen = new GroupSetting();
     screen->setLabel(tr("Theme / Screen Settings"));
@@ -4684,14 +4799,12 @@ AppearanceSettings::AppearanceSettings()
     screen->addChild(MenuTheme());
     screen->addChild(GUIRGBLevels());
 
-    m_display = GetMythMainWindow()->GetDisplay();
-    m_screen = ScreenSelection();
-    m_screenAspect = ScreenAspectRatio();
     screen->addChild(m_screen);
     screen->addChild(m_screenAspect);
     PopulateScreens(MythDisplay::GetScreenCount());
     connect(m_display, &MythDisplay::ScreenCountChanged, this, &AppearanceSettings::PopulateScreens);
 
+    screen->addChild(ForceFullScreen());
     screen->addChild(new GuiDimension());
 
     screen->addChild(GuiSizeForTV());
@@ -4701,6 +4814,7 @@ AppearanceSettings::AppearanceSettings()
         screen->addChild(RunInWindow());
         screen->addChild(AlwaysOnTop());
     }
+    screen->addChild(SmoothTransitions());
     screen->addChild(StartupScreenDelay());
     screen->addChild(GUIFontZoom());
 #ifdef USING_AIRPLAY
@@ -4720,6 +4834,7 @@ AppearanceSettings::AppearanceSettings()
     dates->setLabel(tr("Localization"));
 
     dates->addChild(MythLanguage());
+    dates->addChild(AudioLanguage());
     dates->addChild(ISO639PreferredLanguage(0));
     dates->addChild(ISO639PreferredLanguage(1));
     dates->addChild(MythDateFormatCB());
@@ -4734,6 +4849,26 @@ AppearanceSettings::AppearanceSettings()
 /*******************************************************************************
 *                                Channel Groups                                *
 *******************************************************************************/
+
+static HostComboBoxSetting *AutomaticChannelGroupSelection()
+{
+    auto *gc = new HostComboBoxSetting("Select from Channel Group");
+    gc->setLabel(AppearanceSettings::tr("Select from Channel Group"));
+    gc->addSelection("All Channels");
+
+    // All automatic channel groups that have at least one channel
+    auto list = ChannelGroup::GetAutomaticChannelGroups(false);
+    for (const auto &chgrp : list)
+    {
+        gc->addSelection(chgrp.m_name);
+    }
+    gc->setHelpText(AppearanceSettings::tr(
+            "Select the channel group to select channels from. "
+            "\"All Channels\" lets you choose from all channels of all video sources. "
+            "\"Priority\" lets you choose from all channels that have recording priority. "
+            "The other values let you select a video source to choose channels from."));
+    return gc;
+}
 
 class ChannelCheckBoxSetting : public TransMythUICheckBoxSetting
 {
@@ -4756,11 +4891,11 @@ ChannelCheckBoxSetting::ChannelCheckBoxSetting(uint chanid,
 
 ChannelGroupSetting::ChannelGroupSetting(const QString &groupName,
                                          int groupId = -1)
-    : m_groupId(groupId)
+    : m_groupId(groupId),
+      m_groupName(new TransTextEditSetting())
 {
-    setLabel(groupName);//TODO this should be the translated name if Favorite
+    setLabel(groupName == "Favorites" ? tr("Favorites") : groupName);
     setValue(groupName);
-    m_groupName = new TransTextEditSetting();
     m_groupName->setLabel(groupName);
 }
 
@@ -4774,41 +4909,11 @@ void ChannelGroupSetting::Save()
         {
             MSqlQuery query(MSqlQuery::InitCon());
             QString newname = m_groupName ? m_groupName->getValue() : "undefined";
-            QString qstr =
-                "INSERT INTO channelgroupnames (name) VALUE (:NEWNAME);";
-            query.prepare(qstr);
-            query.bindValue(":NEWNAME", newname);
-
-            if (!query.exec())
-                MythDB::DBError("ChannelGroupSetting::Close", query);
-            else
-            {
-                //update m_groupId
-                QString qstr2 = "SELECT grpid FROM channelgroupnames "
-                                "WHERE name = :NEWNAME;";
-                query.prepare(qstr2);
-                query.bindValue(":NEWNAME", newname);
-                if (!query.exec())
-                    MythDB::DBError("ChannelGroupSetting::Close", query);
-                else
-                    if (query.next())
-                        m_groupId = query.value(0).toUInt();
-            }
+            m_groupId = ChannelGroup::AddChannelGroup(newname);
         }
         else
         {
-            MSqlQuery query(MSqlQuery::InitCon());
-            QString qstr = "UPDATE channelgroupnames set name = :NEWNAME "
-                            " WHERE name = :OLDNAME ;";
-            query.prepare(qstr);
-            query.bindValue(":NEWNAME", m_groupName->getValue());
-            query.bindValue(":OLDNAME", getValue());
-
-            if (!query.exec())
-                MythDB::DBError("ChannelGroupSetting::Close", query);
-            else
-                if (query.next())
-                    m_groupId = query.value(0).toUInt();
+            ChannelGroup::UpdateChannelGroup( getValue(), m_groupName->getValue());
         }
     }
 
@@ -4845,73 +4950,137 @@ void ChannelGroupSetting::Save()
     }
 }
 
-void ChannelGroupSetting::Load()
+void ChannelGroupSetting::LoadChannelGroup()
 {
-    clearSettings();
-    //We can not rename the Favorite group
-    //if (m_groupId!=1)
-    //{
-        m_groupName = new TransTextEditSetting();
-        m_groupName->setLabel(tr("Group name"));
-//        if (m_groupId > -1)
-        m_groupName->setValue(getLabel());
-        m_groupName->setEnabled(m_groupId != 1);
-        addChild(m_groupName);
-    //}
+    if (VERBOSE_LEVEL_CHECK(VB_GENERAL, LOG_DEBUG))
+    {
+        QString group = m_groupSelection->getValue();
+        int groupId = ChannelGroup::GetChannelGroupId(group);
+        LOG(VB_GENERAL, LOG_INFO,
+            QString("ChannelGroupSetting::LoadChannelGroup group:%1 groupId:%2")
+                .arg(group).arg(groupId));
+    }
+
+    // Set the old checkboxes from the previously selected channel group invisible
+    for (const auto &it : m_boxMap)
+    {
+        it.second->setVisible(false);
+    }
+
+    // And load the new collection
+    LoadChannelGroupChannels();
+
+    // Using m_groupSelection instead of nullptr keeps the focus in the "Select from Channel Group" box
+    emit settingsChanged(m_groupSelection);
+}
+
+void ChannelGroupSetting::LoadChannelGroupChannels()
+{
+    QString fromGroup = m_groupSelection->getValue();
+    int fromGroupId = ChannelGroup::GetChannelGroupId(fromGroup);
 
     MSqlQuery query(MSqlQuery::InitCon());
 
-    QString qstr =
-        "SELECT channel.chanid, channum, name, grpid FROM channel "
-        "LEFT JOIN channelgroup "
-        "ON (channel.chanid = channelgroup.chanid AND grpid = :GRPID) "
-        "WHERE deleted IS NULL "
-        "ORDER BY channum+0; "; //to order by numeric value of channel number
-
-    query.prepare(qstr);
-
-    query.bindValue(":GRPID",  m_groupId);
+    if (fromGroupId == -1)      // All Channels
+    {
+        query.prepare(
+            "SELECT channel.chanid, channum, name, grpid FROM channel "
+            "LEFT JOIN channelgroup "
+            "ON (channel.chanid = channelgroup.chanid AND grpid = :GRPID) "
+            "WHERE deleted IS NULL "
+            "AND visible > 0 "
+            "ORDER BY channum+0; ");    // Order by numeric value of channel number
+        query.bindValue(":GRPID",  m_groupId);
+    }
+    else
+    {
+        query.prepare(
+            "SELECT channel.chanid, channum, name, cg2.grpid FROM channel "
+            "RIGHT JOIN channelgroup AS cg1 "
+            "ON (channel.chanid = cg1.chanid AND cg1.grpid = :FROMGRPID) "
+            "LEFT JOIN channelgroup AS cg2 "
+            "ON (channel.chanid = cg2.chanid AND cg2.grpid = :GRPID) "
+            "WHERE deleted IS NULL "
+            "AND visible > 0 "
+            "ORDER BY channum+0; ");    // Order by numeric value of channel number
+        query.bindValue(":GRPID",  m_groupId);
+        query.bindValue(":FROMGRPID",  fromGroupId);
+    }
 
     if (!query.exec() || !query.isActive())
-        MythDB::DBError("ChannelGroupSetting::Load", query);
+        MythDB::DBError("ChannelGroupSetting::LoadChannelGroupChannels", query);
     else
     {
         while (query.next())
         {
-            auto *channelCheckBox =
-                    new ChannelCheckBoxSetting(query.value(0).toUInt(),
-                                               query.value(1).toString(),
-                                               query.value(2).toString());
-            channelCheckBox->setValue(!query.value(3).isNull());
-            addChild(channelCheckBox);
+            auto chanid  = query.value(0).toUInt();
+            auto channum = query.value(1).toString();
+            auto name    = query.value(2).toString();
+            auto checked = !query.value(3).isNull();
+            auto pair    = std::make_pair(m_groupId, chanid);
+
+            TransMythUICheckBoxSetting *checkBox = nullptr;
+            auto it = m_boxMap.find(pair);
+            if (it != m_boxMap.end())
+            {
+                checkBox = it->second;
+                checkBox->setVisible(true);
+            }
+            else
+            {
+                checkBox = new ChannelCheckBoxSetting(chanid, channum, name);
+                checkBox->setValue(checked);
+                m_boxMap[pair] = checkBox;
+                addChild(checkBox);
+            }
         }
     }
+}
+
+void ChannelGroupSetting::Load()
+{
+    clearSettings();
+
+    // We cannot rename the Favorites group, make it readonly
+    m_groupName = new TransTextEditSetting();
+    m_groupName->setLabel(tr("Group name"));
+    m_groupName->setValue(getLabel());
+    m_groupName->setReadOnly(m_groupId == 1);
+    addChild(m_groupName);
+
+    // Add channel group selection
+    m_groupSelection = AutomaticChannelGroupSelection();
+    connect(m_groupSelection, qOverload<StandardSetting *>(&StandardSetting::valueChanged),
+            this, &ChannelGroupSetting::LoadChannelGroup);
+    addChild(m_groupSelection);
+
+    LoadChannelGroupChannels();
 
     GroupSetting::Load();
 }
 
 bool ChannelGroupSetting::canDelete(void)
 {
-    //can not delete new group or Favorite
+    // Cannot delete new group or Favorites
     return (m_groupId > 1);
 }
 
 void ChannelGroupSetting::deleteEntry(void)
 {
     MSqlQuery query(MSqlQuery::InitCon());
+
     // Delete channels from this group
     query.prepare("DELETE FROM channelgroup WHERE grpid = :GRPID;");
     query.bindValue(":GRPID", m_groupId);
     if (!query.exec())
-        MythDB::DBError("ChannelGroupSetting::deleteEntry", query);
+        MythDB::DBError("ChannelGroupSetting::deleteEntry 1", query);
 
     // Now delete the group from channelgroupnames
     query.prepare("DELETE FROM channelgroupnames WHERE grpid = :GRPID;");
     query.bindValue(":GRPID", m_groupId);
     if (!query.exec())
-        MythDB::DBError("ChannelGroupSetting::Close", query);
+        MythDB::DBError("ChannelGroupSetting::deleteEntry 2", query);
 }
-
 
 ChannelGroupsSetting::ChannelGroupsSetting()
 {
@@ -4926,33 +5095,19 @@ void ChannelGroupsSetting::Load()
             this, &ChannelGroupsSetting::ShowNewGroupDialog);
     addChild(newGroup);
 
-    addChild(new ChannelGroupSetting(tr("Favorites"), 1));
-
-    MSqlQuery query(MSqlQuery::InitCon());
-
-    QString qstr = "SELECT grpid, name FROM channelgroupnames "
-                        " WHERE grpid <> 1 "
-                        " ORDER BY name ; ";
-
-    query.prepare(qstr);
-
-    if (!query.exec() || !query.isActive())
-        MythDB::DBError("ChannelGroupsSetting::Load", query);
-    else
+    ChannelGroupList list = ChannelGroup::GetManualChannelGroups();
+    for (auto it = list.begin(); it < list.end(); ++it)
     {
-        while(query.next())
-        {
-            addChild(new ChannelGroupSetting(query.value(1).toString(),
-                                             query.value(0).toUInt()));
-        }
+        QString name = (it->m_name == "Favorites") ? tr("Favorites") : it->m_name;
+        addChild(new ChannelGroupSetting(name, it->m_grpId));
     }
 
-    //Load all the groups
+    // Load all the groups
     GroupSetting::Load();
-    //TODO select the new one or the edited one
+
+    // TODO select the new one or the edited one
     emit settingsChanged(nullptr);
 }
-
 
 void ChannelGroupsSetting::ShowNewGroupDialog() const
 {
@@ -4974,12 +5129,11 @@ void ChannelGroupsSetting::ShowNewGroupDialog() const
 
 void ChannelGroupsSetting::CreateNewGroup(const QString& name)
 {
-    auto *button = new ChannelGroupSetting(name,-1);
+    auto *button = new ChannelGroupSetting(name, -1);
     button->setLabel(name);
     button->Load();
     addChild(button);
     emit settingsChanged(this);
 }
-
 
 // vim:set sw=4 ts=4 expandtab:

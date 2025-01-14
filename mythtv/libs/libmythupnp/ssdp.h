@@ -6,35 +6,38 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef SSDP_H
 #define SSDP_H
 
+#include <array>
+
 #include <QFile>
 
+#include "libmythbase/mthread.h"
+
 #include "upnpexp.h"
-#include "mthread.h"
 #include "httpserver.h"
 #include "taskqueue.h"
 #include "msocketdevice.h"
 #include "ssdpcache.h"
 #include "upnptasknotify.h"
 
-#define SSDP_GROUP      "239.255.255.250"
-#define SSDP_PORT       1900
-#define SSDP_SEARCHPORT 6549
+static constexpr const char* SSDP_GROUP { "239.255.255.250" };
+static constexpr uint16_t SSDP_PORT       { 1900 };
+static constexpr uint16_t SSDP_SEARCHPORT { 6549 };
 
-enum SSDPMethod
+enum SSDPMethod : std::uint8_t
 {
     SSDPM_Unknown         = 0,
     SSDPM_GetDeviceDesc   = 1,
     SSDPM_GetDeviceList   = 2
 };
 
-enum SSDPRequestType
+enum SSDPRequestType : std::uint8_t
 {
     SSDP_Unknown        = 0,
     SSDP_MSearch        = 1,
@@ -50,9 +53,12 @@ enum SSDPRequestType
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
 
-#define SocketIdx_Search     0
-#define SocketIdx_Multicast  1
-#define SocketIdx_Broadcast  2
+enum SocketIdxType : std::uint8_t
+{
+    SocketIdx_Search     = 0,
+    SocketIdx_Multicast  = 1,
+    SocketIdx_Broadcast  = 2
+};
 
 class UPNP_PUBLIC SSDP : public MThread
 {
@@ -77,7 +83,7 @@ class UPNP_PUBLIC SSDP : public MThread
     private:
 
         // ------------------------------------------------------------------
-        // Private so the singleton pattern can be inforced.
+        // Private so the singleton pattern can be enforced.
         // ------------------------------------------------------------------
 
         SSDP   ();

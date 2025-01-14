@@ -1,22 +1,23 @@
-// MythTV
-#include "osd.h"
-#include "mythplayer.h"
-#include "mythvideoprofile.h"
-#include "decoderbase.h"
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "mythmainwindow.h"
-#include "mythuihelper.h"
-#include "mythavutil.h"
-#include "mthreadpool.h"
-#include "mythcodeccontext.h"
-#include "mythvideooutnull.h"
-#include "mythvideooutgpu.h"
-#include "mythvideoout.h"
-
 // std
 #include <cmath>
 #include <cstdlib>
+
+// MythTV
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuihelper.h"
+
+#include "decoders/decoderbase.h"
+#include "decoders/mythcodeccontext.h"
+#include "mythavutil.h"
+#include "mythplayer.h"
+#include "mythvideoout.h"
+#include "mythvideooutgpu.h"
+#include "mythvideooutnull.h"
+#include "mythvideoprofile.h"
+#include "osd.h"
 
 #define LOC QString("VideoOutput: ")
 
@@ -95,10 +96,10 @@ void MythVideoOutput::GetRenderOptions(RenderOptions& Options, MythRender* Rende
  * \brief This constructor for VideoOutput must be followed by an
  *        Init(int,int,float,WId,int,int,int,int,WId) call.
  */
-MythVideoOutput::MythVideoOutput()
+MythVideoOutput::MythVideoOutput() :
+    m_dbLetterboxColour(static_cast<LetterBoxColour>(gCoreContext->GetNumSetting("LetterboxColour", 0))),
+    m_clearColor(m_dbLetterboxColour == kLetterBoxColour_Gray25 ? 64 : 0)
 {
-    m_dbLetterboxColour = static_cast<LetterBoxColour>(gCoreContext->GetNumSetting("LetterboxColour", 0));
-    m_clearColor = m_dbLetterboxColour == kLetterBoxColour_Gray25 ? 64 : 0;
 }
 
 /**
@@ -190,7 +191,7 @@ bool MythVideoOutput::InputChanged(const QSize VideoDim, const QSize VideoDispDi
     SourceChanged(VideoDim, VideoDispDim, VideoAspect);
     m_maxReferenceFrames = ReferenceFrames;
     AVCodecID avCodecId = myth2av_codecid(CodecID);
-    AVCodec* codec = avcodec_find_decoder(avCodecId);
+    const AVCodec* codec = avcodec_find_decoder(avCodecId);
     QString codecName;
     if (codec)
         codecName = codec->name;
@@ -323,8 +324,11 @@ QRect MythVideoOutput::GetImageRect(const QRect Rect, QRect* DisplayRect)
     qreal hscale = 0.0;
     QSize video_size   = GetVideoDispDim();
     int image_height   = video_size.height();
-    int image_width    = (image_height > 720) ? 1920 :
-                         (image_height > 576) ? 1280 : 720;
+    int image_width {720};
+    if (image_height > 720)
+        image_width = 1920;
+    else if (image_height > 576)
+        image_width = 1280;
     qreal image_aspect = static_cast<qreal>(image_width) / image_height;
     qreal pixel_aspect = static_cast<qreal>(video_size.width()) / video_size.height();
 

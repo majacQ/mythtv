@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -28,10 +28,11 @@
 #include <QMutex>
 
 // MythTV headers
-#include "referencecounter.h"
-#include "upnputil.h"
-#include "mthread.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/referencecounter.h"
+
 #include "upnpexp.h"
+#include "upnputil.h"
 
 class Task;
 class TaskQueue;

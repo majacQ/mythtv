@@ -12,7 +12,7 @@
 #-----------------------
 __title__ = "TheMovieDB.org V3"
 __author__ = "Raymond Wagner, Roland Ernst"
-__version__ = "0.3.9"
+__version__ = "0.3.12"
 # 0.1.0 Initial version
 # 0.2.0 Add language support, move cache to home directory
 # 0.3.0 Enable version detection to allow use in MythTV
@@ -30,6 +30,9 @@ __version__ = "0.3.9"
 # 0.3.7.a : Added compatibiliy to python3, tested with python 3.6 and 2.7
 # 0.3.8 Sort posters by system language or 'en', if not found for given language
 # 0.3.9 Support TV lookup
+# 0.3.10 Use new API for release dates for movies
+# 0.3.11 Allow queries for specials in series in TV lookup
+# 0.3.12 `buildMovieList` searches now for movies with year
 
 # ~ from optparse import OptionParser
 import sys
@@ -38,17 +41,14 @@ import signal
 def print_etree(etostr):
     """lxml.etree.tostring is a bytes object in python3, and a str in python2.
     """
-    if sys.version_info[0] == 2:
-        sys.stdout.write(etostr)
-    else:
-        sys.stdout.write(etostr.decode())
+    sys.stdout.write(etostr.decode())
 
 def timeouthandler(signal, frame):
     raise RuntimeError("Timed out")
 
 def buildSingle(inetref, opts):
     from MythTV.tmdb3.tmdb_exceptions import TMDBRequestInvalid
-    from MythTV.tmdb3 import Movie, get_locale
+    from MythTV.tmdb3 import Movie, ReleaseType, get_locale
     from MythTV import VideoMetadata
     from lxml import etree
 
@@ -60,7 +60,7 @@ def buildSingle(inetref, opts):
     else:
         movie = Movie(inetref)
 
-    tree = etree.XML(u'<metadata></metadata>')
+    tree = etree.XML('<metadata></metadata>')
     mapping = [['runtime',      'runtime'],     ['title',       'originaltitle'],
                ['releasedate',  'releasedate'], ['tagline',     'tagline'],
                ['description',  'overview'],    ['homepage',    'homepage'],
@@ -78,12 +78,11 @@ def buildSingle(inetref, opts):
     if movie.title:
         m.title = movie.title
 
-    releases = list(movie.releases.items())
+    if movie.releasedate:
+        m.releasedate = movie.releasedate
 
-# get the release date for the wanted country
-# TODO if that is not part of the reply use the primary release date (Primary=true)
-# if that is not part of the reply use whatever release date is first in list
-# if there is not a single release date in the reply, then leave it empty
+    releases = list(movie.cert_releases.items())
+
     if len(releases) > 0:
         if opts.country:
             # resort releases with selected country at top to ensure it
@@ -92,17 +91,34 @@ def buildSingle(inetref, opts):
             if opts.country in r[0]:
                 index = r[0].index(opts.country)
                 releases.insert(0, releases.pop(index))
-
-        m.releasedate = releases[0][1].releasedate
+                r_dates_country = releases[0][1].cert_release_dates
+                r_types_country = [x.releasetype for x in r_dates_country]
+                # from the mailing list: 
+                # https://www.themoviedb.org/talk/585ad032925141724d0514f4
+                # sort order for release dates: 2, 3, 1, min (4 ,5, 6)
+                sorted_dates = []
+                for rt in [ ReleaseType.Theatrical_limited,    # 2
+                            ReleaseType.Theatrical,            # 3
+                            ReleaseType.Premiere,              # 1
+                            ReleaseType.Digital,               # 4
+                            ReleaseType.Physical,              # 5
+                            ReleaseType.TV] :                  # 6
+                    if rt in r_types_country:
+                        r_index = r_types_country.index(rt)
+                        sorted_dates.append(r_dates_country[r_index].releasedate)
+                        if rt < ReleaseType.Digital:
+                            break
+                if len(sorted_dates) > 0:
+                    m.releasedate = min(sorted_dates)
 
     m.inetref = str(movie.id)
     if movie.collection:
         m.collectionref = str(movie.collection.id)
     if m.releasedate:
         m.year = m.releasedate.year
-    for country, release in releases:
-        if release.certification:
-            m.certifications[country] = release.certification
+    for country, releaseitem in releases:
+        if releaseitem.cert_release_dates[0].certification:
+            m.certifications[country] = releaseitem.cert_release_dates[0].certification
     for genre in movie.genres:
         m.categories.append(genre.name)
     for studio in movie.studios:
@@ -129,10 +145,14 @@ def buildSingle(inetref, opts):
     # if no poster of given language was found,
     # try to sort by system language and then by language "en"
     system_language = py_locale.getdefaultlocale()[0].split("_")[0]
+    system_country = py_locale.getdefaultlocale()[0].split("_")[1]
     locale_language = get_locale().language
+    locale_country = get_locale().country
     if opts.debug:
         print("system_language : ", system_language)
         print("locale_language : ", locale_language)
+        print("system_country  : ", system_country)
+        print("locale_country  : ", locale_country)
 
     loc_posters = movie.posters
     if len(loc_posters) and loc_posters[0].language != locale_language \
@@ -170,11 +190,11 @@ def buildMovieList(query, opts):
     # as negative to all text that comes afterwards
     query = query.replace('-',' ')
 
-    from MythTV.tmdb3 import searchMovie
+    from MythTV.tmdb3 import searchMovieWithYear
     from MythTV import VideoMetadata
     from lxml import etree
-    results = iter(searchMovie(query))
-    tree = etree.XML(u'<metadata></metadata>')
+    results = iter(searchMovieWithYear(query))
+    tree = etree.XML('<metadata></metadata>')
     mapping = [['runtime',      'runtime'],     ['title',       'originaltitle'],
                ['releasedate',  'releasedate'], ['tagline',     'tagline'],
                ['description',  'overview'],    ['homepage',    'homepage'],
@@ -240,7 +260,7 @@ def buildTVList(query, opts):
         ['title', 'name'], ['inetref','id'],
         ['collectionref','id'], ['description','overview'],
         ['releasedate','first_air_date']]
-    tree = etree.XML(u'<metadata></metadata>')
+    tree = etree.XML('<metadata></metadata>')
 
     count = 0
     while True:
@@ -297,14 +317,7 @@ def buildEpisode(args, opts):
     from lxml import etree
     from MythTV.tmdb3 import searchSeries
 
-    query_is_numeric = False
-    try:
-       query_is_numeric = query.isnumeric()
-    except AttributeError:
-       # python2 and ascii strings
-       query_is_numeric = query.isdigit()
-
-    if query_is_numeric:
+    if query.isnumeric():
         inetref = query
     else:
         results = searchSeries(query)
@@ -329,7 +342,7 @@ def buildEpisode(args, opts):
 
     # process seasons backwards because it is more likely
     # that you have a recent one than an old one
-    while season_number > 0:
+    while season_number >= 0:
         season = Season(inetref,str(season_number))
         if episode_number:
             episode = season.episodes[episode_number]
@@ -350,7 +363,7 @@ def buildEpisode(args, opts):
     # reload episode with full details
     episode = Episode(inetref,season_number,episode_number)
 
-    tree = etree.XML(u'<metadata></metadata>')
+    tree = etree.XML('<metadata></metadata>')
     mapping = [['subtitle','name'],
                ['description', 'overview'], ['season', 'season_number'],
                ['episode', 'episode_number'], ['releasedate', 'air_date']]
@@ -406,7 +419,7 @@ def buildCollection(inetref, opts):
     from MythTV import VideoMetadata
     from lxml import etree
     collection = Collection(inetref)
-    tree = etree.XML(u'<metadata></metadata>')
+    tree = etree.XML('<metadata></metadata>')
     m = VideoMetadata()
     m.collectionref = str(collection.id)
     try:
@@ -441,7 +454,7 @@ def buildTVSeries(inetref, opts):
         ['title', 'name'], ['inetref','id'],
         ['collectionref','id'], ['description','overview'],
         ['releasedate','first_air_date']]
-    tree = etree.XML(u'<metadata></metadata>')
+    tree = etree.XML('<metadata></metadata>')
     m = VideoMetadata()
     for i,j in mapping:
         if getattr(series, j):
@@ -469,7 +482,7 @@ def buildTVSeries(inetref, opts):
 
 def buildVersion(showType, command):
     from lxml import etree
-    version = etree.XML(u'<grabber></grabber>')
+    version = etree.XML('<grabber></grabber>')
     etree.SubElement(version, "name").text = __title__ + ' ' + showType
     etree.SubElement(version, "author").text = __author__
     etree.SubElement(version, "thumbnail").text = 'tmdb.png'

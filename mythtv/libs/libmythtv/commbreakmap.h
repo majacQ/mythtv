@@ -1,22 +1,19 @@
 #ifndef BREAKMAP_H
 #define BREAKMAP_H
 
-// MythTV headers
-#include "tv.h"
-#include "programtypes.h"
-#include "playercontext.h"
+#include <cstdint>
 
 // Qt headers
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
+#include <QtGlobal>
 #include <QRecursiveMutex>
-#endif
 #include <QMap>
 #include <QCoreApplication>
 
-#include <cstdint>
-#include "compat.h"
+// MythTV headers
+#include "libmythbase/compat.h"
+#include "libmythbase/programtypes.h"
+#include "libmythtv/tv.h"
+#include "libmythtv/playercontext.h"
 
 class CommBreakMap
 {
@@ -50,11 +47,7 @@ class CommBreakMap
   private:
     void MergeShortCommercials(double video_frame_rate);
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex          m_commBreakMapLock      {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_commBreakMapLock;
-#endif
     int                     m_skipcommercials       {0};
     CommSkipMode            m_autocommercialskip    {kCommSkipOff};
     std::chrono::seconds    m_commrewindamount      {0s};

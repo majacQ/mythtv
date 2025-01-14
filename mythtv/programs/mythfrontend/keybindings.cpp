@@ -26,8 +26,8 @@
  */
 
 // MythTV headers
-#include "mythdb.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythdb.h"
+#include "libmythui/mythmainwindow.h"
 
 // MythControls headers
 #include "keybindings.h"
@@ -117,7 +117,7 @@ QStringList KeyBindings::GetKeyContexts(const QString &key) const
     ActionList actions = m_actionSet.GetActions(key);
     QStringList contexts;
 
-    for (const auto & action : qAsConst(actions))
+    for (const auto & action : std::as_const(actions))
     {
         QString context = action.GetContext();
         if (!contexts.contains(context))

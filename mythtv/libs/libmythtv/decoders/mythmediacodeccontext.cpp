@@ -1,15 +1,25 @@
 // Qt
+#include <QtGlobal>
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtAndroidExtras>
 #include <QAndroidJniEnvironment>
+#else
+#include <QCoreApplication>
+#include <QJniEnvironment>
+#include <QJniObject>
+#define QAndroidJniEnvironment QJniEnvironment
+#define QAndroidJniObject QJniObject
+#endif
 
 // MythTV
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+
 #include "avformatdecoder.h"
-#include "mythmediacodecinterop.h"
-#include "mythplayerui.h"
 #include "mythmediacodeccontext.h"
+#include "mythplayerui.h"
+#include "opengl/mythmediacodecinterop.h"
 
 // FFmpeg
 extern "C" {
@@ -208,7 +218,7 @@ int MythMediaCodecContext::InitialiseDecoder(AVCodecContext *Context)
 }
 
 MythCodecID MythMediaCodecContext::GetBestSupportedCodec(AVCodecContext **Context,
-                                                         AVCodec       **Codec,
+                                                         const AVCodec **Codec,
                                                          const QString  &Decoder,
                                                          AVStream       *Stream,
                                                          uint            StreamType)
@@ -231,7 +241,7 @@ MythCodecID MythMediaCodecContext::GetBestSupportedCodec(AVCodecContext **Contex
     MCProfiles& profiles = MythMediaCodecContext::GetProfiles();
     MythCodecContext::CodecProfile mythprofile =
             MythCodecContext::FFmpegToMythProfile((*Context)->codec_id, (*Context)->profile);
-    for (auto profile : qAsConst(profiles))
+    for (auto profile : std::as_const(profiles))
     {
         if (profile.first == mythprofile &&
             profile.second.width() >= (*Context)->width &&
@@ -249,7 +259,7 @@ MythCodecID MythMediaCodecContext::GetBestSupportedCodec(AVCodecContext **Contex
         QString decodername = QString((*Codec)->name) + "_mediacodec";
         if (decodername == "mpeg2video_mediacodec")
             decodername = "mpeg2_mediacodec";
-        AVCodec *newCodec = avcodec_find_decoder_by_name (decodername.toLocal8Bit());
+        const AVCodec *newCodec = avcodec_find_decoder_by_name (decodername.toLocal8Bit());
         if (newCodec)
         {
             *Codec = newCodec;
@@ -325,7 +335,7 @@ void MythMediaCodecContext::PostProcessFrame(AVCodecContext*, MythVideoFrame* Fr
 
     Frame->m_deinterlaceInuse = DEINT_BASIC | DEINT_DRIVER;
     Frame->m_deinterlaceInuse2x = false;
-    Frame->m_interlaced = 0;
+    Frame->m_interlaced = false;
     Frame->m_interlacedReverse = false;
     Frame->m_topFieldFirst = false;
     Frame->m_deinterlaceAllowed = DEINT_NONE;
@@ -345,11 +355,7 @@ bool MythMediaCodecContext::IsDeinterlacing(bool &DoubleRate, bool)
 MCProfiles &MythMediaCodecContext::GetProfiles(void)
 {
     // TODO Something tells me this is leakier than a leaky thing
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static MCProfiles s_profiles;
 
@@ -492,17 +498,13 @@ void MythMediaCodecContext::GetDecoderList(QStringList &Decoders)
         return;
 
     Decoders.append("MediaCodec:");
-    for (auto profile : qAsConst(profiles))
+    for (auto profile : std::as_const(profiles))
         Decoders.append(MythCodecContext::GetProfileDescription(profile.first, profile.second));
 }
 
 bool MythMediaCodecContext::HaveMediaCodec(bool Reinit /*=false*/)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static bool s_available   = false;
 
@@ -518,7 +520,7 @@ bool MythMediaCodecContext::HaveMediaCodec(bool Reinit /*=false*/)
         {
             s_available = true;
             LOG(VB_GENERAL, LOG_INFO, LOC + "Supported/available MediaCodec decoders:");
-            for (auto profile : qAsConst(profiles))
+            for (auto profile : std::as_const(profiles))
             {
                 LOG(VB_GENERAL, LOG_INFO, LOC +
                     MythCodecContext::GetProfileDescription(profile.first, profile.second));

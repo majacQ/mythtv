@@ -4,20 +4,22 @@
 #include <QString>
 
 // MythTV
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "mythevent.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythmainwindow.h"
 #include "mythdisplay.h"
 #include "mythcecadapter.h"
 
 // Std
+#include <memory>
 #include <vector>
 
 // libcec
 #include <libcec/cecloader.h>
 
-#define MAX_CEC_DEVICES 10
+static constexpr uint8_t MAX_CEC_DEVICES { 10 };
 #define LOC QString("CECAdapter: ")
 
 #if CEC_LIB_VERSION_MAJOR <= 3
@@ -187,6 +189,8 @@ void MythCECAdapter::Open(MythMainWindow *Window)
 #if CEC_LIB_VERSION_MAJOR >= 4
     auto *devices = new cec_adapter_descriptor[MAX_CEC_DEVICES];
     int8_t num_devices = m_adapter->DetectAdapters(devices, MAX_CEC_DEVICES, nullptr, true);
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    std::unique_ptr<cec_adapter_descriptor[]> cec_devices(devices);
 #else
     cec_adapter *devices = new cec_adapter[MAX_CEC_DEVICES];
     uint8_t num_devices = m_adapter->FindAdapters(devices, MAX_CEC_DEVICES, nullptr);

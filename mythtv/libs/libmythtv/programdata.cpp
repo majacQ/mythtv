@@ -6,14 +6,15 @@
 #include <utility>
 
 // Qt includes
-#include <QtCore> // for qAbs
+#include <QtGlobal> // for qAbs
 
 // MythTV headers
-#include "programdata.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
 #include "channelutil.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "dvbdescriptors.h"
+#include "mpeg/dvbdescriptors.h"
+#include "programdata.h"
 
 #define LOC      QString("ProgramData: ")
 
@@ -300,8 +301,8 @@ void DBEvent::AddPerson(DBPerson::Role role, const QString &name,
     if (!m_credits)
         m_credits = new DBCredits;
 
-    m_credits->push_back(DBPerson(role, name.simplified(),
-                                  priority, character.simplified()));
+    m_credits->emplace_back(role, name.simplified(),
+                            priority, character.simplified());
 }
 
 void DBEvent::AddPerson(const QString &role, const QString &name,
@@ -310,8 +311,8 @@ void DBEvent::AddPerson(const QString &role, const QString &name,
     if (!m_credits)
         m_credits = new DBCredits;
 
-    m_credits->push_back(DBPerson(role, name.simplified(),
-                                  priority, character.simplified()));
+    m_credits->emplace_back(role, name.simplified(),
+                            priority, character.simplified());
 }
 
 bool DBEvent::HasTimeConflict(const DBEvent &o) const
@@ -547,19 +548,11 @@ static int score_match(const QString &a, const QString &b)
     if (A == B)
         return 1000;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList al = A.split(" ", QString::SkipEmptyParts);
-#else
     QStringList al = A.split(" ", Qt::SkipEmptyParts);
-#endif
     if (al.isEmpty())
         return 0;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList bl = B.split(" ", QString::SkipEmptyParts);
-#else
     QStringList bl = B.split(" ", Qt::SkipEmptyParts);
-#endif
     if (bl.isEmpty())
         return 0;
 
@@ -891,7 +884,7 @@ uint DBEvent::UpdateDB(
     query.bindValue(":SERIESID",    denullify(lseriesId));
     query.bindValue(":PROGRAMID",   denullify(lprogramId));
     query.bindValue(":PREVSHOWN",   lpreviouslyshown);
-    query.bindValue(":INETREF",     linetref);
+    query.bindValue(":INETREF",     denullify(linetref));
 
     if (!query.exec())
     {
@@ -905,7 +898,7 @@ uint DBEvent::UpdateDB(
             credit.InsertDB(query, chanid, m_starttime);
     }
 
-    for (const auto & rating : qAsConst(m_ratings))
+    for (const auto & rating : std::as_const(m_ratings))
     {
         query.prepare(
             "INSERT IGNORE INTO programrating "
@@ -1201,7 +1194,7 @@ uint DBEvent::InsertDB(MSqlQuery &query, uint chanid,
     query.bindValue(":SEASON",      m_season);
     query.bindValue(":EPISODE",     m_episode);
     query.bindValue(":TOTALEPISODES", m_totalepisodes);
-    query.bindValue(":INETREF",     m_inetref);
+    query.bindValue(":INETREF",     denullify(m_inetref));
 
     if (!query.exec())
     {
@@ -1210,7 +1203,7 @@ uint DBEvent::InsertDB(MSqlQuery &query, uint chanid,
     }
 
     table = recording ? "recordedrating" : "programrating";
-    for (const auto & rating : qAsConst(m_ratings))
+    for (const auto & rating : std::as_const(m_ratings))
     {
         query.prepare(QString(
             "INSERT IGNORE INTO %1 "
@@ -1367,13 +1360,13 @@ uint ProgInfo::InsertDB(MSqlQuery &query, uint chanid,
     query.bindValue(":PROGRAMID",   denullify(m_programId));
     query.bindValue(":PREVSHOWN",   m_previouslyshown);
     query.bindValue(":STARS",       m_stars);
-    query.bindValue(":SHOWTYPE",    m_showtype);
-    query.bindValue(":TITLEPRON",   m_title_pronounce);
-    query.bindValue(":COLORCODE",   m_colorcode);
+    query.bindValue(":SHOWTYPE",    denullify(m_showtype));
+    query.bindValue(":TITLEPRON",   denullify(m_title_pronounce));
+    query.bindValue(":COLORCODE",   denullify(m_colorcode));
     query.bindValue(":SEASON",      m_season);
     query.bindValue(":EPISODE",     m_episode);
     query.bindValue(":TOTALEPISODES", m_totalepisodes);
-    query.bindValue(":INETREF",     m_inetref);
+    query.bindValue(":INETREF",     denullify(m_inetref));
 
     if (!query.exec())
     {
@@ -1627,7 +1620,7 @@ void ProgramData::HandlePrograms(MSqlQuery             &query,
                                  uint &unchanged,
                                  uint &updated)
 {
-    for (auto *pinfo : qAsConst(sortlist))
+    for (auto *pinfo : std::as_const(sortlist))
     {
         if (IsUnchanged(query, chanid, *pinfo))
         {
@@ -1751,22 +1744,22 @@ bool ProgramData::IsUnchanged(
     query.bindValue(":STARS1",     pi.m_stars);
     query.bindValue(":STARS2",     pi.m_stars);
     query.bindValue(":PREVIOUSLYSHOWN", pi.m_previouslyshown);
-    query.bindValue(":TITLE_PRONOUNCE", pi.m_title_pronounce);
+    query.bindValue(":TITLE_PRONOUNCE", denullify(pi.m_title_pronounce));
     query.bindValue(":AUDIOPROP",  pi.m_audioProps);
     query.bindValue(":VIDEOPROP",  pi.m_videoProps);
     query.bindValue(":SUBTYPES",   pi.m_subtitleType);
     query.bindValue(":PARTNUMBER", pi.m_partnumber);
     query.bindValue(":PARTTOTAL",  pi.m_parttotal);
     query.bindValue(":SERIESID",   denullify(pi.m_seriesId));
-    query.bindValue(":SHOWTYPE",   pi.m_showtype);
-    query.bindValue(":COLORCODE",  pi.m_colorcode);
+    query.bindValue(":SHOWTYPE",   denullify(pi.m_showtype));
+    query.bindValue(":COLORCODE",  denullify(pi.m_colorcode));
     query.bindValue(":SYNDICATEDEPISODENUMBER",
                     denullify(pi.m_syndicatedepisodenumber));
     query.bindValue(":PROGRAMID",  denullify(pi.m_programId));
     query.bindValue(":SEASON",     pi.m_season);
     query.bindValue(":EPISODE",    pi.m_episode);
     query.bindValue(":TOTALEPISODES", pi.m_totalepisodes);
-    query.bindValue(":INETREF",    pi.m_inetref);
+    query.bindValue(":INETREF",    denullify(pi.m_inetref));
 
     if (query.exec() && query.next())
         return query.value(0).toUInt() > 0;

@@ -37,6 +37,8 @@
 #undef LOGLEVEL_POSTAMBLE
 #undef LOGLEVEL_MAP
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 #ifdef MYTH_IMPLEMENT_VERBOSE
 
 // This is used to actually implement the mask in mythlogging.cpp
@@ -71,13 +73,15 @@
 #endif
 
 #define LOGLEVEL_PREAMBLE \
-    enum LogLevel_t {
+    enum LogLevel_t : std::int8_t {
 #define LOGLEVEL_POSTAMBLE \
     };
 #define LOGLEVEL_MAP(name,value,shortname) \
     name = (value),
 
 #endif
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 VERBOSE_PREAMBLE
 VERBOSE_MAP(VB_ALL,       ~0ULL, false,
@@ -195,7 +199,8 @@ LOGLEVEL_MAP(LOG_WARNING, 4, 'W')
 LOGLEVEL_MAP(LOG_NOTICE,  5, 'N')
 LOGLEVEL_MAP(LOG_INFO,    6, 'I')
 LOGLEVEL_MAP(LOG_DEBUG,   7, 'D')
-LOGLEVEL_MAP(LOG_UNKNOWN, 8, '-')
+LOGLEVEL_MAP(LOG_TRACE,   8, 'T')
+LOGLEVEL_MAP(LOG_UNKNOWN, 9, '-')
 LOGLEVEL_POSTAMBLE
 
 #ifndef MYTH_IMPLEMENT_VERBOSE

@@ -10,8 +10,9 @@
 #include <chrono>
 #include <cstdint>
 
+#include "libmythbase/compat.h"
+
 #include "upnpexp.h"
-#include "compat.h"
 
 using namespace std::chrono_literals;
 
@@ -127,7 +128,7 @@ namespace UPnPDateTime
  */
 namespace UPNPProtocol
 {
-    enum TransferProtocol
+    enum TransferProtocol : std::uint8_t
     {
         kHTTP,
         kRTP
@@ -220,7 +221,7 @@ namespace DLNA
      *      are mutally exclusive. FlagsString() should account for these
      *      but care should still be taken. Read the DLNA documentation.
      */
-    enum UPNP_PUBLIC DLNA_Flags
+    enum DLNA_Flags
     {
         // NAME                    BIT             BIT #      REFERENCE
 

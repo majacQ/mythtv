@@ -1,14 +1,13 @@
-#include "vbitext/vbi.h"
-
 #include <algorithm>
 
-#include "mythplayer.h"
 #include "captions/cc608reader.h"
+#include "mythplayer.h"
+#include "recorders/vbitext/vbi.h"
 
 CC608Reader::CC608Reader(MythPlayer *parent)
-  : m_parent(parent)
+  : m_parent(parent),
+    m_maxTextSize(8 * (sizeof(teletextsubtitle) + VT_WIDTH))
 {
-    m_maxTextSize = 8 * (sizeof(teletextsubtitle) + VT_WIDTH);
     for (int i = 0; i < MAXTBUFFER; i++)
         m_inputBuffers[i].buffer = new unsigned char[m_maxTextSize + 1];
 }
@@ -151,8 +150,10 @@ void CC608Reader::SetMode(int mode)
 {
     // TODO why was the clearing code removed?
     //int oldmode = m_ccMode;
-    m_ccMode = (mode <= 2) ? ((mode == 1) ? CC_CC1 : CC_CC2) :
-                           ((mode == 3) ? CC_CC3 : CC_CC4);
+    if (mode <= 2)
+        m_ccMode = (mode == 1) ? CC_CC1 : CC_CC2;
+    else
+        m_ccMode = (mode == 3) ? CC_CC3 : CC_CC4;
     //if (oldmode != m_ccMode)
     //    ClearBuffers(true, true);
 }
@@ -185,7 +186,7 @@ int CC608Reader::Update(unsigned char *inpos)
         int row = 0;
         int linecont = (subtitle.resumetext & CC_LINE_CONT);
 
-        auto *ccbuf = new vector<CC608Text*>;
+        auto *ccbuf = new std::vector<CC608Text*>;
         CC608Text *tmpcc = nullptr;
         int replace = linecont;
         int scroll = 0;
@@ -298,8 +299,7 @@ int CC608Reader::Update(unsigned char *inpos)
             // - if caption is at bottom, row address is for last
             // row
             // - if caption is at top, row address is for first row (?)
-            if (subtitle.rowcount > 4)
-                subtitle.rowcount = 4;
+            subtitle.rowcount = std::min<int>(subtitle.rowcount, 4);
             if (m_state[streamIdx].m_outputRow < subtitle.rowcount)
             {
                 m_state[streamIdx].m_outputRow = subtitle.rowcount;
@@ -365,7 +365,7 @@ void CC608Reader::Update608Text(
         QString("scroll_ymax:%1 ").arg(scroll_ymax) +
         QString("streamIdx:%1 ").arg(streamIdx));
 #endif
-    vector<CC608Text*>::iterator i;
+    std::vector<CC608Text*>::iterator i;
     int visible = 0;
 
     m_state[streamIdx].m_output.m_lock.lock();
@@ -507,8 +507,7 @@ void CC608Reader::AddTextData(unsigned char *buffer, int len,
         return;
     }
 
-    if (len > m_maxTextSize)
-        len = m_maxTextSize;
+    len = std::min(len, m_maxTextSize);
 
     QMutexLocker locker(&m_inputBufLock);
     int prev_readpos = (m_readPosition - 1 + MAXTBUFFER) % MAXTBUFFER;

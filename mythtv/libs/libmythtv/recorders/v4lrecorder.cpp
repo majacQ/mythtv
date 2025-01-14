@@ -1,9 +1,5 @@
 // -*- Mode: c++ -*-
 
-#ifdef USING_V4L1
-#include <linux/videodev.h> // for vbi_format
-#endif // USING_V4L1
-
 #ifdef USING_V4L2
 #include <linux/videodev2.h>
 #endif // USING_V4L2
@@ -13,9 +9,10 @@
 #include <unistd.h>         // for IO_NONBLOCK
 #include <fcntl.h>          // for IO_NONBLOCK
 
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "captions/vbi608extractor.h"
-#include "mythcontext.h"
-#include "mythlogging.h"
 #include "v4lrecorder.h"
 #include "vbitext/vbi.h"
 #include "tv_rec.h"
@@ -143,31 +140,9 @@ int V4LRecorder::OpenVBIDevice(void)
         fmt.type = V4L2_BUF_TYPE_VBI_CAPTURE;
         if (0 != ioctl(fd, VIDIOC_G_FMT, &fmt))
         {
-#ifdef USING_V4L1
-            LOG(VB_RECORD, LOG_INFO, "V4L2 VBI setup failed, trying v1 ioctl");
-            // Try V4L v1 VBI ioctls, iff V4L v2 fails
-            struct vbi_format old_fmt;
-            memset(&old_fmt, 0, sizeof(vbi_format));
-            if (ioctl(fd, VIDIOCGVBIFMT, &old_fmt) < 0)
-            {
-                LOG(VB_GENERAL, LOG_ERR, LOC +
-                    "Failed to query vbi capabilities (V4L1)");
-                close(fd);
-                return -1;
-            }
-            fmt.fmt.vbi.sampling_rate    = old_fmt.sampling_rate;
-            fmt.fmt.vbi.offset           = 0;
-            fmt.fmt.vbi.samples_per_line = old_fmt.samples_per_line;
-            fmt.fmt.vbi.start[0]         = old_fmt.start[0];
-            fmt.fmt.vbi.start[1]         = old_fmt.start[1];
-            fmt.fmt.vbi.count[0]         = old_fmt.count[0];
-            fmt.fmt.vbi.count[1]         = old_fmt.count[1];
-            fmt.fmt.vbi.flags            = old_fmt.flags;
-#else // if !USING_V4L1
             LOG(VB_RECORD, LOG_ERR, "V4L2 VBI setup failed");
             close(fd);
             return -1;
-#endif // !USING_V4L1
         }
         LOG(VB_RECORD, LOG_INFO, LOC +
             QString("vbi_format  rate: %1"
@@ -301,10 +276,10 @@ void V4LRecorder::RunVBIDevice(void)
             if ((ptr_end - ptr) == 0)
             {
                 unsigned char *line21_field1 =
-                    buf + ((21 - m_ntscVbiStartLine) * m_ntscVbiWidth);
+                    buf + ((21 - m_ntscVbiStartLine) * static_cast<size_t>(m_ntscVbiWidth));
                 unsigned char *line21_field2 =
                     buf + ((m_ntscVbiLineCount + 21 - m_ntscVbiStartLine)
-                           * m_ntscVbiWidth);
+                           * static_cast<size_t>(m_ntscVbiWidth));
                 bool cc1 = m_vbi608->ExtractCC12(line21_field1, m_ntscVbiWidth);
                 bool cc2 = m_vbi608->ExtractCC34(line21_field2, m_ntscVbiWidth);
                 if (cc1 || cc2)

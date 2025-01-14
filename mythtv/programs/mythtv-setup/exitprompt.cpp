@@ -1,14 +1,16 @@
+// Qt
 #include <QCoreApplication>
 
 // MythTV stuff
-#include "exitcodes.h"
-#include "mythcorecontext.h"
-#include "mythdialogbox.h"
-#include "mythmainwindow.h"
-#include "mythscreenstack.h"
-#include "remoteutil.h"
-#include "mythsystemlegacy.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
 
+// MythTV Setup
 #include "checksetup.h"
 #include "exitprompt.h"
 
@@ -23,8 +25,8 @@ struct ExitPrompterPrivate
 };
 
 ExitPrompter::ExitPrompter()
+  : m_d(new ExitPrompterPrivate)
 {
-    m_d = new ExitPrompterPrivate;
 }
 
 ExitPrompter::~ExitPrompter()
@@ -55,22 +57,43 @@ void ExitPrompter::masterPromptExit()
         }
     }
     else
+    {
         quit();
+    }
 }
 
 void ExitPrompter::handleExit()
 {
-    QStringList problems;
+    QStringList allproblems;
 
     // Look for common problems
-    if (CheckSetup(problems))
+    if (CheckSetup(allproblems))
     {
-        problems.push_back(QString());
+        // Only report the first 4 problems
+        QStringList problems;
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        int limit = std::min(4, allproblems.size());
+#else
+        int limit = std::min(4LL, allproblems.size());
+#endif
+        for (int i = 0; i < limit; ++i)
+        {
+            problems.push_back(allproblems[i]);
+        }
+        if (problems.size() < allproblems.size())
+        {
+            problems.push_back(tr("...and more..."));
+        }
+        else
+        {
+            problems.push_back(QString());
+        }
+
         problems.push_back(tr("Do you want to go back and fix this(these) "
                               "problem(s)?", nullptr, problems.size()));
 
-        auto *dia = new MythDialogBox(problems.join("\n"),
-                                      m_d->m_stk, "exit prompt");
+        auto *dia = new MythDialogBox(tr("Configuration Problems"), problems.join("\n"),
+                                      m_d->m_stk, "exit prompt", true);
         if (!dia->Create())
         {
             LOG(VB_GENERAL, LOG_ERR, "Can't create Exit Prompt dialog?");
@@ -80,15 +103,17 @@ void ExitPrompter::handleExit()
         }
 
         dia->SetReturnEvent(this, "problemprompt");
-        
+
         dia->AddButton(tr("Yes please"));
         dia->AddButton(tr("No, I know what I am doing"),
                        &ExitPrompter::masterPromptExit);
-                
+
         m_d->m_stk->AddScreen(dia);
     }
     else
+    {
         masterPromptExit();
+    }
 }
 
 void ExitPrompter::customEvent(QEvent *event)
@@ -99,7 +124,7 @@ void ExitPrompter::customEvent(QEvent *event)
 
         QString resultid= dce->GetId();
         int buttonnum = dce->GetResult();
-        
+
         if (resultid == "mythfillprompt")
         {
             quit();

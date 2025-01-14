@@ -1,11 +1,13 @@
 // MythTV
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
+
 #include "platforms/drm/mythdrmhdr.h"
 #include "platforms/mythdisplaydrm.h"
-#include "mythlogging.h"
 
 // libdrm
 extern "C" {
-enum hdmi_eotf
+enum hdmi_eotf : std::uint8_t
 {
     HDMI_EOTF_TRADITIONAL_GAMMA_SDR = 0,
     HDMI_EOTF_TRADITIONAL_GAMMA_HDR,
@@ -13,7 +15,7 @@ enum hdmi_eotf
     HDMI_EOTF_BT_2100_HLG,
 };
 
-enum hdmi_metadata_type
+enum hdmi_metadata_type : std::uint8_t
 {
     HDMI_STATIC_METADATA_TYPE1 = 0,
 };
@@ -47,9 +49,9 @@ struct hdr_output_metadata {
 
 #define LOC QString("HDR: ")
 
-MythHDRPtr MythDRMHDR::Create(MythDisplay* _Display, const MythHDRDesc& Desc)
+MythHDRPtr MythDRMHDR::Create(MythDisplay* MDisplay, const MythHDRDesc& Desc)
 {
-    auto * display = dynamic_cast<MythDisplayDRM*>(_Display);
+    auto * display = dynamic_cast<MythDisplayDRM*>(MDisplay);
     if (!display)
         return nullptr;
 
@@ -67,11 +69,11 @@ MythHDRPtr MythDRMHDR::Create(MythDisplay* _Display, const MythHDRDesc& Desc)
     return nullptr;
 }
 
-MythDRMHDR::MythDRMHDR(MythDRMPtr Device, DRMProp HDRProp, const MythHDRDesc& Desc)
+MythDRMHDR::MythDRMHDR(const MythDRMPtr& Device, DRMProp HDRProp, const MythHDRDesc& Desc)
   : MythHDR(Desc),
     m_device(Device),
     m_connector(Device->GetConnector()),
-    m_hdrProp(HDRProp),
+    m_hdrProp(std::move(HDRProp)),
     m_crtc(Device->GetCrtc())
 {
     m_controllable = true;

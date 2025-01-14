@@ -1,6 +1,7 @@
+#include <QtGlobal>
+
 // MythTV
-#include "config.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "mythdisplay.h"
 #include "mythmainwindow.h"
 #include "mythpaintergpu.h"

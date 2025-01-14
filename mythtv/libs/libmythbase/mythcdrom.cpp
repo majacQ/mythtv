@@ -1,45 +1,53 @@
+#include "mythcdrom.h"
+
+#ifdef HAVE_LIBUDFREAD
+#include <udfread/udfread.h>
+#include <udfread/blockinput.h>
+#else
+#include "udfread.h"
+#include "blockinput.h"
+#endif
+
+#include <QtGlobal>
 #include <QDir>
 #include <QFileInfo>
 
 #include "compat.h"
-#include "mythcdrom.h"
 #include "mythconfig.h"
-#include "remotefile.h"
-#include "blockinput.h"
-#include "udfread.h"
-#ifdef linux
-#include "mythcdrom-linux.h"
-#elif defined(__FreeBSD__)
-#include "mythcdrom-freebsd.h"
-#elif CONFIG_DARWIN
-#include "mythcdrom-darwin.h"
-#endif
 #include "mythlogging.h"
+#include "remotefile.h"
 
+#ifdef __linux__
+#   include "mythcdrom-linux.h"
+#elif defined(__FreeBSD__)
+#   include "mythcdrom-freebsd.h"
+#elif defined(Q_OS_DARWIN)
+#   include "mythcdrom-darwin.h"
+#endif
 
 // If your DVD has directories in lowercase, then it is wrongly mounted!
 // DVDs use the UDF filesystem, NOT ISO9660. Fix your /etc/fstab.
 
 // This allows a warning for the above mentioned OS setup fault
-#define PATHTO_BAD_DVD_MOUNT "/video_ts"
+static constexpr const char* PATHTO_BAD_DVD_MOUNT { "/video_ts"   };
 
-#define PATHTO_DVD_DETECT "/VIDEO_TS"
-#define PATHTO_BD_DETECT "/BDMV"
-#define PATHTO_VCD_DETECT "/vcd"
-#define PATHTO_SVCD_DETECT "/svcd"
+static constexpr const char* PATHTO_DVD_DETECT    { "/VIDEO_TS"   };
+static constexpr const char* PATHTO_BD_DETECT     { "/BDMV"       };
+static constexpr const char* PATHTO_VCD_DETECT    { "/vcd"        };
+static constexpr const char* PATHTO_SVCD_DETECT   { "/svcd"       };
 
 // Mac OS X mounts audio CDs ready to use
-#define PATHTO_AUDIO_DETECT "/.TOC.plist"
+static constexpr const char* PATHTO_AUDIO_DETECT  { "/.TOC.plist" };
 
 
 MythCDROM* MythCDROM::get(QObject* par, const QString& devicePath,
                           bool SuperMount, bool AllowEject)
 {
-#if defined(linux) && !defined(Q_OS_ANDROID)
+#if defined(__linux__) && !defined(Q_OS_ANDROID)
     return GetMythCDROMLinux(par, devicePath, SuperMount, AllowEject);
 #elif defined(__FreeBSD__)
     return GetMythCDROMFreeBSD(par, devicePath, SuperMount, AllowEject);
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
     return GetMythCDROMDarwin(par, devicePath, SuperMount, AllowEject);
 #else
     return new MythCDROM(par, devicePath, SuperMount, AllowEject);
@@ -164,13 +172,14 @@ static uint32_t def_size(udfread_block_input *p_gen)
     return (uint32_t)(p->m_file->GetRealFileSize() / UDF_BLOCK_SIZE);
 }
 
-static int def_read(udfread_block_input *p_gen, uint32_t lba, void *buf, uint32_t nblocks, int flags)
+static int def_read(udfread_block_input *p_gen, uint32_t lba,
+                    void *buf, uint32_t nblocks,
+                    [[maybe_unused]] int flags)
 {
-    (void)flags;
     int result = -1;
     auto *p = (blockInput_t *)p_gen;
 
-    if (p && p->m_file && (p->m_file->Seek(lba * UDF_BLOCK_SIZE, SEEK_SET) != -1))
+    if (p && p->m_file && (p->m_file->Seek(static_cast<long long>(lba) * UDF_BLOCK_SIZE, SEEK_SET) != -1))
         result = p->m_file->Read(buf, nblocks * UDF_BLOCK_SIZE) / UDF_BLOCK_SIZE;
 
     return result;

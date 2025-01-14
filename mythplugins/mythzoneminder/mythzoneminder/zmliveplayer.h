@@ -23,10 +23,10 @@
 #include <QObject>
 
 // mythtv
-#include <mythscreentype.h>
-#include <mythuiimage.h>
-#include <mythuitext.h>
-#include <mythdialogbox.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythscreentype.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // mythzoneminder
 #include "zmdefines.h"
@@ -41,7 +41,7 @@ class Player
     void updateStatus(void);
     void updateCamera();
 
-    void setMonitor(Monitor *mon);
+    void setMonitor(const Monitor *mon);
     void setWidgets(MythUIImage *image, MythUIText *status,
                     MythUIText  *camera);
 

@@ -3,15 +3,16 @@
 * creation : 01/10/2000
 *  -ajout de sinFilter()
 *  -ajout de zoomFilter()
-*  -copie de zoomFilter() en zoomFilterRGB(), gérant les 3 couleurs
+*  -copie de zoomFilter() en zoomFilterRGB(), gÃ©rant les 3 couleurs
 *  -optimisation de sinFilter (utilisant une table de sin)
 *	-asm
-*	-optimisation de la procedure de génération du buffer de transformation
+*	-optimisation de la procedure de gÃ©nÃ©ration du buffer de transformation
 *		la vitesse est maintenant comprise dans [0..128] au lieu de [0..100]
 */
 
 //#define _DEBUG_PIXEL;
 
+#include <algorithm>
 #include <array>
 #include <cinttypes>
 #include <cmath>
@@ -21,7 +22,7 @@
 #include "filters.h"
 #include "goom_tools.h"
 #include "graphic.h"
-#include "goom/zoom_filters.h"
+#include "visualisations/goom/zoom_filters.h"
 
 #ifdef MMX
 #define USE_ASM
@@ -30,8 +31,8 @@
 #define USE_ASM
 #endif
 
-#define EFFECT_DISTORS 4
-#define EFFECT_DISTORS_SL 2
+static constexpr int8_t EFFECT_DISTORS    { 4 };
+static constexpr int8_t EFFECT_DISTORS_SL { 2 };
 
 extern volatile guint32 resolx;
 extern volatile guint32 c_resoly;
@@ -98,7 +99,7 @@ unsigned int *coeffs = nullptr, *freecoeffs = nullptr;
 
 signed int *brutS = nullptr, *freebrutS = nullptr;	// source
 signed int *brutD = nullptr, *freebrutD = nullptr;	// dest
-signed int *brutT = nullptr, *freebrutT = nullptr;	// temp (en cours de génération)
+signed int *brutT = nullptr, *freebrutT = nullptr;	// temp (en cours de gÃ©nÃ©ration)
 
 // TODO : virer
 guint32 *expix1 = nullptr;				// pointeur exporte vers p1
@@ -125,23 +126,23 @@ static int middleX, middleY;
 //static int buffratio = 0;
 int     buffratio = 0;
 
-#define BUFFPOINTNB 16
-#define BUFFPOINTMASK 0xffff
-#define BUFFINCR 0xff
+static   constexpr uint8_t BUFFPOINTNB   { 16     };
+static   constexpr int32_t BUFFPOINTMASK { 0xffff };
+//static constexpr uint8_t BUFFINCR      { 0xff   };
 
-#define sqrtperte 16
+static constexpr int8_t sqrtperte { 16 };
 // faire : a % sqrtperte <=> a & pertemask
-#define PERTEMASK 0xf
+static constexpr int8_t PERTEMASK { 0xf };
 // faire : a / sqrtperte <=> a >> PERTEDEC
-#define PERTEDEC 4
+static constexpr uint8_t PERTEDEC { 4 };
 
 static int *firedec = nullptr;
 
 
 // retourne x>>s , en testant le signe de x
-#define ShiftRight(_x,_s) (((_x)<0) ? -(-(_x)>>(_s)) : ((_x)>>(_s)))
+static inline int ShiftRight(int x,int s) {return (x<0) ? -((-x)>>s) : (x>>s); }
 
-/** modif d'optim by Jeko : precalcul des 4 coefs résultant des 2 pos */
+/** modif d'optim by Jeko : precalcul des 4 coefs rÃ©sultant des 2 pos */
 GoomCoefficients precalCoef = {};
 
 /* Prototypes to keep gcc from spewing warnings */
@@ -205,9 +206,8 @@ calculatePXandPY (int x, int y, int *px, int *py)
 		static int s_wave = 0;
 		static int s_wavesp = 0;
 
-		int yy = y + RAND () % 4 - RAND () % 4 + s_wave / 10;
-		if (yy < 0)
-			yy = 0;
+		int yy = y + (RAND () % 4) - (RAND () % 4) + (s_wave / 10);
+		yy = std::max(yy, 0);
 		if (yy >= (int)c_resoly)
 			yy = c_resoly - 1;
 
@@ -248,8 +248,7 @@ calculatePXandPY (int x, int y, int *px, int *py)
 		if (waveEffect) {
 			fvitesse *=
 				1024 +
-				ShiftRight (sintable
-										[(unsigned short) (dist * 0xffff + EFFECT_DISTORS)], 6);
+				ShiftRight (sintable[(unsigned short) ((dist * 0xffff) + EFFECT_DISTORS)], 6);
 			fvitesse /= 1024;
 		}
 
@@ -266,8 +265,7 @@ calculatePXandPY (int x, int y, int *px, int *py)
 		case WAVE_MODE:
 			fvitesse *=
 				1024 +
-				ShiftRight (sintable
-										[(unsigned short) (dist * 0xffff * EFFECT_DISTORS)], 6);
+				ShiftRight (sintable[(unsigned short) (dist * 0xffff * EFFECT_DISTORS)], 6);
 			fvitesse>>=10;///=1024;
 			break;
 		case CRYSTAL_BALL_MODE:
@@ -299,8 +297,7 @@ calculatePXandPY (int x, int y, int *px, int *py)
 			break;
 		}
 
-		if (fvitesse < -3024)
-			fvitesse = -3024;
+		fvitesse = std::max(fvitesse, -3024);
 
 		int ppx = 0;
 		int ppy = 0;
@@ -335,7 +332,7 @@ setPixelRGB (Uint * buffer, Uint x, Uint y, Color c)
 	}
 #endif
 
-	buffer[y * resolx + x] =
+	buffer[(y * resolx) + x] =
 		(c.b << (BLEU * 8)) | (c.v << (VERT * 8)) | (c.r << (ROUGE * 8));
 }
 
@@ -393,9 +390,9 @@ getPixelRGB_ (const Uint * buffer, Uint x, Color * c)
 
 #else
 	/* ATTENTION AU PETIT INDIEN  */
-	c->b = *(unsigned char *) (tmp8 = (unsigned char *) (buffer + x));
-	c->v = *(unsigned char *) (++tmp8);
-	c->r = *(unsigned char *) (++tmp8);
+	c->b = *(tmp8 = (unsigned char *) (buffer + x));
+	c->v = *(++tmp8);
+	c->r = *(++tmp8);
 	// *c = (Color) buffer[x+y*WIDTH] ;
 #endif
 }
@@ -414,7 +411,7 @@ void c_zoom (unsigned int *lexpix1, unsigned int *lexpix2,
 	int     bufsize = lprevX * lprevY * 2;
 	int     bufwidth = lprevX;
 
-	lexpix1[0]=lexpix1[lprevX-1]=lexpix1[lprevX*lprevY-1]=lexpix1[lprevX*lprevY-lprevX]=0;
+	lexpix1[0]=lexpix1[lprevX-1]=lexpix1[(lprevX*lprevY)-1]=lexpix1[(lprevX*lprevY)-lprevX]=0;
 
 	for (int myPos = 0; myPos < bufsize; myPos += 2) {
 		Color   col1 {};
@@ -429,12 +426,10 @@ void c_zoom (unsigned int *lexpix1, unsigned int *lexpix2,
 		brutSmypos = lbrutS[myPos2];
 		int py = brutSmypos + (((lbrutD[myPos2] - brutSmypos) * buffratio) >> BUFFPOINTNB);
 
-                if (px < 0)
-                    px = 0;
-                if (py < 0)
-                    py = 0;
+                px = std::max(px, 0);
+                py = std::max(py, 0);
 
-		int pos = ((px >> PERTEDEC) + lprevX * (py >> PERTEDEC));
+		int pos = ((px >> PERTEDEC) + (lprevX * (py >> PERTEDEC)));
 		// coef en modulo 15
 		int lcoeffs = precalCoef[px & PERTEMASK][py & PERTEMASK];
 
@@ -494,12 +489,12 @@ getAsmUse ()
 void
 zoomFilterFastRGB (Uint * pix1, Uint * pix2, ZoomFilterData * zf, Uint resx, Uint resy, int switchIncr, float switchMult)
 {
-	static unsigned char s_pertedec = 8;
+	[[maybe_unused]] static unsigned char s_pertedec = 8;
 	static char s_firstTime = 1;
 
-#define INTERLACE_INCR 16
-#define INTERLACE_ADD 9
-#define INTERLACE_AND 0xf
+        static constexpr int8_t INTERLACE_INCR   {  16 };
+        //static constexpr int8_t INTERLACE_ADD  {   9 };
+        //static constexpr int8_t INTERLACE_AND  { 0xf };
 	static int s_interlaceStart = -2;
 
 	expix1 = pix1;
@@ -533,7 +528,7 @@ zoomFilterFastRGB (Uint * pix1, Uint * pix2, ZoomFilterData * zf, Uint resx, Uin
 
 	/** changement de config **/
 	if (zf) {
-		static bool s_reverse = false;	// vitesse inversé..(zoom out)
+		static bool s_reverse = false;	// vitesse inversÃ©..(zoom out)
 		s_reverse = zf->reverse;
 		vitesse = zf->vitesse;
 		if (s_reverse)
@@ -549,9 +544,6 @@ zoomFilterFastRGB (Uint * pix1, Uint * pix2, ZoomFilterData * zf, Uint resx, Uin
 		noisify = zf->noisify;
 	}
 
-	/* Silence a gcc warning */
-	(void)s_pertedec;
-
 	/** generation d'un effet **/
 	if (s_firstTime || zf) {
 
@@ -561,13 +553,13 @@ zoomFilterFastRGB (Uint * pix1, Uint * pix2, ZoomFilterData * zf, Uint resx, Uin
 			generatePrecalCoef ();
 			select_zoom_filter ();
 
-			freebrutS = (signed int *) calloc (resx * resy * 2 + 128, sizeof(signed int));
+			freebrutS = (signed int *) calloc ((resx * resy * 2) + 128, sizeof(signed int));
 			brutS = (signed int *) ((1 + ((uintptr_t) (freebrutS)) / 128) * 128);
 
-			freebrutD = (signed int *) calloc (resx * resy * 2 + 128, sizeof(signed int));
+			freebrutD = (signed int *) calloc ((resx * resy * 2) + 128, sizeof(signed int));
 			brutD = (signed int *) ((1 + ((uintptr_t) (freebrutD)) / 128) * 128);
 
-			freebrutT = (signed int *) calloc (resx * resy * 2 + 128, sizeof(signed int));
+			freebrutT = (signed int *) calloc ((resx * resy * 2) + 128, sizeof(signed int));
 			brutT = (signed int *) ((1 + ((uintptr_t) (freebrutT)) / 128) * 128);
 
 			/** modif here by jeko : plus de multiplications **/
@@ -692,14 +684,13 @@ zoomFilterFastRGB (Uint * pix1, Uint * pix2, ZoomFilterData * zf, Uint resx, Uin
 
 	if (switchIncr != 0) {
 		buffratio += switchIncr;
-		if (buffratio > BUFFPOINTMASK)
-			buffratio = BUFFPOINTMASK;
+		buffratio = std::min(buffratio, BUFFPOINTMASK);
 	}
 
 	if (switchMult != 1.0F) {
 		buffratio =
-			(int) ((float) BUFFPOINTMASK * (1.0F - switchMult) +
-						 (float) buffratio * switchMult);
+			(int) (((float) BUFFPOINTMASK * (1.0F - switchMult)) +
+						 ((float) buffratio * switchMult));
 	}
 
 	zoom_width = prevX;

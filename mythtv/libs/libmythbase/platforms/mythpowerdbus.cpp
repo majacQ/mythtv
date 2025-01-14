@@ -4,6 +4,11 @@
 
 // Std
 #include <unistd.h>
+#include <algorithm>
+
+// Qt
+#include <QDBusReply>
+#include <QDBusUnixFileDescriptor>
 
 #define LOC QString("PowerDBus: ")
 
@@ -129,7 +134,7 @@ void MythPowerDBus::Init(void)
         if (response.isValid())
         {
             QList devices = response.value();
-            for (const auto& device : qAsConst(devices))
+            for (const auto& device : std::as_const(devices))
                 DeviceAdded(device);
         }
 
@@ -163,9 +168,9 @@ void MythPowerDBus::Init(void)
 
 bool MythPowerDBus::DoFeature(bool Delayed)
 {
-    if (!(m_logindInterface &&
-          ((m_features & m_scheduledFeature) != 0U) &&
-          (m_scheduledFeature != 0U)))
+    if (!m_logindInterface ||
+          ((m_features & m_scheduledFeature) == 0U) ||
+          (m_scheduledFeature == 0U))
         return false;
 
     if (!Delayed)
@@ -246,7 +251,7 @@ bool MythPowerDBus::UpdateStatus(void)
     // NB we don't care about user preference here. We are giving
     // MythTV interested components an opportunity to cleanup before
     // an externally initiated shutdown/suspend
-    auto delay = qBound(0s, m_maxRequestedDelay, m_maxSupportedDelay);
+    auto delay = std::clamp(m_maxRequestedDelay, 0s, m_maxSupportedDelay);
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("Trying to delay system %1 for %2 seconds")
         .arg(FeatureToString(feature)).arg(delay.count()));
     m_delayTimer.start(delay);
@@ -442,7 +447,7 @@ void MythPowerDBus::UpdateBattery(void)
         int   count = 0;
 
         // take an average (who has more than 1 battery?)
-        for (int level : qAsConst(m_batteries))
+        for (int level : std::as_const(m_batteries))
         {
             if (level >= 0 && level <= 100)
             {

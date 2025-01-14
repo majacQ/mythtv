@@ -1,21 +1,21 @@
-
-#include "idlescreen.h"
-
+// C++
 #include <chrono>
 
+// Ct
 #include <QTimer>
 
-#include <mythcontext.h>
-#include <mythsystemlegacy.h>
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/programinfo.h"
+#include "libmythtv/tvremoteutil.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
 
-#include <mythuibuttonlist.h>
-#include <mythuistatetype.h>
-#include <mythuitext.h>
-#include <mythmainwindow.h>
-
-#include <programinfo.h>
-
-#include <tvremoteutil.h>
+// MythFrontend
+#include "idlescreen.h"
 
 static constexpr std::chrono::milliseconds UPDATE_INTERVAL { 15s };
 
@@ -133,7 +133,9 @@ void IdleScreen::UpdateStatus(void)
                 statusText->SetText(status);
             }
             else
+            {
                 statusText->Reset();
+            }
         }
     }
 }
@@ -244,7 +246,7 @@ bool IdleScreen::keyPressEvent(QKeyEvent* event)
 
 void IdleScreen::customEvent(QEvent* event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)

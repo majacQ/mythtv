@@ -1,3 +1,4 @@
+// C++
 #include <algorithm>
 #include <cinttypes>
 #include <cstdlib>
@@ -8,22 +9,23 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QObject>
+#include <QRegularExpression>
+
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/compat.h>
+#include <libmythbase/exitcodes.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythmiscutil.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythui/mediamonitor.h>
 
 // mythmusic
 #include "musicdata.h"
+#include "musicplayer.h"
 #include "playlist.h"
 #include "playlistcontainer.h"
 #include "smartplaylist.h"
-#include "musicplayer.h"
-
-// mythtv
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <compat.h>
-#include <mythmediamonitor.h>
-#include <mythmiscutil.h>
-#include <mythsystemlegacy.h>
-#include <exitcodes.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 // Playlist
@@ -78,7 +80,9 @@ void Playlist::addTrack(MusicMetadata::IdType trackID, bool update_display)
             gPlayer->activePlaylistChanged(trackID, false);
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC + "Can't add track, given a bad track ID");
+    }
 }
 
 void Playlist::removeAllTracks(void)
@@ -236,8 +240,8 @@ void Playlist::shuffleTracks(MusicPlayer::ShuffleMode shuffleMode)
                     int playcount = mdata->PlayCount();
                     double lastplaydbl = mdata->LastPlay().toSecsSinceEpoch();
                     double ratingValue = (double)(rating) / 10;
-                    double playcountValue = NAN;
-                    double lastplayValue = NAN;
+                    double playcountValue = __builtin_nan("");
+                    double lastplayValue = __builtin_nan("");
 
                     if (playcountMax == playcountMin)
                         playcountValue = 0;
@@ -336,7 +340,8 @@ void Playlist::shuffleTracks(MusicPlayer::ShuffleMode shuffleMode)
                 if (mdata)
                 {
                     album = mdata->Album() + " ~ " + QString("%1").arg(mdata->getAlbumId());
-                    if ((Ialbum = album_map.find(album)) == album_map.end())
+                    Ialbum = album_map.find(album);
+                    if (Ialbum == album_map.end())
                         album_map.insert(AlbumMap::value_type(album, 0));
                 }
             }
@@ -358,7 +363,8 @@ void Playlist::shuffleTracks(MusicPlayer::ShuffleMode shuffleMode)
                 {
                     uint32_t album_order = 1;
                     album = album = mdata->Album() + " ~ " + QString("%1").arg(mdata->getAlbumId());;
-                    if ((Ialbum = album_map.find(album)) == album_map.end())
+                    Ialbum = album_map.find(album);
+                    if (Ialbum == album_map.end())
                     {
                         // we didn't find this album in the map,
                         // yet we pre-loaded them all. we are broken,
@@ -406,7 +412,8 @@ void Playlist::shuffleTracks(MusicPlayer::ShuffleMode shuffleMode)
                 if (mdata)
                 {
                     artist = mdata->Artist() + " ~ " + mdata->Title();
-                    if ((Iartist = artist_map.find(artist)) == artist_map.end())
+                    Iartist = artist_map.find(artist);
+                    if (Iartist == artist_map.end())
                         artist_map.insert(ArtistMap::value_type(artist,0));
                 }
             }
@@ -428,7 +435,8 @@ void Playlist::shuffleTracks(MusicPlayer::ShuffleMode shuffleMode)
                 {
                     uint32_t artist_order = 1;
                     artist = mdata->Artist() + " ~ " + mdata->Title();
-                    if ((Iartist = artist_map.find(artist)) == artist_map.end())
+                    Iartist = artist_map.find(artist);
+                    if (Iartist == artist_map.end())
                     {
                         // we didn't find this artist in the map,
                         // yet we pre-loaded them all. we are broken,
@@ -633,12 +641,8 @@ void Playlist::fillSongsFromSonglist(const QString& songList)
 {
     bool badTrack = false;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList list = songList.split(",", QString::SkipEmptyParts);
-#else
     QStringList list = songList.split(",", Qt::SkipEmptyParts);
-#endif
-    for (const auto & song : qAsConst(list))
+    for (const auto & song : std::as_const(list))
     {
         MusicMetadata::IdType id = song.toUInt();
         int repo = ID_TO_REPO(id);
@@ -678,13 +682,14 @@ void Playlist::fillSongsFromSonglist(const QString& songList)
         gPlayer->activePlaylistChanged(-1, false);
 }
 
-void Playlist::fillSonglistFromQuery(const QString& whereClause,
-                                     bool removeDuplicates,
-                                     InsertPLOption insertOption,
-                                     int currentTrackID)
+int Playlist::fillSonglistFromQuery(const QString& whereClause,
+                                    bool removeDuplicates,
+                                    InsertPLOption insertOption,
+                                    int currentTrackID)
 {
     QString orig_songlist = toRawSonglist();
     QString new_songlist;
+    int added = 0;
 
     disableSaves();
     removeAllTracks();
@@ -714,17 +719,18 @@ void Playlist::fillSonglistFromQuery(const QString& whereClause,
         fillSongsFromSonglist(new_songlist);
         enableSaves();
         changed();
-        return;
+        return 0;
     }
 
     while (query.next())
     {
         new_songlist += "," + query.value(0).toString();
+        added++;
     }
     new_songlist.remove(0, 1);
 
     if (removeDuplicates && insertOption != PL_REPLACE)
-        new_songlist = removeDuplicateTracks(orig_songlist, new_songlist);
+        orig_songlist = removeItemsFromList(new_songlist, orig_songlist);
 
     switch (insertOption)
     {
@@ -741,14 +747,10 @@ void Playlist::fillSonglistFromQuery(const QString& whereClause,
 
         case PL_INSERTAFTERCURRENT:
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList list = orig_songlist.split(",", QString::SkipEmptyParts);
-#else
             QStringList list = orig_songlist.split(",", Qt::SkipEmptyParts);
-#endif
             bool bFound = false;
             QString tempList;
-            for (const auto& song : qAsConst(list))
+            for (const auto& song : std::as_const(list))
             {
                 int an_int = song.toInt();
                 tempList += "," + song;
@@ -775,13 +777,14 @@ void Playlist::fillSonglistFromQuery(const QString& whereClause,
 
     enableSaves();
     changed();
+    return added;
 }
 
 // songList is a list of trackIDs to add
-void Playlist::fillSonglistFromList(const QList<int> &songList,
-                                    bool removeDuplicates,
-                                    InsertPLOption insertOption,
-                                    int currentTrackID)
+int Playlist::fillSonglistFromList(const QList<int> &songList,
+                                   bool removeDuplicates,
+                                   InsertPLOption insertOption,
+                                   int currentTrackID)
 {
     QString orig_songlist = toRawSonglist();
     QString new_songlist;
@@ -797,7 +800,7 @@ void Playlist::fillSonglistFromList(const QList<int> &songList,
     new_songlist.remove(0, 1);
 
     if (removeDuplicates && insertOption != PL_REPLACE)
-        new_songlist = removeDuplicateTracks(orig_songlist, new_songlist);
+        orig_songlist = removeItemsFromList(new_songlist, orig_songlist);
 
     switch (insertOption)
     {
@@ -814,14 +817,10 @@ void Playlist::fillSonglistFromList(const QList<int> &songList,
 
         case PL_INSERTAFTERCURRENT:
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList list = orig_songlist.split(",", QString::SkipEmptyParts);
-#else
             QStringList list = orig_songlist.split(",", Qt::SkipEmptyParts);
-#endif
             bool bFound = false;
             QString tempList;
-            for (const auto & song : qAsConst(list))
+            for (const auto & song : std::as_const(list))
             {
                 int an_int = song.toInt();
                 tempList += "," + song;
@@ -849,6 +848,7 @@ void Playlist::fillSonglistFromList(const QList<int> &songList,
     enableSaves();
 
     changed();
+    return songList.count();
 }
 
 QString Playlist::toRawSonglist(bool shuffled, bool tracksOnly)
@@ -866,7 +866,9 @@ QString Playlist::toRawSonglist(bool shuffled, bool tracksOnly)
                     rawList += QString(",%1").arg(id);
             }
             else
+            {
                 rawList += QString(",%1").arg(id);
+            }
         }
     }
     else
@@ -880,7 +882,9 @@ QString Playlist::toRawSonglist(bool shuffled, bool tracksOnly)
                     rawList += QString(",%1").arg(id);
             }
             else
+            {
                 rawList += QString(",%1").arg(id);
+            }
         }
     }
 
@@ -890,10 +894,10 @@ QString Playlist::toRawSonglist(bool shuffled, bool tracksOnly)
     return rawList;
 }
 
-void Playlist::fillSonglistFromSmartPlaylist(const QString& category, const QString& name,
-                                             bool removeDuplicates,
-                                             InsertPLOption insertOption,
-                                             int currentTrackID)
+int Playlist::fillSonglistFromSmartPlaylist(const QString& category, const QString& name,
+                                            bool removeDuplicates,
+                                            InsertPLOption insertOption,
+                                            int currentTrackID)
 {
     MSqlQuery query(MSqlQuery::InitCon());
 
@@ -903,7 +907,7 @@ void Playlist::fillSonglistFromSmartPlaylist(const QString& category, const QStr
     {
         LOG(VB_GENERAL, LOG_WARNING, LOC +
             QString("Cannot find Smartplaylist Category: %1") .arg(category));
-        return;
+        return 0;
     }
 
     // find smartplaylist
@@ -932,13 +936,13 @@ void Playlist::fillSonglistFromSmartPlaylist(const QString& category, const QStr
         {
             LOG(VB_GENERAL, LOG_WARNING, LOC +
                 QString("Cannot find smartplaylist: %1").arg(name));
-            return;
+            return 0;
         }
     }
     else
     {
         MythDB::DBError("Find SmartPlaylist", query);
-        return;
+        return 0;
     }
 
     // get smartplaylist items
@@ -978,8 +982,8 @@ void Playlist::fillSonglistFromSmartPlaylist(const QString& category, const QStr
     if (limitTo > 0)
         whereClause +=  " LIMIT " + QString::number(limitTo);
 
-    fillSonglistFromQuery(whereClause, removeDuplicates,
-                          insertOption, currentTrackID);
+    return fillSonglistFromQuery(whereClause, removeDuplicates,
+                                 insertOption, currentTrackID);
 }
 
 void Playlist::changed(void)
@@ -1064,20 +1068,24 @@ void Playlist::savePlaylist(const QString& a_name, const QString& a_host)
     m_changed = false;
 }
 
-QString Playlist::removeDuplicateTracks(const QString &orig_songlist, const QString &new_songlist)
+// Return a copy of the second list, having removed any item that
+// also appears in the first list.
+//
+// @param remove_list A comma separated list of strings to be
+//                    removed from the source list.
+// @param source_list A comma separated list of strings to be
+//                    processed.
+// @return A comma separated list of the strings remaining after
+//         processing.
+QString Playlist::removeItemsFromList(const QString &remove_list, const QString &source_list)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList curList = orig_songlist.split(",", QString::SkipEmptyParts);
-    QStringList newList = new_songlist.split(",", QString::SkipEmptyParts);
-#else
-    QStringList curList = orig_songlist.split(",", Qt::SkipEmptyParts);
-    QStringList newList = new_songlist.split(",", Qt::SkipEmptyParts);
-#endif
+    QStringList removeList = remove_list.split(",", Qt::SkipEmptyParts);
+    QStringList sourceList = source_list.split(",", Qt::SkipEmptyParts);
     QString songlist;
 
-    for (const auto & song : qAsConst(newList))
+    for (const auto & song : std::as_const(sourceList))
     {
-        if (curList.indexOf(song) == -1)
+        if (removeList.indexOf(song) == -1)
             songlist += "," + song;
     }
     songlist.remove(0, 1);
@@ -1141,8 +1149,8 @@ void Playlist::computeSize(double &size_in_MB, double &size_in_sec)
                 continue;
 
             // Normal track
-            if (mdata->Length() > 0)
-                size_in_sec += mdata->Length();
+            if (mdata->Length() > 0ms)
+                size_in_sec += duration_cast<floatsecs>(mdata->Length()).count();
             else
                 LOG(VB_GENERAL, LOG_ERR, "Computing track lengths. "
                                          "One track <=0");
@@ -1167,11 +1175,7 @@ void Playlist::cdrecordData(int fd)
         // Track 01:    6 of  147 MB written (fifo 100%) [buf  99%]  16.3x.
         QString data(buf);
         static const QRegularExpression newline { "\\R" }; // Any unicode newline
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList list = data.split(newline, QString::SkipEmptyParts);
-#else
         QStringList list = data.split(newline, Qt::SkipEmptyParts);
-#endif
 
         for (int i = 0; i < list.size(); i++)
         {
@@ -1373,16 +1377,16 @@ int Playlist::CreateCDMP3(void)
 
     connect(m_proc, &MythSystemLegacy::readDataReady, this, &Playlist::mkisofsData,
             Qt::DirectConnection);
-    connect(m_proc, &MythSystemLegacy::inished,       this, qOverload<>&Playlist::processExit,
+    connect(m_proc, &MythSystemLegacy::finished,      this, qOverload<>(&Playlist::processExit),
             Qt::DirectConnection);
-    connect(m_proc, &MythSystemLegacy::error,         this, qOverload<uint>&Playlist::processExit),
+    connect(m_proc, &MythSystemLegacy::error,         this, qOverload<uint>(&Playlist::processExit),
             Qt::DirectConnection);
 
     m_procExitVal = GENERIC_EXIT_RUNNING;
     m_proc->Run();
 
     while( m_procExitVal == GENERIC_EXIT_RUNNING )
-        usleep( 100ms );
+        usleep( 100000 );
 
     uint retval = m_procExitVal;
 
@@ -1424,14 +1428,14 @@ int Playlist::CreateCDMP3(void)
         connect(m_proc, &MythSystemLegacy::readDataReady,
                 this, &Playlist::cdrecordData, Qt::DirectConnection);
         connect(m_proc, &MythSystemLegacy::finished,
-                this, qOverload<>&Playlist::processExit, Qt::DirectConnection);
+                this, qOverload<>(&Playlist::processExit), Qt::DirectConnection);
         connect(m_proc, &MythSystemLegacy::error,
-                this, qOverload<uint>&Playlist::processExit, Qt::DirectConnection);
+                this, qOverload<uint>(&Playlist::processExit), Qt::DirectConnection);
         m_procExitVal = GENERIC_EXIT_RUNNING;
         m_proc->Run();
 
         while( m_procExitVal == GENERIC_EXIT_RUNNING )
-            usleep( 100ms );
+            usleep( 100000 );
 
         retval = m_procExitVal;
 

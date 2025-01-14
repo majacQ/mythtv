@@ -1,15 +1,16 @@
-// MythTV headers
-#include "httptsstreamhandler.h"
-#include "mythlogging.h"
-
 #include <chrono> // for milliseconds
 #include <thread> // for sleep_for
+
+// MythTV headers
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+#include "httptsstreamhandler.h"
 
 #define LOC QString("HTTPTSSH[%1](%2): ").arg(m_inputId).arg(m_device)
 
 // BUFFER_SIZE is a multiple of TS_SIZE
-#define TS_SIZE     188
-#define BUFFER_SIZE (512 * TS_SIZE)
+static constexpr qint64 TS_SIZE     { 188 };
+static constexpr qint64 BUFFER_SIZE { TS_SIZE * 512 };
 
 QMap<QString, HTTPTSStreamHandler*> HTTPTSStreamHandler::s_httphandlers;
 QMap<QString, uint>                 HTTPTSStreamHandler::s_httphandlers_refcnt;
@@ -71,7 +72,7 @@ void HTTPTSStreamHandler::Return(HTTPTSStreamHandler * & ref, int inputid)
     QMap<QString,HTTPTSStreamHandler*>::iterator it = s_httphandlers.find(devname);
     if ((it != s_httphandlers.end()) && (*it == ref))
     {
-        LOG(VB_RECORD, LOG_INFO, QString("HTTPTSSH[%1]: Closing handler for %1")
+        LOG(VB_RECORD, LOG_INFO, QString("HTTPTSSH[%1]: Closing handler for %2")
             .arg(inputid).arg(devname));
         ref->Stop();
         delete *it;
@@ -147,7 +148,15 @@ bool HTTPReader::DownloadStream(const QUrl& url)
 
     // the HTTP request
     m_replylock.lock();
-    m_reply = m_mgr.get(QNetworkRequest(url));
+    QNetworkRequest m_req = QNetworkRequest(url);
+    m_req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                       QNetworkRequest::NoLessSafeRedirectPolicy);
+    m_req.setHeader(QNetworkRequest::UserAgentHeader,
+                    QString("MythTV/%1 %2/%3")
+                    .arg(MYTH_VERSION_MAJMIN,
+                         QSysInfo::productType(),
+                         QSysInfo::productVersion()));
+    m_reply = m_mgr.get(m_req);
     m_replylock.unlock();
 
     connect(&m_timer, &QTimer::timeout, &event_loop, &QEventLoop::quit);
@@ -170,7 +179,11 @@ bool HTTPReader::DownloadStream(const QUrl& url)
     QMutexLocker  replylock(&m_replylock);
     if (m_reply->error() != QNetworkReply::NoError)
     {
-        LOG(VB_RECORD, LOG_ERR, LOC + "DownloadStream exited with " + m_reply->errorString());
+        LOG(VB_RECORD, LOG_ERR, LOC + "DownloadStream exited with error " +
+            QString("%1 '%2'").arg(m_reply->error()).arg(m_reply->errorString()));
+
+        // Download is not OK when there is a network error
+        m_ok = false;
     }
 
     delete m_reply;

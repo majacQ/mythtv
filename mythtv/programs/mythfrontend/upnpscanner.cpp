@@ -1,3 +1,9 @@
+// C++
+#include <chrono> // for milliseconds
+#include <thread> // for sleep_for
+#include <utility>
+
+// Qt
 #include <QCoreApplication>
 #if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
 #include <QStringConverter>
@@ -5,26 +11,24 @@
 #include <QTextCodec>
 #endif
 
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "ssdp.h"
-#include "upnpscanner.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythupnp/ssdp.h"
 
-#include <chrono> // for milliseconds
-#include <thread> // for sleep_for
-#include <utility>
+// MythFrontend
+#include "upnpscanner.h"
 
 #define LOC QString("UPnPScan: ")
 #define ERR QString("UPnPScan error: ")
 
-#define MAX_ATTEMPTS 5
-#define MAX_REQUESTS 1
+static constexpr uint8_t MAX_ATTEMPTS { 5 };
 
 QString MediaServerItem::NextUnbrowsed(void)
 {
     // items don't need scanning
     if (!m_url.isEmpty())
-        return QString();
+        return {};
 
     // scan this container
     if (!m_scanned)
@@ -40,7 +44,7 @@ QString MediaServerItem::NextUnbrowsed(void)
             return result;
     }
 
-    return QString();
+    return {};
 }
 
 MediaServerItem* MediaServerItem::Find(QString &id)
@@ -77,21 +81,20 @@ void MediaServerItem::Reset(void)
 }
 
 /**
- * \class MediaServer
+ * \class UpnpMediaServer
  *  A simple wrapper containing details about a UPnP Media Server
  */
-class MediaServer : public MediaServerItem
+class UpnpMediaServer : public MediaServerItem
 {
   public:
-    MediaServer()
+    UpnpMediaServer()
      : MediaServerItem(QString("0"), QString(), QString(), QString()),
-       m_eventSubPath(QString()),
        m_friendlyName(QString("Unknown"))
     {
     }
-    explicit MediaServer(QUrl URL)
+    explicit UpnpMediaServer(QUrl URL)
      : MediaServerItem(QString("0"), QString(), QString(), QString()),
-       m_serverURL(std::move(URL)), m_eventSubPath(QString()),
+       m_serverURL(std::move(URL)),
        m_friendlyName(QString("Unknown"))
     {
     }
@@ -109,11 +112,11 @@ class MediaServer : public MediaServerItem
     }
 
     QUrl    m_serverURL;
-    int     m_connectionAttempts {0};
     QUrl    m_controlURL;
     QUrl    m_eventSubURL;
     QString m_eventSubPath;
     QString m_friendlyName;
+    uint8_t m_connectionAttempts {0};
     bool    m_subscribed         {false};
     int     m_renewalTimerId     {0};
     int     m_systemUpdateID     {-1};
@@ -122,11 +125,7 @@ class MediaServer : public MediaServerItem
 UPNPScanner* UPNPScanner::gUPNPScanner        = nullptr;
 bool         UPNPScanner::gUPNPScannerEnabled = false;
 MThread*     UPNPScanner::gUPNPScannerThread  = nullptr;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-QMutex*      UPNPScanner::gUPNPScannerLock    = new QMutex(QMutex::Recursive);
-#else
 QRecursiveMutex* UPNPScanner::gUPNPScannerLock = new QRecursiveMutex();
-#endif
 
 /**
  * \class UPNPScanner
@@ -225,7 +224,7 @@ void UPNPScanner::GetInitialMetadata(VideoMetadataListManager::metadata_list* li
     mediaservers->setPathRoot();
 
     m_lock.lock();
-    QMutableHashIterator<QString,MediaServer*> it(m_servers);
+    QMutableHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -271,7 +270,7 @@ void UPNPScanner::GetMetadata(VideoMetadataListManager::metadata_list* list,
     mediaservers->setPathRoot();
 
     m_lock.lock();
-    QMutableHashIterator<QString,MediaServer*> it(m_servers);
+    QMutableHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -294,7 +293,7 @@ bool UPNPScanner::GetMetadata(QVariant &data)
     if (list.size() != 2)
         return false;
 
-    QString usn = list[0];
+    const QString& usn = list[0];
     QString object = list[1];
 
     m_lock.lock();
@@ -398,7 +397,7 @@ QMap<QString,QString> UPNPScanner::ServerList(void)
 {
     QMap<QString,QString> servers;
     m_lock.lock();
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -467,7 +466,7 @@ void UPNPScanner::Stop(void)
         m_watchdogTimer->stop();
 
     // cleanup our servers and subscriptions
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -480,13 +479,13 @@ void UPNPScanner::Stop(void)
     m_servers.clear();
 
     // cleanup the network
-    for (QNetworkReply *reply : qAsConst(m_descriptionRequests))
+    for (QNetworkReply *reply : std::as_const(m_descriptionRequests))
     {
         reply->abort();
         delete reply;
     }
     m_descriptionRequests.clear();
-    for (QNetworkReply *reply : qAsConst(m_browseRequests))
+    for (QNetworkReply *reply : std::as_const(m_browseRequests))
     {
         reply->abort();
         delete reply;
@@ -523,7 +522,7 @@ void UPNPScanner::Update(void)
     // if our network queue is full, then we may need to come back later
     bool reschedule = false;
 
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -564,7 +563,7 @@ void UPNPScanner::CheckStatus(void)
     // Remove stale servers - the SSDP cache code does not send out removal
     // notifications for expired (rather than explicitly closed) connections
     m_lock.lock();
-    QMutableHashIterator<QString,MediaServer*> it(m_servers);
+    QMutableHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -573,7 +572,7 @@ void UPNPScanner::CheckStatus(void)
         {
             LOG(VB_UPNP, LOG_INFO, LOC + QString("%1 no longer in SSDP cache. Removing")
                 .arg(it.value()->m_serverURL.toString()));
-            MediaServer* last = it.value();
+            UpnpMediaServer* last = it.value();
             it.remove();
             delete last;
         }
@@ -634,7 +633,9 @@ void UPNPScanner::replyFinished(QNetworkReply *reply)
         }
     }
     else
+    {
         LOG(VB_UPNP, LOG_ERR, LOC + "Received unknown reply");
+    }
 
     reply->deleteLater();
 }
@@ -644,7 +645,7 @@ void UPNPScanner::replyFinished(QNetworkReply *reply)
  */
 void UPNPScanner::customEvent(QEvent *event)
 {
-    if (event->type() != MythEvent::MythEventMessage)
+    if (event->type() != MythEvent::kMythEventMessage)
         return;
 
     // UPnP events
@@ -734,7 +735,7 @@ void UPNPScanner::timerEvent(QTimerEvent * event)
     QString usn;
 
     m_lock.lock();
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -775,7 +776,7 @@ void UPNPScanner::ScheduleUpdate(void)
 void UPNPScanner::CheckFailure(const QUrl &url)
 {
     m_lock.lock();
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -796,7 +797,7 @@ void UPNPScanner::Debug(void)
     m_lock.lock();
     LOG(VB_UPNP, LOG_INFO, LOC + QString("%1 media servers discovered:")
                                    .arg(m_servers.size()));
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -807,7 +808,9 @@ void UPNPScanner::Debug(void)
                 status = "Failed";
         }
         else
+        {
             status = "Yes";
+        }
         LOG(VB_UPNP, LOG_INFO, LOC +
             QString("'%1' Connected: %2 Subscribed: %3 SystemUpdateID: "
                     "%4 timerId: %5")
@@ -831,7 +834,7 @@ void UPNPScanner::BrowseNextContainer(void)
 {
     QMutexLocker locker(&m_lock);
 
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     bool complete = true;
     while (it.hasNext())
     {
@@ -943,7 +946,7 @@ void UPNPScanner::AddServer(const QString &usn, const QString &url)
     m_lock.lock();
     if (!m_servers.contains(usn))
     {
-        m_servers.insert(usn, new MediaServer(url));
+        m_servers.insert(usn, new UpnpMediaServer(url));
         LOG(VB_GENERAL, LOG_INFO, LOC + QString("Adding: %1").arg(usn));
         ScheduleUpdate();
     }
@@ -959,7 +962,7 @@ void UPNPScanner::RemoveServer(const QString &usn)
     if (m_servers.contains(usn))
     {
         LOG(VB_GENERAL, LOG_INFO, LOC + QString("Removing: %1").arg(usn));
-        MediaServer* old = m_servers[usn];
+        UpnpMediaServer* old = m_servers[usn];
         if (old->m_renewalTimerId)
             killTimer(old->m_renewalTimerId);
         m_servers.remove(usn);
@@ -999,6 +1002,7 @@ void UPNPScanner::ParseBrowse(const QUrl &url, QNetworkReply *reply)
 
     // Open the response for parsing
     auto *parent = new QDomDocument();
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMessage;
     int errorLine   = 0;
     int errorColumn = 0;
@@ -1011,6 +1015,18 @@ void UPNPScanner::ParseBrowse(const QUrl &url, QNetworkReply *reply)
         delete parent;
         return;
     }
+#else
+    auto parseResult = parent->setContent(data);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("DIDL Parse error, Line: %1 Col: %2 Error: '%3'")
+                .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                .arg(parseResult.errorMessage));
+        delete parent;
+        return;
+    }
+#endif
 
     LOG(VB_UPNP, LOG_INFO, "\n\n" + parent->toString(4) + "\n\n");
 
@@ -1035,8 +1051,8 @@ void UPNPScanner::ParseBrowse(const QUrl &url, QNetworkReply *reply)
     // determine the 'server' which requested the browse
     m_lock.lock();
 
-    MediaServer* server = nullptr;
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    UpnpMediaServer* server = nullptr;
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();
@@ -1182,10 +1198,11 @@ QDomDocument* UPNPScanner::FindResult(const QDomNode &n, uint &num,
         updateid = node.text().toUInt();
     if (node.tagName() == "Result" && !result)
     {
+        result = new QDomDocument();
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         QString errorMessage;
         int errorLine   = 0;
         int errorColumn = 0;
-        result = new QDomDocument();
         if (!result->setContent(node.text(), true, &errorMessage, &errorLine, &errorColumn))
         {
             LOG(VB_GENERAL, LOG_ERR, LOC +
@@ -1194,6 +1211,20 @@ QDomDocument* UPNPScanner::FindResult(const QDomNode &n, uint &num,
             delete result;
             result = nullptr;
         }
+#else
+        auto parseResult =
+            result->setContent(node.text(),
+                               QDomDocument::ParseOption::UseNamespaceProcessing);
+        if (!parseResult)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC +
+                QString("DIDL Parse error, Line: %1 Col: %2 Error: '%3'")
+                    .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                    .arg(parseResult.errorMessage));
+            delete result;
+            result = nullptr;
+        }
+#endif
     }
 
     QDomNode next = node.firstChild();
@@ -1232,6 +1263,7 @@ bool UPNPScanner::ParseDescription(const QUrl &url, QNetworkReply *reply)
     QString URLBase = QString();
 
     QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMessage;
     int errorLine   = 0;
     int errorColumn = 0;
@@ -1244,6 +1276,19 @@ bool UPNPScanner::ParseDescription(const QUrl &url, QNetworkReply *reply)
             .arg(errorLine).arg(errorColumn).arg(errorMessage));
         return false;
     }
+#else
+    auto parseResult = doc.setContent(data);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("Failed to parse device description from %1")
+                .arg(url.toString()));
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Line: %1 Col: %2 Error: '%3'")
+            .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+            .arg(parseResult.errorMessage));
+        return false;
+    }
+#endif
 
     QDomElement docElem = doc.documentElement();
     QDomNode n = docElem.firstChild();
@@ -1300,7 +1345,7 @@ bool UPNPScanner::ParseDescription(const QUrl &url, QNetworkReply *reply)
     std::chrono::seconds timeout = 0s;
 
     m_lock.lock();
-    QHashIterator<QString,MediaServer*> it(m_servers);
+    QHashIterator<QString,UpnpMediaServer*> it(m_servers);
     while (it.hasNext())
     {
         it.next();

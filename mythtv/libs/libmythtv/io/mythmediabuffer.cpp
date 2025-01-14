@@ -1,29 +1,5 @@
-// Qt
-#include <QFile>
-#include <QDateTime>
-#include <QReadLocker>
-
-// MythTV
-#include "threadedfilewriter.h"
-#include "io/mythfilebuffer.h"
-#include "io/mythstreamingbuffer.h"
-#include "mythmiscutil.h"
-#include "livetvchain.h"
-#include "mythcontext.h"
-#include "mythconfig.h"
-#include "remotefile.h"
-#include "compat.h"
-#include "mythdate.h"
-#include "mythtimer.h"
-#include "mythlogging.h"
-#include "DVD/mythdvdbuffer.h"
-#include "DVD/mythdvdstream.h"
-#include "Bluray/mythbdbuffer.h"
-#include "HLS/httplivestreambuffer.h"
-#include "mythcdrom.h"
-#include "io/mythmediabuffer.h"
-
 // Std
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -34,6 +10,32 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+// Qt
+#include <QFile>
+#include <QDateTime>
+#include <QReadLocker>
+
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcdrom.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/threadedfilewriter.h"
+
+#include "Bluray/mythbdbuffer.h"
+#include "DVD/mythdvdbuffer.h"
+#include "DVD/mythdvdstream.h"
+#include "HLS/httplivestreambuffer.h"
+#include "io/mythfilebuffer.h"
+#include "io/mythmediabuffer.h"
+#include "io/mythstreamingbuffer.h"
+#include "livetvchain.h"
 
 // FFmpeg
 extern "C" {
@@ -334,6 +336,27 @@ void MythMediaBuffer::SetBufferSizeFactors(bool EstBitrate, bool Matroska)
     CreateReadAheadBuffer();
 }
 
+static inline uint estbitrate_to_rbs(uint estbitrate)
+{
+    if (estbitrate > 18000)
+        return 512*1024;
+    if (estbitrate >  9000)
+        return 256*1024;
+    if (estbitrate >  5000)
+        return 128*1024;
+    if (estbitrate >  2500)
+        return 64*1024;
+    if (estbitrate >  1250)
+        return 32*1024;
+    if (estbitrate >=  500)
+        return 16*1024;
+    if (estbitrate >   250)
+        return 8*1024;
+    if (estbitrate >   125)
+        return 4*1024;
+    return 2*1024;
+}
+
 /** \fn MythMediaBuffer::CalcReadAheadThresh(void)
  *  \brief Calculates m_fillMin, m_fillThreshold, and m_readBlockSize
  *         from the estimated effective bitrate of the stream.
@@ -351,26 +374,10 @@ void MythMediaBuffer::CalcReadAheadThresh(void)
     // loop without sleeping if the buffered data is less than this
     m_fillThreshold = 7 * m_bufferSize / 8;
 
-    const uint KB2   =   2*1024;
-    const uint KB4   =   4*1024;
-    const uint KB8   =   8*1024;
-    const uint KB16  =  16*1024;
-    const uint KB32  =  32*1024;
-    const uint KB64  =  64*1024;
-    const uint KB128 = 128*1024;
-    const uint KB256 = 256*1024;
-    const uint KB512 = 512*1024;
-
     estbitrate     = static_cast<uint>(std::max(abs(m_rawBitrate * m_playSpeed), 0.5F * m_rawBitrate));
     estbitrate     = std::min(m_rawBitrate * 3, estbitrate);
-    int const rbs  = (estbitrate > 18000) ? KB512 :
-                     (estbitrate >  9000) ? KB256 :
-                     (estbitrate >  5000) ? KB128 :
-                     (estbitrate >  2500) ? KB64  :
-                     (estbitrate >  1250) ? KB32  :
-                     (estbitrate >=  500) ? KB16  :
-                     (estbitrate >   250) ? KB8   :
-                     (estbitrate >   125) ? KB4   : KB2;
+    int const rbs = estbitrate_to_rbs(estbitrate);
+
     if (rbs < DEFAULT_CHUNK_SIZE)
         m_readBlockSize = rbs;
     else
@@ -920,8 +927,7 @@ void MythMediaBuffer::run(void)
                     int old_block_size = m_readBlockSize;
                     m_readBlockSize = 3 * m_readBlockSize / 2;
                     m_readBlockSize = ((m_readBlockSize+DEFAULT_CHUNK_SIZE-1) / DEFAULT_CHUNK_SIZE) * DEFAULT_CHUNK_SIZE;
-                    if (m_readBlockSize > KB512)
-                        m_readBlockSize = KB512;
+                    m_readBlockSize = std::min(m_readBlockSize, KB512);
                     LOG(VB_FILE, LOG_INFO, LOC + QString("Avg read interval was %1 msec. "
                                                          "%2K -> %3K block size")
                         .arg(readTimeAvg.count()).arg(old_block_size/1024).arg(m_readBlockSize/1024));
@@ -1212,14 +1218,18 @@ int MythMediaBuffer::WaitForAvail(int Count, std::chrono::milliseconds  Timeout)
     if (available >= Count)
         return available;
 
-    Count = (m_ateof && available < Count) ? available : Count;
+    if (m_ateof)
+    {
+        m_wantToRead = 0;
+        return available;
+    }
 
-    if (m_liveTVChain && m_setSwitchToNext && (available < Count))
+    if (m_liveTVChain && m_setSwitchToNext)
         return available;
 
     // Make sure that if the read ahead thread is sleeping and
     // it should be reading that we start reading right away.
-    if ((available < Count) && !m_stopReads && !m_requestPause && !m_commsError && m_readAheadRunning)
+    if (!m_stopReads && !m_requestPause && !m_commsError && m_readAheadRunning)
         m_generalWait.wakeAll();
 
     MythTimer timer;
@@ -1560,7 +1570,7 @@ uint64_t MythMediaBuffer::UpdateDecoderRate(uint64_t Latest)
     if (!m_bitrateMonitorEnabled)
         return 0;
 
-    auto current = std::chrono::milliseconds(QDateTime::currentDateTime().toMSecsSinceEpoch());
+    auto current = std::chrono::milliseconds(QDateTime::currentMSecsSinceEpoch());
     std::chrono::milliseconds expire = current - 1s;
 
     m_decoderReadLock.lock();
@@ -1591,7 +1601,7 @@ uint64_t MythMediaBuffer::UpdateStorageRate(uint64_t Latest)
     if (!m_bitrateMonitorEnabled)
         return 0;
 
-    auto current = std::chrono::milliseconds(QDateTime::currentDateTime().toMSecsSinceEpoch());
+    auto current = std::chrono::milliseconds(QDateTime::currentMSecsSinceEpoch());
     auto expire = current - 1s;
 
     m_storageReadLock.lock();
@@ -1859,11 +1869,7 @@ MythBDBuffer  *MythMediaBuffer::BD(void)
 
 void MythMediaBuffer::AVFormatInitNetwork(void)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex s_avnetworkLock(QMutex::Recursive);
-#else
     static QRecursiveMutex s_avnetworkLock;
-#endif
     static bool s_avnetworkInitialised = false;
     QMutexLocker lock(&s_avnetworkLock);
     if (!s_avnetworkInitialised)

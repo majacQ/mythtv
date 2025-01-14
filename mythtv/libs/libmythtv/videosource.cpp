@@ -26,34 +26,35 @@
 #include <utility>
 
 // MythTV headers
-#include "mythconfig.h"
-#include "mythcorecontext.h"
-#include "videosource.h"
-#include "scanwizard.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythui/mythnotification.h"
+#include "libmythui/mythterminal.h"
+#include "libmythupnp/httprequest.h"    // for TestMimeType()
+
 #include "cardutil.h"
-#include "sourceutil.h"
 #include "channelinfo.h"
 #include "channelutil.h"
-#include "frequencies.h"
 #include "diseqcsettings.h"
-#include "firewiredevice.h"
-#include "compat.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
-#include "libmythupnp/httprequest.h"    // for TestMimeType()
-#include "mythsystemlegacy.h"
-#include "exitcodes.h"
+#include "frequencies.h"
+#include "recorders/firewiredevice.h"
+#include "scanwizard.h"
+#include "sourceutil.h"
 #include "v4l2util.h"
-#include "mythnotification.h"
-#include "mythterminal.h"
+#include "videosource.h"
 
 #ifdef USING_DVB
-#include "dvbtypes.h"
+#include "recorders/dvbtypes.h"
 #endif
 
 #ifdef USING_VBOX
-#include "vboxutils.h"
+#include "recorders/vboxutils.h"
 #endif
 
 #ifdef USING_HDHOMERUN
@@ -297,7 +298,7 @@ class XMLTVGrabber : public MythUIComboBoxSetting
             args += "baseline";
 
             MythSystemLegacy find_grabber_proc("tv_find_grabbers", args,
-                                                kMSStdOut | kMSRunShell);
+                                                kMSStdOut | kMSRunShell | kMSDontDisableDrawing);
             find_grabber_proc.Run(25s);
             LOG(VB_GENERAL, LOG_INFO,
                 loc + "Running 'tv_find_grabbers " + args.join(" ") + "'.");
@@ -309,13 +310,8 @@ class XMLTVGrabber : public MythUIComboBoxSetting
                 while (!ostream.atEnd())
                 {
                     QString grabber_list(ostream.readLine());
-    #if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                    QStringList grabber_split =
-                        grabber_list.split("|", QString::SkipEmptyParts);
-    #else
                     QStringList grabber_split =
                         grabber_list.split("|", Qt::SkipEmptyParts);
-    #endif
                     QString grabber_name = grabber_split[1] + " (xmltv)";
                     QFileInfo grabber_file(grabber_split[0]);
 
@@ -405,7 +401,7 @@ class CaptureCardSpinBoxSetting : public MythUISpinBoxSetting
     void setValueMs (std::chrono::milliseconds newValue)
         { setValue(newValue.count()); }
     // Handle non-integer seconds
-    template<typename T, typename = typename std::enable_if<!std::is_integral<T>()>>
+    template<typename T, typename = std::enable_if_t<!std::is_integral<T>()>>
     void setValueMs (std::chrono::duration<T> newSecs)
         { setValueMs(duration_cast<std::chrono::milliseconds>(newSecs)); }
 };
@@ -589,9 +585,9 @@ void TransFreqTableSelector::Save(void)
     }
 }
 
-void TransFreqTableSelector::SetSourceID(uint _sourceid)
+void TransFreqTableSelector::SetSourceID(uint sourceid)
 {
-    m_sourceId = _sourceid;
+    m_sourceId = sourceid;
     Load();
 }
 
@@ -663,10 +659,10 @@ void XMLTV_generic_config::RunConfig(void)
 }
 
 EITOnly_config::EITOnly_config(const VideoSource& _parent, StandardSetting *_setting)
+  : m_useEit(new UseEIT(_parent))
 {
     setVisible(false);
 
-    m_useEit = new UseEIT(_parent);
     m_useEit->setValue(true);
     m_useEit->setVisible(false);
     addChild(m_useEit);
@@ -687,8 +683,8 @@ void EITOnly_config::Save(void)
 }
 
 NoGrabber_config::NoGrabber_config(const VideoSource& _parent)
+  : m_useEit(new UseEIT(_parent))
 {
-    m_useEit = new UseEIT(_parent);
     m_useEit->setValue(false);
     m_useEit->setVisible(false);
     addChild(m_useEit);
@@ -705,9 +701,9 @@ void NoGrabber_config::Save(void)
 }
 
 VideoSource::VideoSource()
-{
     // must be first
-    m_id = new ID();
+  : m_id(new ID())
+{
     addChild(m_id = new ID());
 
     setLabel(QObject::tr("Video Source Setup"));
@@ -828,11 +824,9 @@ class VideoDevice : public CaptureCardComboBoxSetting
      *  \param dir      The directory to open and search for devices.
      *  \param absPath  Ignored. The function always uses absolute paths.
      */
-    void fillSelectionsFromDir(const QDir &dir, bool absPath = true)
+    void fillSelectionsFromDir(const QDir &dir,
+                               [[maybe_unused]] bool absPath = true)
     {
-        // Needed to make both compiler and doxygen happy.
-        (void) absPath;
-
         fillSelectionsFromDir(dir, 0, 255, QString(), QRegularExpression(), false);
     }
 
@@ -843,7 +837,7 @@ class VideoDevice : public CaptureCardComboBoxSetting
     {
         uint cnt = 0;
         QFileInfoList entries = dir.entryInfoList();
-        for (const auto & fi : qAsConst(entries))
+        for (const auto & fi : std::as_const(entries))
         {
             struct stat st {};
             QString filepath = fi.absoluteFilePath();
@@ -919,14 +913,14 @@ class VBIDevice : public CaptureCardComboBoxSetting
 
     uint setFilter(const QString &card, const QString &driver)
     {
-        uint count = 0;
         clearSelections();
         QDir dev("/dev/v4l", "vbi*", QDir::Name, QDir::System);
-        if (!(count = fillSelectionsFromDir(dev, card, driver)))
+        uint count = fillSelectionsFromDir(dev, card, driver);
+        if (count == 0)
         {
             dev.setPath("/dev");
-            if (((count = fillSelectionsFromDir(dev, card, driver)) == 0U) &&
-                !getValue().isEmpty())
+            count = fillSelectionsFromDir(dev, card, driver);
+            if ((count == 0U) && !getValue().isEmpty())
             {
                 addSelection(getValue(),getValue(),true);
             }
@@ -939,11 +933,9 @@ class VBIDevice : public CaptureCardComboBoxSetting
      *  \param dir      The directory to open and search for devices.
      *  \param absPath  Ignored. The function always uses absolute paths.
      */
-    void fillSelectionsFromDir(const QDir &dir, bool absPath = true)
+    void fillSelectionsFromDir(const QDir &dir,
+                               [[maybe_unused]] bool absPath = true)
     {
-        // Needed to make both compiler and doxygen happy.
-        (void) absPath;
-
         fillSelectionsFromDir(dir, QString(), QString());
     }
 
@@ -952,7 +944,7 @@ class VBIDevice : public CaptureCardComboBoxSetting
     {
         QStringList devices;
         QFileInfoList entries = dir.entryInfoList();
-        for (const auto & fi : qAsConst(entries))
+        for (const auto & fi : std::as_const(entries))
         {
             QString    device = fi.absoluteFilePath();
             QByteArray adevice = device.toLatin1();
@@ -973,7 +965,7 @@ class VBIDevice : public CaptureCardComboBoxSetting
         }
 
         QString sel = getValue();
-        for (const QString& device : qAsConst(devices))
+        for (const QString& device : std::as_const(devices))
             addSelection(device, device, device == sel);
 
         return (uint) devices.size();
@@ -1014,13 +1006,13 @@ class AudioDevice : public CaptureCardComboBoxSetting
                                    "audiodevice")
     {
         setLabel(QObject::tr("Audio device"));
-#if USING_OSS
+#ifdef USING_OSS
         QDir dev("/dev", "dsp*", QDir::Name, QDir::System);
         fillSelectionsFromDir(dev);
         dev.setPath("/dev/sound");
         fillSelectionsFromDir(dev);
 #endif
-#if USING_ALSA
+#ifdef USING_ALSA
         addSelection("ALSA:default", "ALSA:default");
 #endif
         addSelection(QObject::tr("(None)"), "NULL");
@@ -1044,10 +1036,10 @@ class SignalTimeout : public CaptureCardSpinBoxSetting
                         "a signal when scanning for channels."));
     };
     // Handle non-integer seconds
-    template<typename T, typename = typename std::enable_if<std::is_floating_point<T>::value>::type >
+    template<typename T, typename = std::enable_if_t<std::is_floating_point_v<T>> >
     SignalTimeout(const CaptureCard &parent, std::chrono::milliseconds value, std::chrono::duration<T> min_secs) :
         SignalTimeout(parent, value, duration_cast<std::chrono::milliseconds>(min_secs)) {};
-    template<typename T, typename = typename std::enable_if<std::is_floating_point<T>::value>::type >
+    template<typename T, typename = std::enable_if_t<std::is_floating_point_v<T>> >
     SignalTimeout(const CaptureCard &parent, std::chrono::duration<T> value, std::chrono::duration<T> min_secs) :
         SignalTimeout(parent,
                       duration_cast<std::chrono::milliseconds>(value),
@@ -1070,10 +1062,10 @@ class ChannelTimeout : public CaptureCardSpinBoxSetting
                         "exceeded, the recording will be marked as failed."));
     };
     // Handle non-integer seconds
-    template<typename T, typename = typename std::enable_if<std::is_floating_point<T>::value>::type >
+    template<typename T, typename = std::enable_if_t<std::is_floating_point_v<T>> >
     ChannelTimeout(const CaptureCard &parent, std::chrono::milliseconds value, std::chrono::duration<T> min_secs) :
         ChannelTimeout(parent, value, duration_cast<std::chrono::milliseconds>(min_secs)) {};
-    template<typename T, typename = typename std::enable_if<std::is_floating_point<T>::value>::type >
+    template<typename T, typename = std::enable_if_t<std::is_floating_point_v<T>> >
     ChannelTimeout(const CaptureCard &parent, std::chrono::duration<T> value, std::chrono::duration<T> min_secs) :
         ChannelTimeout(parent, value, duration_cast<std::chrono::milliseconds>(min_secs)) {};
 };
@@ -1148,7 +1140,7 @@ class DVBCardNum : public CaptureCardComboBoxSetting
 
         QMap<QString,bool> in_use;
         QString sel = current;
-        for (const QString& dev : qAsConst(sdevs))
+        for (const QString& dev : std::as_const(sdevs))
         {
             in_use[dev] = std::find(db.begin(), db.end(), dev) != db.end();
             if (sel.isEmpty() && !in_use[dev])
@@ -1161,7 +1153,7 @@ class DVBCardNum : public CaptureCardComboBoxSetting
         QString usestr = QString(" -- ");
         usestr += QObject::tr("Warning: already in use");
 
-        for (const QString& dev : qAsConst(sdevs))
+        for (const QString& dev : std::as_const(sdevs))
         {
             QString desc = dev + (in_use[dev] ? usestr : "");
             desc = (current == dev) ? dev : desc;
@@ -1325,10 +1317,8 @@ FirewireModel::FirewireModel(const CaptureCard  &parent,
     setHelpText(help);
 }
 
-void FirewireModel::SetGUID(const QString &_guid)
+void FirewireModel::SetGUID([[maybe_unused]] const QString &_guid)
 {
-    (void) _guid;
-
 #ifdef USING_FIREWIRE
     AVCInfo info = m_guid->GetAVCInfo(_guid);
     QString model = FirewireDevice::GetModelName(info.m_vendorid, info.m_modelid);
@@ -1336,10 +1326,8 @@ void FirewireModel::SetGUID(const QString &_guid)
 #endif // USING_FIREWIRE
 }
 
-void FirewireDesc::SetGUID(const QString &_guid)
+void FirewireDesc::SetGUID([[maybe_unused]] const QString &_guid)
 {
-    (void) _guid;
-
     setLabel(tr("Description"));
 
 #ifdef USING_FIREWIRE
@@ -1409,7 +1397,7 @@ static void FirewireConfigurationGroup(CaptureCard& parent, CardType& cardtype)
 }
 #endif
 
-#if USING_HDHOMERUN
+#ifdef USING_HDHOMERUN
 
 // -----------------------
 // HDHomeRun Configuration
@@ -1470,14 +1458,13 @@ class UseHDHomeRunDevice : public TransMythUICheckBoxSetting
 
 HDHomeRunConfigurationGroup::HDHomeRunConfigurationGroup
         (CaptureCard& a_parent, CardType &a_cardtype) :
-    m_parent(a_parent)
+    m_parent(a_parent),
+    m_deviceId(new HDHomeRunDeviceID(a_parent, *this))
 {
     setVisible(false);
 
     // Fill Device list
     FillDeviceList();
-
-    m_deviceId   = new HDHomeRunDeviceID(m_parent, *this);
 
     QMap<QString, HDHomeRunDevice>::iterator dit;
     for (dit = m_deviceList.begin(); dit != m_deviceList.end(); ++dit)
@@ -1507,7 +1494,7 @@ void HDHomeRunConfigurationGroup::FillDeviceList(void)
     // ProbeVideoDevices returns "deviceid ip" pairs
     QStringList devs = CardUtil::ProbeVideoDevices("HDHOMERUN");
 
-    for (const auto & dev : qAsConst(devs))
+    for (const auto & dev : std::as_const(devs))
     {
         QStringList devinfo = dev.split(" ");
         const QString& devid = devinfo.at(0);
@@ -1539,7 +1526,7 @@ void HDHomeRunConfigurationGroup::FillDeviceList(void)
 void HDHomeRunConfigurationGroup::SetDeviceCheckBoxes(const QString& devices)
 {
     QStringList devstrs = devices.split(",");
-    for (const QString& devstr : qAsConst(devstrs))
+    for (const QString& devstr : std::as_const(devstrs))
     {
         // Get the HDHomeRun device ID using libhdhomerun.  We need to
         // do it this way because legacy configurations could use an
@@ -1565,7 +1552,7 @@ QString HDHomeRunConfigurationGroup::GetDeviceCheckBoxes(void)
 {
     // Return a string listing each HDHomeRun device with its checbox
     // turned on.
-    QStringList devstrs;    
+    QStringList devstrs;
     QMap<QString, HDHomeRunDevice>::iterator dit;
     for (dit = m_deviceList.begin(); dit != m_deviceList.end(); ++dit)
     {
@@ -1795,7 +1782,10 @@ class IPTVHost : public CaptureCardTextEditSetting
         setValue("http://mafreebox.freebox.fr/freeboxtv/playlist.m3u");
         setLabel(QObject::tr("M3U URL"));
         setHelpText(
-            QObject::tr("URL of M3U containing RTSP/RTP/UDP channel URLs."));
+            QObject::tr("URL of M3U file containing RTSP/RTP/UDP/HTTP channel URLs,"
+            " example for HDHomeRun: http://<ipv4>/lineup.m3u and for Freebox:"
+            " http://mafreebox.freebox.fr/freeboxtv/playlist.m3u."
+            ));
     }
 };
 
@@ -1842,7 +1832,7 @@ class ASIDevice : public CaptureCardComboBoxSetting
         // for new configs (preferring non-conflicing devices).
         QMap<QString,bool> in_use;
         QString sel = current;
-        for (const QString& dev : qAsConst(sdevs))
+        for (const QString& dev : std::as_const(sdevs))
         {
             in_use[dev] = std::find(db.begin(), db.end(), dev) != db.end();
             if (sel.isEmpty() && !in_use[dev])
@@ -1858,7 +1848,7 @@ class ASIDevice : public CaptureCardComboBoxSetting
 
         // Add the devices to the UI
         bool found = false;
-        for (const QString& dev : qAsConst(sdevs))
+        for (const QString& dev : std::as_const(sdevs))
         {
             QString desc = dev + (in_use[dev] ? usestr : "");
             desc = (current == dev) ? dev : desc;
@@ -1905,7 +1895,7 @@ ASIConfigurationGroup::ASIConfigurationGroup(CaptureCard& a_parent,
     probeCard(m_device->getValue());
 };
 
-void ASIConfigurationGroup::probeCard(const QString &device)
+void ASIConfigurationGroup::probeCard([[maybe_unused]] const QString &device)
 {
 #ifdef USING_ASI
     if (device.isEmpty())
@@ -1931,7 +1921,6 @@ void ASIConfigurationGroup::probeCard(const QString &device)
     }
     m_cardInfo->setValue(tr("Valid DVEO ASI card"));
 #else
-    Q_UNUSED(device);
     m_cardInfo->setValue(QString("Not compiled with ASI support"));
 #endif
 }
@@ -1981,7 +1970,9 @@ void ImportConfigurationGroup::probeCard(const QString &device)
             cs = tr("%1 MB").arg(fileInfo.size() / 1024 / 1024);
         }
         else
+        {
             ci = tr("File not readable");
+        }
     }
     else
     {
@@ -1998,18 +1989,18 @@ void ImportConfigurationGroup::probeCard(const QString &device)
 
 VBoxConfigurationGroup::VBoxConfigurationGroup
         (CaptureCard& a_parent, CardType& a_cardtype) :
-    m_parent(a_parent)
+    m_parent(a_parent),
+    m_desc(new GroupSetting()),
+    m_deviceId(new VBoxDeviceID(a_parent)),
+    m_cardIp(new VBoxIP()),
+    m_cardTuner(new VBoxTunerIndex())
 {
     setVisible(false);
 
     // Fill Device list
     FillDeviceList();
 
-    m_deviceId     = new VBoxDeviceID(m_parent);
-    m_desc         = new GroupSetting();
     m_desc->setLabel(tr("Description"));
-    m_cardIp       = new VBoxIP();
-    m_cardTuner    = new VBoxTunerIndex();
     m_deviceIdList = new VBoxDeviceIDList(
         m_deviceId, m_desc, m_cardIp, m_cardTuner, &m_deviceList, m_parent);
 
@@ -2037,7 +2028,7 @@ void VBoxConfigurationGroup::FillDeviceList(void)
     // ProbeVideoDevices returns "deviceid ip tunerno tunertype"
     QStringList devs = CardUtil::ProbeVideoDevices("VBOX");
 
-    for (const auto & dev : qAsConst(devs))
+    for (const auto & dev : std::as_const(devs))
     {
         QStringList devinfo = dev.split(" ");
         const QString& id = devinfo.at(0);
@@ -2062,7 +2053,7 @@ void VBoxConfigurationGroup::FillDeviceList(void)
     // returns "ip.ip.ip.ip-n-type" or deviceid-n-type values
     QStringList db = CardUtil::GetVideoDevices("VBOX");
 
-    for (const auto & dev : qAsConst(db))
+    for (const auto & dev : std::as_const(db))
     {
         QMap<QString, VBoxDevice>::iterator dit;
         dit = m_deviceList.find(dev);
@@ -2134,7 +2125,7 @@ void CetonDeviceID::Load(void)
 
 void CetonDeviceID::UpdateValues(void)
 {
-    QRegularExpression newstyle { R"(^([0-9.]+)-(\d|RTP)\.(\d)$)" };
+    static const QRegularExpression newstyle { R"(^([0-9.]+)-(\d|RTP)\.(\d)$)" };
     auto match = newstyle.match(getValue());
     if (match.hasMatch())
     {
@@ -2239,12 +2230,12 @@ void V4LConfigurationGroup::probeCard(const QString &device)
 MPEGConfigurationGroup::MPEGConfigurationGroup(CaptureCard &parent,
                                                CardType &cardtype) :
     m_parent(parent),
+    m_vbiDevice(new VBIDevice(parent)),
     m_cardInfo(new GroupSetting())
 {
     setVisible(false);
     QRegularExpression drv { "^(ivtv|(saa7164(.*)))$" };
     m_device    = new VideoDevice(m_parent, 0, 15, QString(), drv);
-    m_vbiDevice = new VBIDevice(m_parent);
     m_vbiDevice->setVisible(false);
 
     m_cardInfo->setLabel(tr("Probed info"));
@@ -2325,7 +2316,9 @@ void DemoConfigurationGroup::probeCard(const QString &device)
             cs = tr("%1 MB").arg(fileInfo.size() / 1024 / 1024);
         }
         else
+        {
             ci = tr("File not readable");
+        }
     }
     else
     {
@@ -2434,10 +2427,10 @@ void HDPVRConfigurationGroup::probeCard(const QString &device)
         else if (!dn.isEmpty())
             ci = cn + "  [" + dn + "]";
         close(videofd);
+        m_audioInput->fillSelections(device);
     }
 
     m_cardInfo->setValue(ci);
-    m_audioInput->fillSelections(device);
 }
 
 V4L2encGroup::V4L2encGroup(CaptureCard &parent, CardType& cardtype) :
@@ -2467,7 +2460,7 @@ V4L2encGroup::V4L2encGroup(CaptureCard &parent, CardType& cardtype) :
         probeCard(device_name);
 }
 
-void V4L2encGroup::probeCard(const QString &device_name)
+void V4L2encGroup::probeCard([[maybe_unused]] const QString &device_name)
 {
 #ifdef USING_V4L2
     QString    card_name = tr("Failed to open");
@@ -2496,7 +2489,9 @@ void V4L2encGroup::probeCard(const QString &device_name)
             m_device->addTargetedChild(m_driverName, audioinput);
         }
         else
+        {
             delete audioinput;
+        }
 
         if (v4l2.HasSlicedVBI())
         {
@@ -2507,15 +2502,15 @@ void V4L2encGroup::probeCard(const QString &device_name)
                 m_device->addTargetedChild(m_driverName, vbidev);
             }
             else
+            {
                 delete vbidev;
+            }
         }
 
         m_device->addTargetedChild(m_driverName, new EmptyVBIDevice(m_parent));
         m_device->addTargetedChild(m_driverName,
                                    new ChannelTimeout(m_parent, 15s, 2s));
     }
-#else
-    Q_UNUSED(device_name);
 #endif // USING_V4L2
 }
 
@@ -2532,10 +2527,8 @@ CaptureCardGroup::CaptureCardGroup(CaptureCard &parent)
 #endif // USING_DVB
 
 #ifdef USING_V4L2
-# ifdef USING_HDPVR
     cardtype->addTargetedChild("HDPVR",
                                new HDPVRConfigurationGroup(parent, *cardtype));
-# endif // USING_HDPVR
 #endif // USING_V4L2
 
 #ifdef USING_HDHOMERUN
@@ -2573,10 +2566,8 @@ CaptureCardGroup::CaptureCardGroup(CaptureCard &parent)
                                new V4LConfigurationGroup(parent, *cardtype, "MJPEG"));
     cardtype->addTargetedChild("GO7007",
                                new V4LConfigurationGroup(parent, *cardtype, "GO7007"));
-# ifdef USING_IVTV
     cardtype->addTargetedChild("MPEG",
                                new MPEGConfigurationGroup(parent, *cardtype));
-# endif // USING_IVTV
 #endif // USING_V4L2
 
 #ifdef USING_ASI
@@ -2609,7 +2600,7 @@ QString CaptureCard::GetRawCardType(void) const
 {
     int cardid = getCardID();
     if (cardid <= 0)
-        return QString();
+        return {};
     return CardUtil::GetRawInputType(cardid);
 }
 
@@ -2617,7 +2608,7 @@ void CaptureCard::fillSelections(GroupSetting *setting)
 {
     MSqlQuery query(MSqlQuery::InitCon());
     QString qstr =
-        "SELECT cardid, videodevice, cardtype "
+        "SELECT cardid, videodevice, cardtype, displayname "
         "FROM capturecard "
         "WHERE hostname = :HOSTNAME AND parentid = 0 "
         "ORDER BY cardid";
@@ -2638,8 +2629,11 @@ void CaptureCard::fillSelections(GroupSetting *setting)
         uint    cardid      = query.value(0).toUInt();
         QString videodevice = query.value(1).toString();
         QString cardtype    = query.value(2).toString();
+        QString displayname = query.value(3).toString();
 
-        QString label = CardUtil::GetDeviceLabel(cardtype, videodevice);
+        QString label = QString("%1 (%2)")
+            .arg(CardUtil::GetDeviceLabel(cardtype, videodevice), displayname);
+
         auto *card = new CaptureCard();
         card->loadByID(cardid);
         card->setLabel(label);
@@ -2733,10 +2727,8 @@ void CardType::fillSelections(MythUIComboBoxSetting* setting)
 #ifdef USING_V4L2
     setting->addSelection(
         QObject::tr("V4L2 encoder"), "V4L2ENC");
-#ifdef USING_HDPVR
     setting->addSelection(
         QObject::tr("HD-PVR H.264 encoder"), "HDPVR");
-#endif // USING_HDPVR
 #endif // USING_V4L2
 
 #ifdef USING_HDHOMERUN
@@ -2769,10 +2761,8 @@ void CardType::fillSelections(MythUIComboBoxSetting* setting)
 #endif // USING_IPTV
 
 #ifdef USING_V4L2
-#ifdef USING_IVTV
     setting->addSelection(
         QObject::tr("Analog to MPEG-2 encoder card (PVR-150/250/350, etc)"), "MPEG");
-#endif // USING_IVTV
     setting->addSelection(
         QObject::tr("Analog to MJPEG encoder card (Matrox G200, DC10, etc)"), "MJPEG");
     setting->addSelection(
@@ -2843,6 +2833,8 @@ class DeliverySystem : public GroupSetting
 
 class InputDisplayName : public MythUITextEditSetting
 {
+    Q_DECLARE_TR_FUNCTIONS(InputDisplayName);
+
   public:
     explicit InputDisplayName(const CardInput &parent) :
         MythUITextEditSetting(new CardInputDBStorage(this, parent, "displayname")), m_parent(parent)
@@ -2851,7 +2843,8 @@ class InputDisplayName : public MythUITextEditSetting
         setHelpText(QObject::tr(
                         "This name is displayed on screen when Live TV begins "
                         "and in various other places.  Make sure the last two "
-                        "characters are unique for each input."));
+                        "characters are unique for each input or use a "
+                        "slash ('/') to designate the unique portion."));
     };
     void Load(void) override {
         MythUITextEditSetting::Load();
@@ -2916,14 +2909,11 @@ class InputGroup : public TransMythUIComboBoxSetting
         uint inputid     = m_cardInput.getInputID();
         uint new_groupid = getValue().toUInt();
 
-        if (m_groupId)
+        if (m_groupId && (m_groupId != new_groupid))
             CardUtil::UnlinkInputGroup(inputid, m_groupId);
 
         if (new_groupid)
-        {
-            if (CardUtil::UnlinkInputGroup(inputid, new_groupid))
-                CardUtil::LinkInputGroup(inputid, new_groupid);
-        }
+            CardUtil::LinkInputGroup(inputid, new_groupid);
     }
 
     virtual void Save(const QString& /*destination*/) { Save(); }
@@ -3083,7 +3073,7 @@ void StartingChannel::SetSourceID(const QString &sourceid)
     if (storage == nullptr)
         return;
     int inputId = storage->getInputID();
-    QString startChan = CardUtil::GetStartingChannel(inputId);
+    QString startChan = CardUtil::GetStartChannel(inputId);
 
     ChannelInfoList channels = ChannelUtil::GetAllChannels(sourceid.toUInt());
 
@@ -3210,7 +3200,7 @@ CardInput::CardInput(const QString & cardtype, const QString & device,
         ds->setValue(CardUtil::GetDeliverySystemFromDB(_cardid));
         addChild(ds);
     }
-    else
+    else if (CardUtil::IsV4L(cardtype))
     {
         addChild(m_inputName);
     }
@@ -3322,7 +3312,9 @@ void CardInput::CreateNewInputGroup(void)
         popupStack->AddScreen(settingdialog);
     }
     else
+    {
         delete settingdialog;
+    }
 }
 
 void CardInput::CreateNewInputGroupSlot(const QString& name)
@@ -3396,8 +3388,8 @@ void CardInput::channelScanner(void)
 
     if (ssd->Create())
     {
-        connect(ssd, &StandardSettingDialog::Exiting,
-                [=]()
+        connect(ssd, &StandardSettingDialog::Exiting, this,
+                [srcid, this, num_channels_before]()
                 {
                     if (SourceUtil::GetChannelCount(srcid))
                         m_startChan->SetSourceID(QString::number(srcid));
@@ -3410,7 +3402,9 @@ void CardInput::channelScanner(void)
         mainStack->AddScreen(ssd);
     }
     else
+    {
         delete ssd;
+    }
 
 #else
     LOG(VB_GENERAL, LOG_ERR, "You must compile the backend "
@@ -3509,28 +3503,8 @@ void CardInput::Save(void)
     uint icount = 1;
     if (m_instanceCount)
         icount = m_instanceCount->getValue().toUInt();
-    std::vector<uint> cardids = CardUtil::GetChildInputIDs(cardid);
 
-    // Delete old clone cards as required.
-    for (size_t i = cardids.size() + 1;
-         (i > icount) && !cardids.empty(); --i)
-    {
-        CardUtil::DeleteInput(cardids.back());
-        cardids.pop_back();
-    }
-
-    // Clone this config to existing clone cards.
-    for (uint id : cardids)
-        CardUtil::CloneCard(cardid, id);
-
-    // Create new clone cards as required.
-    for (size_t i = cardids.size() + 1; i < icount; i++)
-    {
-        CardUtil::CloneCard(cardid, 0);
-    }
-
-    // Delete any unused input groups
-    CardUtil::UnlinkInputGroup(0,0);
+    CardUtil::InputSetMaxRecordings(cardid, icount);
 }
 
 int CardInputDBStorage::getInputID(void) const
@@ -3720,7 +3694,7 @@ void CardInputEditor::Load(void)
 
     MSqlQuery query(MSqlQuery::InitCon());
     query.prepare(
-        "SELECT cardid, videodevice, cardtype, inputname "
+        "SELECT cardid, videodevice, cardtype, displayname "
         "FROM capturecard "
         "WHERE hostname = :HOSTNAME "
         "      AND parentid = 0 "
@@ -3738,13 +3712,13 @@ void CardInputEditor::Load(void)
         uint    cardid      = query.value(0).toUInt();
         QString videodevice = query.value(1).toString();
         QString cardtype    = query.value(2).toString();
-        QString inputname   = query.value(3).toString();
+        QString displayname = query.value(3).toString();
 
         auto *cardinput = new CardInput(cardtype, videodevice, cardid);
         cardinput->loadByID(cardid);
         QString inputlabel = QString("%1 (%2) -> %3")
             .arg(CardUtil::GetDeviceLabel(cardtype, videodevice),
-                 inputname, cardinput->getSourceName());
+                 displayname, cardinput->getSourceName());
         m_cardInputs.push_back(cardinput);
         cardinput->setLabel(inputlabel);
         addChild(cardinput);
@@ -3838,43 +3812,43 @@ void DVBConfigurationGroup::probeCard(const QString &videodevice)
 
     switch (CardUtil::toInputType(subtype))
     {
-        case CardUtil::ERROR_OPEN:
+        case CardUtil::INPUT_TYPES::ERROR_OPEN:
             m_cardName->setValue(err_open);
             m_cardType->setValue(strerror(errno));
             break;
-        case CardUtil::ERROR_UNKNOWN:
+        case CardUtil::INPUT_TYPES::ERROR_UNKNOWN:
             m_cardName->setValue(err_other);
             m_cardType->setValue("Unknown error");
             break;
-        case CardUtil::ERROR_PROBE:
+        case CardUtil::INPUT_TYPES::ERROR_PROBE:
             m_cardName->setValue(err_other);
             m_cardType->setValue(strerror(errno));
             break;
-        case CardUtil::QPSK:
+        case CardUtil::INPUT_TYPES::QPSK:
             m_cardType->setValue("DVB-S");
             m_cardName->setValue(frontend_name);
             m_signalTimeout->setValueMs(7s);
             m_channelTimeout->setValueMs(10s);
             break;
-        case CardUtil::DVBS2:
+        case CardUtil::INPUT_TYPES::DVBS2:
             m_cardType->setValue("DVB-S2");
             m_cardName->setValue(frontend_name);
             m_signalTimeout->setValueMs(7s);
             m_channelTimeout->setValueMs(10s);
             break;
-        case CardUtil::QAM:
+        case CardUtil::INPUT_TYPES::QAM:
             m_cardType->setValue("DVB-C");
             m_cardName->setValue(frontend_name);
             m_signalTimeout->setValueMs(3s);
             m_channelTimeout->setValueMs(6s);
             break;
-        case CardUtil::DVBT2:
+        case CardUtil::INPUT_TYPES::DVBT2:
             m_cardType->setValue("DVB-T2");
             m_cardName->setValue(frontend_name);
             m_signalTimeout->setValueMs(3s);
             m_channelTimeout->setValueMs(6s);
             break;
-        case CardUtil::OFDM:
+        case CardUtil::INPUT_TYPES::OFDM:
         {
             m_cardType->setValue("DVB-T");
             m_cardName->setValue(frontend_name);
@@ -3906,7 +3880,7 @@ void DVBConfigurationGroup::probeCard(const QString &videodevice)
 #endif
         }
         break;
-        case CardUtil::ATSC:
+        case CardUtil::INPUT_TYPES::ATSC:
         {
             QString short_name = remove_chaff(frontend_name);
             m_cardType->setValue("ATSC");
@@ -3941,7 +3915,7 @@ void DVBConfigurationGroup::probeCard(const QString &videodevice)
     {
         m_cardType->clearSelections();
         QStringList delsyslist = CardUtil::ProbeDeliverySystems(videodevice);
-        for (const auto & item : qAsConst(delsyslist))
+        for (const auto & item : std::as_const(delsyslist))
         {
             LOG(VB_GENERAL, LOG_DEBUG, QString("DVBCardType: add deliverysystem:%1")
                 .arg(item));
@@ -4000,15 +3974,16 @@ int TunerCardAudioInput::fillSelections(const QString &device)
 DVBConfigurationGroup::DVBConfigurationGroup(CaptureCard& a_parent,
                                              CardType& cardType) :
     m_parent(a_parent),
-    m_diseqcTree(new DiSEqCDevTree())
+    m_cardNum(new DVBCardNum(a_parent)),
+    m_cardName(new DVBCardName()),
+    m_cardType(new DVBCardType(a_parent)),
+    m_signalTimeout(new SignalTimeout(a_parent, 0.5s, 0.25s)),
+    m_tuningDelay(new DVBTuningDelay(a_parent)),
+    m_diseqcTree(new DiSEqCDevTree()),
+    m_diseqcBtn(new DeviceTree(*m_diseqcTree))
 {
     setVisible(false);
 
-    m_cardNum  = new DVBCardNum(m_parent);
-    m_cardName = new DVBCardName();
-    m_cardType = new DVBCardType(m_parent);
-
-    m_signalTimeout = new SignalTimeout(m_parent, 0.5s, 0.25s);
     m_channelTimeout = new ChannelTimeout(m_parent, 3s, 1.75s);
 
     cardType.addTargetedChild("DVB", m_cardNum);
@@ -4026,11 +4001,9 @@ DVBConfigurationGroup::DVBConfigurationGroup(CaptureCard& a_parent,
     cardType.addTargetedChild("DVB", new DVBOnDemand(m_parent));
     cardType.addTargetedChild("DVB", new DVBEITScan(m_parent));
 
-    m_diseqcBtn = new DeviceTree(*m_diseqcTree);
     m_diseqcBtn->setLabel(tr("DiSEqC (Switch, LNB and Rotor Configuration)"));
     m_diseqcBtn->setHelpText(tr("Input and satellite settings."));
 
-    m_tuningDelay = new DVBTuningDelay(m_parent);
     cardType.addTargetedChild("DVB", m_tuningDelay);
     cardType.addTargetedChild("DVB", m_diseqcBtn);
     m_tuningDelay->setVisible(false);
@@ -4074,9 +4047,28 @@ void DVBConfigurationGroup::Save(void)
 // SAT>IP configuration
 // -----------------------
 #ifdef USING_SATIP
+
+class DiSEqCPosition : public MythUISpinBoxSetting
+{
+  public:
+    explicit DiSEqCPosition(const CaptureCard &parent, int value, int min_val) :
+        MythUISpinBoxSetting(new CaptureCardDBStorage(this, parent, "dvb_diseqc_type"),
+                             min_val, 0xff, 1)
+    {
+       setLabel(QObject::tr("DiSEqC position"));
+       setHelpText(QObject::tr("Position of the LNB on the DiSEqC switch. "
+                               "Leave at 1 if there is no DiSEqC switch "
+                               "and the LNB is directly connected to the SatIP server. "
+                               "This value is used as signal source (attribute src) in "
+                               "the SatIP tune command."));
+       setValue(value);
+    };
+};
+
 SatIPConfigurationGroup::SatIPConfigurationGroup
         (CaptureCard& a_parent, CardType &a_cardtype) :
-    m_parent(a_parent)
+    m_parent(a_parent),
+    m_deviceId(new SatIPDeviceID(a_parent))
 {
     setVisible(false);
 
@@ -4085,7 +4077,6 @@ SatIPConfigurationGroup::SatIPConfigurationGroup
     m_friendlyName = new SatIPDeviceAttribute(tr("Friendly name"), tr("Friendly name of the Sat>IP server"));
     m_tunerType    = new SatIPDeviceAttribute(tr("Tuner type"),    tr("Type of the selected tuner"));
     m_tunerIndex   = new SatIPDeviceAttribute(tr("Tuner index"),   tr("Index of the tuner on the Sat>IP server"));
-    m_deviceId     = new SatIPDeviceID(m_parent);
 
     m_deviceIdList = new SatIPDeviceIDList(
         m_deviceId, m_friendlyName, m_tunerType, m_tunerIndex, &m_deviceList, m_parent);
@@ -4098,6 +4089,7 @@ SatIPConfigurationGroup::SatIPConfigurationGroup
     a_cardtype.addTargetedChild("SATIP", new SignalTimeout(m_parent, 7s, 1s));
     a_cardtype.addTargetedChild("SATIP", new ChannelTimeout(m_parent, 10s, 2s));
     a_cardtype.addTargetedChild("SATIP", new DVBEITScan(m_parent));
+    a_cardtype.addTargetedChild("SATIP", new DiSEqCPosition(m_parent, 1, 1));
 
     connect(m_deviceIdList, &SatIPDeviceIDList::NewTuner,
             m_deviceId,     &SatIPDeviceID::SetTuner);
@@ -4111,7 +4103,7 @@ void SatIPConfigurationGroup::FillDeviceList(void)
     // Returns each devices as "deviceid friendlyname ip tunerno tunertype"
     QStringList devs = CardUtil::ProbeVideoDevices("SATIP");
 
-    for (const auto & dev : qAsConst(devs))
+    for (const auto & dev : std::as_const(devs))
     {
         QStringList devparts = dev.split(" ");
         const QString& id = devparts.value(0);
@@ -4140,7 +4132,7 @@ void SatIPConfigurationGroup::FillDeviceList(void)
     // Now find configured devices
     // Returns each devices as "deviceid friendlyname ip tunerno tunertype"
     QStringList db = CardUtil::GetVideoDevices("SATIP");
-    for (const auto& dev : db)
+    for (const auto& dev : std::as_const(db))
     {
         auto dit = m_deviceList.find(dev);
         if (dit != m_deviceList.end())
@@ -4222,8 +4214,8 @@ void SatIPDeviceIDList::fillSelections(const QString &cur)
 
     for (uint i = 0; i < devs.size(); ++i)
     {
-        const QString dev = devs[i];
-        const QString name = names[i];
+        const QString& dev = devs[i];
+        const QString& name = names[i];
         bool dev_in_use = (dev == sel) ? false : in_use[devs[i]];
         QString desc = name + (dev_in_use ? usestr : "");
         addSelection(desc, dev, dev == sel);

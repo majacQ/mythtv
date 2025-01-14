@@ -6,15 +6,16 @@
 //
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include "mythversion.h"
-#include "mythxmlclient.h"
-#include "mythlogging.h"
-
 #include <QObject>
+
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+
+#include "mythxmlclient.h"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -51,7 +52,7 @@ UPnPResultCode MythXMLClient::GetConnectionInfo( const QString &sPin, DatabasePa
     // Is this a valid response?
     // --------------------------------------------------------------
 
-    QDomNode oNode = xmlResults.namedItem( "GetConnectionInfoResult" );
+    QDomNode oNode = xmlResults.namedItem( "ConnectionInfo" );
 
     if (UPnPResult_Success == nErrCode && !oNode.isNull())
     {

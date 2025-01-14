@@ -3,23 +3,23 @@
 
 #include <QCoreApplication>
 #include <QDomDocument>
+#include <QTimeZone>
 
 #include "mythpainter.h"
 #include "mythmainwindow.h"
 #include "mythfontproperties.h"
 
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "mythdate.h"
-#include "mythdb.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
 
 MythUIClock::MythUIClock(MythUIType *parent, const QString &name)
-    : MythUIText(parent, name)
+    : MythUIText(parent, name),
+      m_timeFormat(GetMythDB()->GetSetting("TimeFormat", "h:mm ap")),
+      m_dateFormat(GetMythDB()->GetSetting("DateFormat", "ddd d MMM yyyy")),
+      m_shortDateFormat(GetMythDB()->GetSetting("ShortDateFormat", "ddd M/d"))
 {
-    m_dateFormat = GetMythDB()->GetSetting("DateFormat", "ddd d MMM yyyy");
-    m_shortDateFormat = GetMythDB()->GetSetting("ShortDateFormat", "ddd M/d");
-    m_timeFormat = GetMythDB()->GetSetting("TimeFormat", "h:mm ap");
-
     m_format = QString("%1, %2").arg(m_dateFormat, m_timeFormat);
 }
 
@@ -55,9 +55,15 @@ QString MythUIClock::GetTimeText(void)
     QString newMsg = gCoreContext->GetQLocale().toString(dt, m_format);
 
     m_nextUpdate = m_time.addSecs(1);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     m_nextUpdate = QDateTime(m_time.date(),
                              m_time.time().addMSecs(m_time.time().msec()),
                              Qt::UTC);
+#else
+    m_nextUpdate = QDateTime(m_time.date(),
+                             m_time.time().addMSecs(m_time.time().msec()),
+                             QTimeZone(QTimeZone::UTC));
+#endif
 
     return newMsg;
 }

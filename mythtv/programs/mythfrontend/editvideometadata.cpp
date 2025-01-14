@@ -1,33 +1,36 @@
+// C++
 #include <algorithm>
 
+// Qt
 #include <QImageReader>
 #include <QUrl>
 
-#include <mythcontext.h>
-#include <mythdirs.h>
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/stringutil.h"
+#include "libmythmetadata/dbaccess.h"
+#include "libmythmetadata/globals.h"
+#include "libmythmetadata/metadatafactory.h"
+#include "libmythmetadata/mythuiimageresults.h"
+#include "libmythmetadata/videometadatalistmanager.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuicheckbox.h"
+#include "libmythui/mythuifilebrowser.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuispinbox.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuitextedit.h"
 
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-#include "mythuibuttonlist.h"
-#include "mythuitext.h"
-#include "mythuitextedit.h"
-#include "mythuibutton.h"
-#include "mythuicheckbox.h"
-#include "mythuispinbox.h"
-#include "mythuiimage.h"
-#include "mythuifilebrowser.h"
-#include "mythuiimageresults.h"
-#include "mythuihelper.h"
-#include "mythprogressdialog.h"
-#include "mythmiscutil.h"
-#include "remoteutil.h"
-#include "globals.h"
-#include "dbaccess.h"
-#include "videometadatalistmanager.h"
-#include "videoutils.h"
-
+// MythFrontend
 #include "editvideometadata.h"
-#include "metadatafactory.h"
 
 //static const QString _Location = QObject::tr("Metadata Editor");
 
@@ -35,12 +38,11 @@ EditMetadataDialog::EditMetadataDialog(MythScreenStack *lparent,
         const QString& lname, VideoMetadata *source_metadata,
         const VideoMetadataListManager &cache) : MythScreenType(lparent, lname),
     m_origMetadata(source_metadata),
-    m_metaCache(cache)
+    m_metaCache(cache),
+    m_query(new MetadataDownload(this)),
+    m_imageDownload(new MetadataImageDownload(this))
 {
-    m_query = new MetadataDownload(this);
-    m_imageDownload = new MetadataImageDownload(this);
     m_workingMetadata = new VideoMetadata(*m_origMetadata);
-
     m_popupStack = GetMythMainWindow()->GetStack("popup stack");
 }
 
@@ -203,7 +205,7 @@ namespace
     {
         bool operator()(const T &lhs, const T &rhs)
         {
-            return naturalCompare(lhs.second, rhs.second) < 0;
+            return StringUtil::naturalSortCompare(lhs.second, rhs.second);
         }
     };
 
@@ -212,7 +214,7 @@ namespace
         QStringList ret;
 
         QList<QByteArray> exts = QImageReader::supportedImageFormats();
-        for (const auto & ext : qAsConst(exts))
+        for (const auto & ext : std::as_const(exts))
             ret.append(QString("*.").append(ext));
         return ret;
     }
@@ -238,7 +240,9 @@ namespace
             popupStack->AddScreen(fb);
         }
         else
+        {
             delete fb;
+        }
     }
 
     void FindVideoFilePopup(const QString &prefix, const QString &prefixAlt,
@@ -268,7 +272,9 @@ namespace
             popupStack->AddScreen(fb);
         }
         else
+        {
             delete fb;
+        }
     }
 
     const QString CEID_COVERARTFILE = "coverartfile";
@@ -371,7 +377,7 @@ void EditMetadataDialog::fillWidgets()
         {
             title = md->GetTitle();
         }
-        tc.push_back(std::make_pair(md->GetID(), title));
+        tc.emplace_back(md->GetID(), title);
     }
     std::sort(tc.begin(), tc.end(), title_sort<title_list::value_type>());
 
@@ -430,7 +436,9 @@ void EditMetadataDialog::fillWidgets()
                                   m_workingMetadata->GetCoverFile()));
         }
         else
+        {
             m_coverart->SetFilename(m_workingMetadata->GetCoverFile());
+        }
 
         if (!m_workingMetadata->GetCoverFile().isEmpty())
             m_coverart->Load();
@@ -446,7 +454,9 @@ void EditMetadataDialog::fillWidgets()
                                   m_workingMetadata->GetScreenshot()));
         }
         else
+        {
             m_screenshot->SetFilename(m_workingMetadata->GetScreenshot());
+        }
 
         if (!m_workingMetadata->GetScreenshot().isEmpty())
             m_screenshot->Load();
@@ -462,7 +472,9 @@ void EditMetadataDialog::fillWidgets()
                                   m_workingMetadata->GetBanner()));
         }
         else
+        {
             m_banner->SetFilename(m_workingMetadata->GetBanner());
+        }
 
         if (!m_workingMetadata->GetBanner().isEmpty())
             m_banner->Load();
@@ -478,7 +490,9 @@ void EditMetadataDialog::fillWidgets()
                                   m_workingMetadata->GetFanart()));
         }
         else
+        {
             m_fanart->SetFilename(m_workingMetadata->GetFanart());
+        }
 
         if (!m_workingMetadata->GetFanart().isEmpty())
             m_fanart->Load();
@@ -783,7 +797,9 @@ void EditMetadataDialog::SetCoverArt(QString file)
             m_workingMetadata->SetCoverFile(QString());
     }
     else
+    {
         m_workingMetadata->SetCoverFile(file);
+    }
 
     CheckedSet(m_coverartText, file);
 
@@ -828,7 +844,9 @@ void EditMetadataDialog::SetBanner(QString file)
             m_workingMetadata->SetBanner(QString());
     }
     else
+    {
         m_workingMetadata->SetBanner(file);
+    }
 
     CheckedSet(m_bannerText, file);
 
@@ -873,7 +891,9 @@ void EditMetadataDialog::SetFanart(QString file)
             m_workingMetadata->SetFanart(QString());
     }
     else
+    {
         m_workingMetadata->SetFanart(file);
+    }
 
     CheckedSet(m_fanartText, file);
 
@@ -919,7 +939,9 @@ void EditMetadataDialog::SetScreenshot(QString file)
             m_workingMetadata->SetScreenshot(QString());
     }
     else
+    {
         m_workingMetadata->SetScreenshot(file);
+    }
 
     CheckedSet(m_screenshotText, file);
 
@@ -962,7 +984,9 @@ void EditMetadataDialog::SetTrailer(QString file)
             m_workingMetadata->SetTrailer(QString());
     }
     else
+    {
         m_workingMetadata->SetTrailer(file);
+    }
     CheckedSet(m_trailerText, file);
 }
 

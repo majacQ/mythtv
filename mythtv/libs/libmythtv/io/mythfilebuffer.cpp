@@ -3,17 +3,19 @@
 #include <QDir>
 
 // MythTV
-#include "threadedfilewriter.h"
-#include "mythcontext.h"
-#include "remotefile.h"
-#include "mythconfig.h"
-#include "mythtimer.h"
-#include "mythdate.h"
-#include "compat.h"
-#include "mythcorecontext.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/threadedfilewriter.h"
+
 #include "io/mythfilebuffer.h"
 
 // Std
+#include <array>
 #include <cstdlib>
 #include <cerrno>
 #include <sys/types.h>
@@ -24,21 +26,20 @@
 
 #if HAVE_POSIX_FADVISE < 1
 static int posix_fadvise(int, off_t, off_t, int) { return 0; }
-#define POSIX_FADV_SEQUENTIAL 0
-#define POSIX_FADV_WILLNEED 0
-#define POSIX_FADV_DONTNEED 0
+static constexpr int8_t POSIX_FADV_SEQUENTIAL { 0 };
+static constexpr int8_t POSIX_FADV_WILLNEED { 0 };
 #endif
 
 #ifndef O_STREAMING
-#define O_STREAMING 0
+static constexpr int8_t O_STREAMING { 0 };
 #endif
 
 #ifndef O_LARGEFILE
-#define O_LARGEFILE 0
+static constexpr int8_t O_LARGEFILE { 0 };
 #endif
 
 #ifndef O_BINARY
-#define O_BINARY 0
+static constexpr int8_t O_BINARY { 0 };
 #endif
 
 #define LOC QString("FileRingBuf(%1): ").arg(m_filename)
@@ -167,7 +168,7 @@ static QString LocalSubtitleFilename(QFileInfo &FileInfo)
             return file.absoluteFilePath();
     }
 
-    return QString();
+    return {};
 }
 
 bool MythFileBuffer::OpenFile(const QString &Filename, std::chrono::milliseconds Retry)
@@ -252,7 +253,7 @@ bool MythFileBuffer::OpenFile(const QString &Filename, std::chrono::milliseconds
                                 QString("OpenFile(): fadvise sequential "
                                         "failed: ") + ENO);
                         }
-                        if (posix_fadvise(m_fd2, 0, 128*1024, POSIX_FADV_WILLNEED) != 0)
+                        if (posix_fadvise(m_fd2, 0, static_cast<off_t>(128)*1024, POSIX_FADV_WILLNEED) != 0)
                         {
                             LOG(VB_FILE, LOG_DEBUG, LOC +
                                 QString("OpenFile(): fadvise willneed "
@@ -662,7 +663,7 @@ long long MythFileBuffer::SeekInternal(long long Position, int Whence)
                 {
                     ret = lseek64(m_fd2, m_internalReadPos, SEEK_SET);
 #ifndef _MSC_VER
-                    if (posix_fadvise(m_fd2, m_internalReadPos, 128*1024, POSIX_FADV_WILLNEED) != 0)
+                    if (posix_fadvise(m_fd2, m_internalReadPos, static_cast<off_t>(128)*1024, POSIX_FADV_WILLNEED) != 0)
                         LOG(VB_FILE, LOG_DEBUG, LOC + QString("Seek(): fadvise willneed failed: ") + ENO);
 #endif
                 }
@@ -774,8 +775,7 @@ long long MythFileBuffer::SeekInternal(long long Position, int Whence)
                 {
                     QString cmd2 = QString("Seek(%1, %2) int ")
                         .arg(m_internalReadPos)
-                        .arg((SEEK_SET == Whence) ? "SEEK_SET" :
-                             ((SEEK_CUR == Whence) ?"SEEK_CUR" : "SEEK_END"));
+                        .arg(seek2string(Whence));
                     LOG(VB_GENERAL, LOG_ERR, LOC + cmd2 + " succeeded");
                 }
                 ret = -1;
@@ -823,8 +823,7 @@ long long MythFileBuffer::SeekInternal(long long Position, int Whence)
     else
     {
         QString cmd = QString("Seek(%1, %2)").arg(Position)
-            .arg((Whence == SEEK_SET) ? "SEEK_SET" :
-                 ((Whence == SEEK_CUR) ? "SEEK_CUR" : "SEEK_END"));
+            .arg(seek2string(Whence));
         LOG(VB_GENERAL, LOG_ERR, LOC + cmd + " Failed" + ENO);
     }
 

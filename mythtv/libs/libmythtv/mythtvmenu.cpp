@@ -3,9 +3,9 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "mythlogging.h"
-#include "mythdirs.h"
-#include "mythuihelper.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythuihelper.h"
 #include "osd.h"
 #include "mythtvmenu.h"
 
@@ -22,7 +22,7 @@ bool MythTVMenuItemContext::AddButton(MythOSDDialogData *Menu, bool Active, cons
         if ((m_showContext != kMenuShowInactive && Active) || (m_showContext != kMenuShowActive && !Active))
         {
             result = true;
-            if (m_doDisplay)
+            if (m_visible)
             {
                 QString text = m_actionText;
                 if (text.isEmpty())
@@ -46,42 +46,42 @@ bool MythTVMenuItemContext::AddButton(MythOSDDialogData *Menu, bool Active, cons
 
 // Constructor for a menu element.
 MythTVMenuItemContext::MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
-                                             QString Name, MenuCurrentContext Current, bool Display)
+                                             QString Name, MenuCurrentContext Current, bool Visible)
   : m_menu(Menu),
     m_node(Node),
     m_category(kMenuCategoryMenu),
     m_menuName(std::move(Name)),
     m_showContext(kMenuShowAlways),
     m_currentContext(Current),
-    m_doDisplay(Display)
+    m_visible(Visible)
 {
 }
 
 // Constructor for an item element.
 MythTVMenuItemContext::MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
                                              MenuShowContext Context, MenuCurrentContext Current,
-                                             QString Action, QString ActionText, bool Display)
+                                             QString Action, QString ActionText, bool Visible)
   : m_menu(Menu),
     m_node(Node),
     m_showContext(Context),
     m_currentContext(Current),
     m_action(std::move(Action)),
     m_actionText(std::move(ActionText)),
-    m_doDisplay(Display)
+    m_visible(Visible)
 {
 }
 
 // Constructor for an itemlist element.
 MythTVMenuItemContext::MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
                                              MenuShowContext Context, MenuCurrentContext Current,
-                                             QString Action, bool Display)
+                                             QString Action, bool Visible)
   : m_menu(Menu),
     m_node(Node),
     m_category(kMenuCategoryItemlist),
     m_showContext(Context),
     m_currentContext(Current),
     m_action(std::move(Action)),
-    m_doDisplay(Display)
+    m_visible(Visible)
 {
 }
 
@@ -150,13 +150,13 @@ QDomNode MythTVMenu::GetNodeFromPath(const QString& path) const
 {
     QStringList pathList = path.split('/');
     if (pathList.isEmpty())
-        return QDomNode();
+        return {};
 
     // Root node is special
     QDomElement result = GetRoot();
     QString name = pathList.takeFirst();
     if ((result.tagName() != "menu") || (result.attribute("text") != name))
-        return QDomNode();
+        return {};
 
     // Start walking children
     while (!pathList.isEmpty())
@@ -180,7 +180,7 @@ QDomNode MythTVMenu::GetNodeFromPath(const QString& path) const
         if (!found)
         {
             // Oops. Have name but no matching child.
-            return QDomNode();
+            return {};
         }
     }
     return result;
@@ -293,7 +293,7 @@ void MythTVMenu::ProcessIncludes(QDomElement& Root, int IncludeLevel)
 
 bool MythTVMenu::Show(const QDomNode& Node, const QDomNode& Selected,
                       MythTVMenuItemDisplayer& Displayer, MythOSDDialogData* Menu,
-                      bool Display) const
+                      bool Visible) const
 {
     bool hasSelected = false;
     bool displayed = false;
@@ -310,9 +310,11 @@ bool MythTVMenu::Show(const QDomNode& Node, const QDomNode& Selected,
             QDomElement element = node.toElement();
             QString text  = Translate(element.attribute("text", ""));
             QString show = element.attribute("show", "");
-            MenuShowContext showContext =
-                (show == "active" ? kMenuShowActive :
-                 show == "inactive" ? kMenuShowInactive : kMenuShowAlways);
+            MenuShowContext showContext {kMenuShowAlways};
+            if (show == "active")
+                showContext = kMenuShowActive;
+            else if (show == "inactive")
+                showContext = kMenuShowInactive;
             QString current = element.attribute("current", "");
             MenuCurrentContext currentContext = kMenuCurrentDefault;
             if ((current == "active") && !hasSelected)
@@ -324,25 +326,25 @@ bool MythTVMenu::Show(const QDomNode& Node, const QDomNode& Selected,
             {
                 if (hasSelected && node == Selected)
                     currentContext = kMenuCurrentAlways;
-                MythTVMenuItemContext context(*this, node, text, currentContext, Display);
+                MythTVMenuItemContext context(*this, node, text, currentContext, Visible);
                 displayed |= Displayer.MenuItemDisplay(context, Menu);
             }
             else if (element.tagName() == "item")
             {
                 QString action = element.attribute("action", "");
-                MythTVMenuItemContext context(*this, node, showContext, currentContext, action, text, Display);
+                MythTVMenuItemContext context(*this, node, showContext, currentContext, action, text, Visible);
                 displayed |= Displayer.MenuItemDisplay(context, Menu);
             }
             else if (element.tagName() == "itemlist")
             {
                 QString actiongroup = element.attribute("actiongroup", "");
-                MythTVMenuItemContext context(*this, node, showContext, currentContext, actiongroup, Display);
+                MythTVMenuItemContext context(*this, node, showContext, currentContext, actiongroup, Visible);
                 displayed |= Displayer.MenuItemDisplay(context, Menu);
             }
         }
 
          // early exit optimization
-        if (!Display && displayed)
+        if (!Visible && displayed)
             break;
     }
     return displayed;
@@ -353,5 +355,3 @@ MythTVMenuNodeTuple::MythTVMenuNodeTuple(MenuTypeId Id, QString Path)
     m_path(std::move(Path))
 {
 }
-
-

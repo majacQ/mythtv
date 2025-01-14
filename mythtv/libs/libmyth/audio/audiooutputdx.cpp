@@ -1,7 +1,7 @@
 #include <iostream>
 #include <cmath>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "audiooutputdx.h"
 
 #include <windows.h>
@@ -129,14 +129,14 @@ using LPFNDSE = HRESULT (WINAPI *) (LPDSENUMCALLBACK, LPVOID);
 #ifdef UNICODE
 int CALLBACK AudioOutputDXPrivate::DSEnumCallback(LPGUID  lpGuid,
                                                   LPCWSTR lpcstrDesc,
-                                                  LPCWSTR lpcstrModule,
+                                 [[maybe_unused]] LPCWSTR lpcstrModule,
                                                   LPVOID  lpContext)
 {
         QString enum_desc = QString::fromWCharArray( lpcstrDesc );
 #else
 int CALLBACK AudioOutputDXPrivate::DSEnumCallback(LPGUID lpGuid,
                                                   LPCSTR lpcstrDesc,
-                                                  LPCSTR lpcstrModule,
+                                 [[maybe_unused]] LPCSTR lpcstrModule,
                                                   LPVOID lpContext)
 {
         QString enum_desc = QString::fromLocal8Bit( lpcstrDesc );
@@ -574,7 +574,7 @@ int AudioOutputDX::GetBufferedOnSoundcard(void) const
     return buffered;
 }
 
-int AudioOutputDX::GetVolumeChannel(int channel) const
+int AudioOutputDX::GetVolumeChannel([[maybe_unused]] int channel) const
 {
     HRESULT dsresult;
     long dxVolume = 0;
@@ -596,7 +596,7 @@ int AudioOutputDX::GetVolumeChannel(int channel) const
     return volume;
 }
 
-void AudioOutputDX::SetVolumeChannel(int channel, int volume)
+void AudioOutputDX::SetVolumeChannel([[maybe_unused]] int channel, int volume)
 {
     HRESULT dsresult;
     long dxVolume { DSBVOLUME_MIN };

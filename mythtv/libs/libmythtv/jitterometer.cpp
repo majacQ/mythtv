@@ -1,6 +1,6 @@
 // MythTV
-#include "mythchrono.h"
-#include "mythlogging.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythlogging.h"
 #include "jitterometer.h"
 
 // Std
@@ -9,8 +9,12 @@
 #include <cstdlib>
 #include <utility>
 
-#define UNIX_PROC_STAT "/proc/stat"
-#define MAX_CORES 8
+#if defined(__linux__) || defined(Q_OS_ANDROID)
+static constexpr const char* UNIX_PROC_STAT { "/proc/stat" };
+#endif
+#if defined(__linux__) || defined(Q_OS_ANDROID) || defined(Q_OS_MACOS)
+static constexpr size_t MAX_CORES { 8 };
+#endif
 
 #ifdef Q_OS_MACOS
 #include <mach/mach_init.h>
@@ -157,7 +161,7 @@ QString Jitterometer::GetCPUStat(void)
             return result;
 
         result = "";
-        int cores = 0;
+        size_t cores = 0;
         int ptr   = 0;
         line = m_cpuStat->readLine(256);
         while (!line.isEmpty() && cores < MAX_CORES)
@@ -167,7 +171,7 @@ QString Jitterometer::GetCPUStat(void)
             if (sscanf(line.constData(),
                        "cpu%30d %30llu %30llu %30llu %30llu %30llu "
                        "%30llu %30llu %30llu %30llu %*5000s\n",
-                       &num, &stats[0], &stats[1], &stats[2], &stats[3],
+                       &num, stats.data(), &stats[1], &stats[2], &stats[3],
                        &stats[4], &stats[5], &stats[6], &stats[7], &stats[8]) >= 4)
             {
                 float load  = stats[0] + stats[1] + stats[2] + stats[4] +

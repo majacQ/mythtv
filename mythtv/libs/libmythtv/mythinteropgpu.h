@@ -6,24 +6,23 @@
 #include <QObject>
 
 // MythTV
-#include "referencecounter.h"
+#include "libmythbase/referencecounter.h"
 #include "mythframe.h"
 
 // Std
-#include "vector"
-using std::vector;
+#include <vector>
 
 class MythRender;
 class MythPlayerUI;
 using FreeAVHWDeviceContext = void (*)(struct AVHWDeviceContext*);
-#define DUMMY_INTEROP_ID 1
+static constexpr uint64_t DUMMY_INTEROP_ID { 1 };
 
 class MythInteropGPU : public QObject, public ReferenceCounter
 {
     Q_OBJECT
 
   public:
-    enum InteropType
+    enum InteropType : std::uint8_t
     {
         Unsupported  = 0,
         GL_VAAPIGLXCOPY,
@@ -60,7 +59,7 @@ class MythInteropGPU : public QObject, public ReferenceCounter
 
   protected:
     MythRender*         m_context              { nullptr };
-    QSize               m_textureSize          { };
+    QSize               m_textureSize;
     uint64_t            m_discontinuityCounter { 0 };
     FreeAVHWDeviceContext m_defaultFree        { nullptr };
     void*               m_defaultUserOpaque    { nullptr };

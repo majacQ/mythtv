@@ -2,7 +2,7 @@
 #define VIDEOOUT_OPENGL_H_
 
 // MythTV
-#include "opengl/mythrenderopengl.h"
+#include "libmythui/opengl/mythrenderopengl.h"
 #include "mythvideooutgpu.h"
 
 class MythRenderOpenGL;
@@ -14,7 +14,7 @@ class MythVideoOutputOpenGL : public MythVideoOutputGPU
     Q_OBJECT
 
   public:
-    enum TextureFormats
+    enum TextureFormats : std::uint8_t
     {
         AllFormats    = 0,
         LegacyFormats = 1

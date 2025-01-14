@@ -9,7 +9,7 @@
 #include "HLSReader.h"
 #include "HLS/m3u.h"
 
-#define LOC QString("%1: ").arg(m_curstream ? m_curstream->M3U8Url() : "HLSReader")
+#define LOC QString("HLSReader[%1]: ").arg(m_inputId)
 
 /**
  * Handles relative URLs without breaking URI encoded parameters by avoiding
@@ -207,7 +207,7 @@ void HLSReader::Throttle(bool val)
     m_throttleLock.unlock();
 }
 
-int HLSReader::Read(uint8_t* buffer, int maxlen)
+qint64 HLSReader::Read(uint8_t* buffer, qint64 maxlen)
 {
     if (!m_curstream)
     {
@@ -222,7 +222,7 @@ int HLSReader::Read(uint8_t* buffer, int maxlen)
 
     QMutexLocker lock(&m_bufLock);
 
-    int len = m_buffer.size() < maxlen ? m_buffer.size() : maxlen;
+    qint64 len = m_buffer.size() < maxlen ? m_buffer.size() : maxlen;
     LOG(VB_RECORD, LOG_DEBUG, LOC + QString("Reading %1 of %2 bytes")
         .arg(len).arg(m_buffer.size()));
 
@@ -232,7 +232,9 @@ int HLSReader::Read(uint8_t* buffer, int maxlen)
         m_buffer.remove(0, len);
     }
     else
+    {
         m_buffer.clear();
+    }
 
     return len;
 }
@@ -262,7 +264,11 @@ bool HLSReader::IsValidPlaylist(QTextStream & text)
 {
     /* Parse stream and search for
      * EXT-X-TARGETDURATION or EXT-X-STREAM-INF tag, see
-     * http://tools.ietf.org/html/draft-pantos-http-live-streaming-04#page-8 */
+     * http://tools.ietf.org/html/draft-pantos-http-live-streaming-04#page-8
+     *
+     * Updated with latest available version from 2017, see
+     * https://datatracker.ietf.org/doc/html/rfc8216
+     */
     QString line = text.readLine();
     if (!line.startsWith((const char*)"#EXTM3U"))
         return false;
@@ -319,7 +325,7 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
         return false;
     }
 
-    /* What is the version ? */
+    // Version is 1 if not specified, otherwise must be in range 1 to 7.
     int version = 1;
     int p = buffer.indexOf("#EXT-X-VERSION:");
     if (p >= 0)
@@ -332,7 +338,7 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
     if (buffer.indexOf("#EXT-X-STREAM-INF") >= 0)
     {
         // Meta index file
-        LOG(VB_RECORD, LOG_INFO, LOC + "Meta index file");
+        LOG(VB_RECORD, LOG_DEBUG, LOC + "Master Playlist");
 
         /* M3U8 Meta Index file */
         text.seek(0); // rewind
@@ -354,10 +360,10 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                 }
                 else
                 {
-                    StreamContainer::iterator Istream;
                     QString url = RelativeURI(m_segmentBase, uri).toString();
 
-                    if ((Istream = m_streams.find(url)) == m_streams.end())
+                    StreamContainer::iterator Istream = m_streams.find(url);
+                    if (Istream == m_streams.end())
                     {
                         int id = 0;
                         uint64_t bandwidth = 0;
@@ -375,24 +381,25 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                         }
                     }
                     else
+                    {
                         LOG(VB_RECORD, LOG_INFO, LOC +
                             QString("Already have stream '%1'").arg(url));
+                    }
                 }
             }
         }
     }
     else
     {
-        LOG(VB_RECORD, LOG_DEBUG, LOC + "Meta playlist");
+        LOG(VB_RECORD, LOG_DEBUG, LOC + "Media Playlist");
 
         HLSRecStream *hls = stream;
         if (stream == nullptr)
         {
             /* No Meta playlist used */
-            StreamContainer::iterator Istream;
-
-            if ((Istream = m_streams.find(M3U::DecodedURI(m_m3u8))) ==
-                m_streams.end())
+            StreamContainer::iterator Istream =
+                m_streams.find(M3U::DecodedURI(m_m3u8));
+            if (Istream == m_streams.end())
             {
                 hls = new HLSRecStream(0, 0, m_m3u8, m_segmentBase);
                 if (hls)
@@ -424,20 +431,20 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
             /* Store version */
             hls->SetVersion(version);
         }
-        LOG(VB_RECORD, LOG_DEBUG, LOC +
-            QString("%1 Playlist HLS protocol version: %2")
+        LOG(VB_RECORD, LOG_INFO, LOC +
+            QString("%1 Media Playlist HLS protocol version: %2")
             .arg(hls->Live() ? "Live": "VOD").arg(version));
 
         // rewind
         text.seek(0);
 
-        QString title;
-        std::chrono::seconds segment_duration = -1s;
-        int64_t first_sequence   = -1;
-        int64_t sequence_num     = 0;
-        int     skipped = 0;
+        QString title;                                  // From playlist, #EXTINF:<duration>,<title>
+        std::chrono::seconds segment_duration = -1s;    // From playlist, e.g. #EXTINF:10.24,
+        int64_t first_sequence   = -1;                  // Sequence number of first segment to be recorded
+        int64_t sequence_num     = 0;                   // Sequence number of next segment to be read
+        int     skipped = 0;                            // Segments skipped, sequence number at or below current
 
-        SegmentContainer new_segments;
+        SegmentContainer new_segments;                  // All segments read from Media Playlist
 
         QMutexLocker lock(&m_seqLock);
         while (!m_cancel)
@@ -472,6 +479,10 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                 if (first_sequence < 0)
                     first_sequence = sequence_num;
             }
+            else if (line.startsWith(QLatin1String("#EXT-X-MEDIA")))
+            {
+                // Not handled yet
+            }
             else if (line.startsWith(QLatin1String("#EXT-X-KEY")))
             {
 #ifdef USING_LIBCRYPTO
@@ -498,6 +509,7 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                 QDateTime date;
                 if (!M3U::ParseProgramDateTime(line, StreamURL(), date))
                     return false;
+                // Not handled yet
             }
             else if (line.startsWith(QLatin1String("#EXT-X-ALLOW-CACHE")))
             {
@@ -506,11 +518,24 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                     return false;
                 hls->SetCache(do_cache);
             }
+            else if (line.startsWith(QLatin1String("#EXT-X-DISCONTINUITY-SEQUENCE")))
+            {
+                int sequence = 0;
+                if (!M3U::ParseDiscontinuitySequence(line, StreamURL(), sequence))
+                    return false;
+                hls->SetDiscontinuitySequence(sequence);
+            }
             else if (line.startsWith(QLatin1String("#EXT-X-DISCONTINUITY")))
             {
                 if (!M3U::ParseDiscontinuity(line, StreamURL()))
                     return false;
-                ResetSequence();
+                // Not handled yet
+            }
+            else if (line.startsWith(QLatin1String("#EXT-X-INDEPENDENT-SEGMENTS")))
+            {
+                if (!M3U::ParseIndependentSegments(line, StreamURL()))
+                    return false;
+                // Not handled yet
             }
             else if (line.startsWith(QLatin1String("#EXT-X-VERSION")))
             {
@@ -535,13 +560,21 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                                        RelativeURI(hls->SegmentBaseUrl(), line)));
                 }
                 else
+                {
                     ++skipped;
+                }
 
                 ++sequence_num;
                 segment_duration = -1s; /* reset duration */
                 title.clear();
             }
         }
+
+        LOG(VB_RECORD, LOG_DEBUG, LOC +
+            QString(" first_sequence:%1").arg(first_sequence) +
+            QString(" sequence_num:%1").arg(sequence_num) +
+            QString(" m_curSeq:%1").arg(m_curSeq) +
+            QString(" skipped:%1").arg(skipped));
 
         if (sequence_num < m_curSeq)
         {
@@ -551,6 +584,34 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
                 .arg(m_curSeq).arg(first_sequence));
             ResetSequence();
             return false;
+        }
+
+        // For near-live skip all segments that are too far in the past.
+        if (m_curSeq < 0)
+        {
+            // Compute number of segments for 30 seconds buffer from live.
+            // If the duration is not know keep 3 segments.
+            int numseg = new_segments.size();
+            numseg = std::min(numseg, 3);
+            if (hls->TargetDuration() > 0s)
+            {
+                numseg = 30s / hls->TargetDuration();
+                numseg = std::clamp(numseg, 2, 10);
+            }
+
+            // Trim new_segments to leave only the last part
+            if (new_segments.size() > numseg)
+            {
+                int size_before = new_segments.size();
+                SegmentContainer::iterator it = new_segments.begin() + (new_segments.size() - numseg);
+                new_segments.erase(new_segments.begin(), it);
+                LOG(VB_RECORD, LOG_INFO, LOC +
+                    QString("Read last %1 segments instead of %2 for near-live")
+                        .arg(new_segments.size()).arg(size_before));
+
+                // Adjust first_sequence to first segment to be read
+                first_sequence += size_before - new_segments.size();
+            }
         }
 
         SegmentContainer::iterator Inew = new_segments.begin();
@@ -606,6 +667,13 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
         m_playlistSize = new_segments.size() + skipped;
         int behind     = m_segments.size() - m_playlistSize;
         int max_behind = m_playlistSize / 2;
+
+        LOG(VB_RECORD, LOG_INFO, LOC +
+            QString("new_segments.size():%1 ").arg(new_segments.size()) +
+            QString("m_playlistSize:%1 ").arg(m_playlistSize) +
+            QString("behind:%1 ").arg(behind) +
+            QString("max_behind:%1").arg(max_behind));
+
         if (behind > max_behind)
         {
             LOG(VB_RECORD, LOG_WARNING, LOC +
@@ -625,9 +693,13 @@ bool HLSReader::ParseM3U8(const QByteArray& buffer, HLSRecStream* stream)
             m_bandwidthCheck = (m_bitrateIndex == 0);
         }
         else if (m_debugCnt > 0)
+        {
             --m_debugCnt;
+        }
         else
+        {
             m_debug = false;
+        }
     }
 
     LOG(VB_RECORD, LOG_DEBUG, LOC + "ParseM3U8 -- end");
@@ -864,7 +936,9 @@ bool HLSReader::LoadSegments(MythSingleDownload& downloader)
             LOG(VB_RECORD, LOG_INFO, LOC + "Throttle done");
         }
         else
+        {
             usleep(5000);
+        }
 
         if (m_prebufferCnt == 0)
         {
@@ -872,7 +946,9 @@ bool HLSReader::LoadSegments(MythSingleDownload& downloader)
             m_prebufferCnt = 2;
         }
         else
+        {
             --m_prebufferCnt;
+        }
     }
 
     LOG(VB_RECORD, LOG_DEBUG, LOC + "LoadSegment -- end");
@@ -894,11 +970,11 @@ int HLSReader::DownloadSegmentData(MythSingleDownload& downloader,
     uint64_t bandwidth = hls->AverageBandwidth();
 
     LOG(VB_RECORD, LOG_DEBUG, LOC +
-        QString("Downloading %1 bandwidth %2 bitrate %3")
+        QString("Downloading seq#%1 av.bandwidth:%2 bitrate %3")
         .arg(segment.Sequence()).arg(bandwidth).arg(hls->Bitrate()));
 
     /* sanity check - can we download this segment on time? */
-    if ((bandwidth > 0) && (hls->Bitrate() > 0))
+    if ((bandwidth > 0) && (hls->Bitrate() > 0) && (segment.Duration().count() > 0))
     {
         uint64_t size = (segment.Duration().count() * hls->Bitrate()); /* bits */
         auto estimated_time = std::chrono::seconds(size / bandwidth);
@@ -906,7 +982,7 @@ int HLSReader::DownloadSegmentData(MythSingleDownload& downloader,
         {
             LOG(VB_RECORD, LOG_WARNING, LOC +
                 QString("downloading of %1 will take %2s, "
-                        "which is longer than its playback (%3s) at %4kiB/s")
+                        "which is longer than its playback (%3s) at %4KiB/s")
                 .arg(segment.Sequence())
                 .arg(estimated_time.count())
                 .arg(segment.Duration().count())
@@ -957,7 +1033,7 @@ int HLSReader::DownloadSegmentData(MythSingleDownload& downloader,
     }
 #endif
 
-    int segment_len = buffer.size();
+    int64_t segment_len = buffer.size();
 
     m_bufLock.lock();
     if (m_buffer.size() > segment_len * playlist_size)
@@ -974,7 +1050,9 @@ int HLSReader::DownloadSegmentData(MythSingleDownload& downloader,
         }
     }
     else if (m_slowCnt > 0)
+    {
         --m_slowCnt;
+    }
 
     if (m_buffer.size() >= segment_len * playlist_size * 2)
     {
@@ -999,19 +1077,20 @@ int HLSReader::DownloadSegmentData(MythSingleDownload& downloader,
         downloadduration = 1ms;
 
     /* bits/sec */
-    bandwidth = segment_len * 8 * 1000ULL / downloadduration.count();
+    bandwidth = 8ULL * 1000 * segment_len / downloadduration.count();
     hls->AverageBandwidth(bandwidth);
-    hls->SetCurrentByteRate(static_cast<uint64_t>
-                            ((static_cast<double>(segment_len) /
-                              static_cast<double>(segment.Duration().count()))));
+    if (segment.Duration() > 0s)
+    {
+        hls->SetCurrentByteRate(segment_len/segment.Duration().count());
+    }
 
     LOG(VB_RECORD, (m_debug ? LOG_INFO : LOG_DEBUG), LOC +
-        QString("%1 took %3ms for %4 bytes: "
-                "bandwidth:%5kiB/s")
+        QString("%1 took %2ms for %3 bytes: bandwidth:%4KiB/s byterate:%5KiB/s")
         .arg(segment.Sequence())
         .arg(downloadduration.count())
         .arg(segment_len)
-        .arg(bandwidth / 8192.0));
+        .arg(bandwidth / 8192.0)
+        .arg(hls->CurrentByteRate() / 1024.0));
 
     return m_slowCnt;
 }

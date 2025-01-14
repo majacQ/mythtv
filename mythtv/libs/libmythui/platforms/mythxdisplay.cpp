@@ -1,5 +1,5 @@
 // MythTV
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "mythxdisplay.h"
 
 class MythXLocker
@@ -119,5 +119,7 @@ QSize MythXDisplay::GetDisplayDimensions(void)
 
 void MythXDisplay::Sync(bool Flush)
 {
-    XLOCK(this, XSync(m_disp, Flush))
+    Lock();
+    XSync(m_disp, Flush);
+    Unlock();
 }

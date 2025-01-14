@@ -1,5 +1,5 @@
 // MythTV
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
 #include "mythmainwindow.h"
 #include "platforms/mythdrmdevice.h"
 #include "platforms/mythdisplaydrm.h"
@@ -20,24 +20,28 @@ bool MythDisplayDRM::DirectRenderingAvailable()
     if (!HasMythMainWindow())
         return false;
 
-    if (auto mainwindow = GetMythMainWindow(); mainwindow)
-        if (auto drmdisplay = dynamic_cast<MythDisplayDRM*>(mainwindow->GetDisplay()); drmdisplay)
+    if (auto *mainwindow = GetMythMainWindow(); mainwindow)
+    {
+        if (auto *drmdisplay = dynamic_cast<MythDisplayDRM*>(mainwindow->GetDisplay()); drmdisplay)
+        {
             if (auto drm = drmdisplay->GetDevice(); drm && drm->Atomic() && drm->Authenticated())
+            {
                 if (auto plane = drm->GetVideoPlane(); plane && plane->m_id)
                     return true;
+            }
+        }
+    }
 #endif
     return false;
 }
 
-MythDisplayDRM::MythDisplayDRM(MythMainWindow* MainWindow)
+MythDisplayDRM::MythDisplayDRM([[maybe_unused]] MythMainWindow* MainWindow)
 {
     m_device = MythDRMDevice::Create(m_screen);
     Initialise();
 #ifdef USING_QTPRIVATEHEADERS
     if (MainWindow && m_device && m_device->GetVideoPlane())
         connect(MainWindow, &MythMainWindow::SignalWindowReady, this, &MythDisplayDRM::MainWindowReady);
-#else
-    (void)MainWindow;
 #endif
 }
 
@@ -153,8 +157,8 @@ const MythDisplayModes& MythDisplayDRM::GetVideoModes()
         m_modeMap.insert(MythDisplayMode::CalcKey(resolution, rate), mode->m_index);
     }
 
-    for (auto it = screenmap.begin(); screenmap.end() != it; ++it)
-        m_videoModes.push_back(it->second);
+    for (auto & it : screenmap)
+        m_videoModes.push_back(it.second);
 
     DebugModes();
     return m_videoModes;

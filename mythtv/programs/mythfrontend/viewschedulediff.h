@@ -5,11 +5,9 @@
 #include <utility>
 #include <vector>
 
-// mythui
-#include "mythscreentype.h"
-
-// mythtv
-#include "programinfo.h"
+// MythTV
+#include "libmythbase/programinfo.h"
+#include "libmythui/mythscreentype.h"
 
 class ProgramStruct
 {

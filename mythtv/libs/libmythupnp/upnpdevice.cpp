@@ -6,19 +6,9 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
-
-#include "upnp.h"
-#include "upnpdevice.h"
-#include "mythdownloadmanager.h"
-#include "mythlogging.h"
-#include "mythversion.h"  // for MYTH_BINARY_VERSION
-#include "mythcorecontext.h"
-
-// MythDB
-#include "mythdb.h"
 
 #include <unistd.h> // for gethostname
 
@@ -27,11 +17,16 @@
 #include <QHostAddress>
 #include <QHostInfo>
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-  #define QT_FLUSH flush
-#else
-  #define QT_FLUSH Qt::flush
-#endif
+// MythDB
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"  // for MYTH_BINARY_VERSION
+
+#include "upnp.h"
+#include "upnpdevice.h"
 
 int DeviceLocation::g_nAllocated   = 0;       // Debugging only
 
@@ -59,6 +54,7 @@ bool UPnpDeviceDesc::Load( const QString &sFileName )
     if ( !file.open( QIODevice::ReadOnly ) )
         return false;
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString sErrMsg;
     int     nErrLine = 0;
     int     nErrCol  = 0;
@@ -78,6 +74,23 @@ bool UPnpDeviceDesc::Load( const QString &sFileName )
             QString("UPnpDeviceDesc::Load - Error Msg: %1" ) .arg(sErrMsg));
         return false;
     }
+#else
+    auto parseResult = doc.setContent( &file );
+
+    file.close();
+
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+            QString("UPnpDeviceDesc::Load - Error parsing: %1 "
+                    "at line: %2  column: %3")
+                .arg(sFileName) .arg(parseResult.errorLine)
+                                .arg(parseResult.errorColumn));
+        LOG(VB_GENERAL, LOG_ERR,
+            QString("UPnpDeviceDesc::Load - Error Msg: %1" ) .arg(parseResult.errorMessage));
+        return false;
+    }
+#endif
 
     // --------------------------------------------------------------
     // XML Document Loaded... now parse it into the UPnpDevice Hierarchy
@@ -312,7 +325,7 @@ QString  UPnpDeviceDesc::GetValidXML( const QString &sBaseAddress, int nPort )
     QTextStream os( &sXML, QIODevice::WriteOnly );
 
     GetValidXML( sBaseAddress, nPort, os );
-    os << QT_FLUSH;
+    os << Qt::flush;
     return( sXML );
 }
 
@@ -338,7 +351,7 @@ void UPnpDeviceDesc::GetValidXML(
     OutputDevice( os, &m_rootDevice, sUserAgent );
 
     os << "</root>\n";
-    os << QT_FLUSH;
+    os << Qt::flush;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -361,8 +374,7 @@ void UPnpDeviceDesc::OutputDevice( QTextStream &os,
     // ----------------------------------------------------------------------
 
     if (pDevice == &m_rootDevice)
-        sFriendlyName = UPnp::GetConfiguration()->GetValue( "UPnP/FriendlyName",
-                                                            sFriendlyName  );
+        sFriendlyName = XmlConfiguration().GetValue("UPnP/FriendlyName", sFriendlyName);
 
     os << "<device>\n";
     os << FormatValue( "deviceType"   , pDevice->m_sDeviceType );
@@ -405,7 +417,7 @@ void UPnpDeviceDesc::OutputDevice( QTextStream &os,
                        pDevice->m_securityPin ? "true" : "false");
     os << FormatValue( "mythtv:X_protocol", pDevice->m_protocolVersion );
 
-    for (const auto & nit : qAsConst(pDevice->m_lstExtra))
+    for (const auto & nit : std::as_const(pDevice->m_lstExtra))
     {
         os << FormatValue( nit );
     }
@@ -418,7 +430,7 @@ void UPnpDeviceDesc::OutputDevice( QTextStream &os,
     {
         os << "<iconList>\n";
 
-        for (auto *icon : qAsConst(pDevice->m_listIcons))
+        for (auto *icon : std::as_const(pDevice->m_listIcons))
         {
             os << "<icon>\n";
             os << FormatValue( "mimetype", icon->m_sMimeType );
@@ -458,7 +470,7 @@ void UPnpDeviceDesc::OutputDevice( QTextStream &os,
 
         os << "<serviceList>\n";
 
-        for (auto *service : qAsConst(pDevice->m_listServices))
+        for (auto *service : std::as_const(pDevice->m_listServices))
         {
             if (!bIsXbox360 && service->m_sServiceType.startsWith(
                     "urn:microsoft.com:service:X_MS_MediaReceiverRegistrar",
@@ -497,7 +509,7 @@ void UPnpDeviceDesc::OutputDevice( QTextStream &os,
         os << "</deviceList>";
     }
     os << "</device>\n";
-    os << QT_FLUSH;
+    os << Qt::flush;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -570,7 +582,7 @@ QString UPnpDeviceDesc::FindDeviceUDN( UPnpDevice *pDevice, QString sST )
     // Check Embedded Devices for a Match
     // ----------------------------------------------------------------------
 
-    for (auto *device : qAsConst(pDevice->m_listDevices))
+    for (auto *device : std::as_const(pDevice->m_listDevices))
     {
         QString sUDN = FindDeviceUDN( device, sST );
         if (sUDN.length() > 0)
@@ -604,7 +616,7 @@ UPnpDevice *UPnpDeviceDesc::FindDevice( UPnpDevice    *pDevice,
     // Check Embedded Devices for a Match
     // ----------------------------------------------------------------------
 
-    for (const auto & dev : qAsConst(pDevice->m_listDevices))
+    for (const auto & dev : std::as_const(pDevice->m_listDevices))
     {
         UPnpDevice *pFound = FindDevice(dev, sURI);
 
@@ -634,11 +646,17 @@ UPnpDeviceDesc *UPnpDeviceDesc::Retrieve( QString &sURL )
 
     if (ok && sXml.startsWith( QString("<?xml") ))
     {
-        QString sErrorMsg;
-
         QDomDocument xml( "upnp" );
 
-        if ( xml.setContent( sXml, false, &sErrorMsg ))
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+        QString sErrorMsg;
+        bool success = xml.setContent( sXml, false, &sErrorMsg );
+#else
+        auto parseResult = xml.setContent( sXml );
+        bool success { parseResult };
+        QString sErrorMsg { parseResult.errorMessage };
+#endif
+        if ( success )
         {
             pDevice = new UPnpDeviceDesc();
             pDevice->Load( xml );
@@ -675,8 +693,7 @@ QString UPnpDeviceDesc::GetHostName() const
             LOG(VB_GENERAL, LOG_ERR,
                 "UPnpDeviceDesc: Error, could not determine host name." + ENO);
 
-        return UPnp::GetConfiguration()->GetValue("Settings/HostName",
-                                                  localHostName);
+        return XmlConfiguration().GetValue("Settings/HostName", localHostName);
     }
 
     return m_sHostName;
@@ -793,7 +810,7 @@ UPnpService UPnpDevice::GetService(const QString &urn, bool *found) const
 
     bool done = false;
 
-    for (auto *service : qAsConst(m_listServices))
+    for (auto *service : std::as_const(m_listServices))
     {
         // Ignore the service version
         if (service->m_sServiceType.section(':', 0, -2) == urn.section(':', 0, -2))
@@ -850,7 +867,7 @@ QString UPnpDevice::toString(uint padding) const
     if (!m_lstExtra.empty())
     {
         ret += "Extra key value pairs\n";
-        for (const auto & extra : qAsConst(m_lstExtra))
+        for (const auto & extra : std::as_const(m_lstExtra))
         {
             ret += extra.m_sName;
             ret += ":";
@@ -864,21 +881,21 @@ QString UPnpDevice::toString(uint padding) const
     if (!m_listIcons.empty())
     {
         ret += "Icon List:\n";
-        for (auto *icon : qAsConst(m_listIcons))
+        for (auto *icon : std::as_const(m_listIcons))
             ret += icon->toString(padding+2) + "\n";
     }
 
     if (!m_listServices.empty())
     {
         ret += "Service List:\n";
-        for (auto *service : qAsConst(m_listServices))
+        for (auto *service : std::as_const(m_listServices))
             ret += service->toString(padding+2) + "\n";
     }
 
     if (!m_listDevices.empty())
     {
         ret += "Device List:\n";
-        for (auto *device : qAsConst(m_listDevices))
+        for (auto *device : std::as_const(m_listDevices))
             ret += device->toString(padding+2) + "\n";
         ret += "\n";
     }

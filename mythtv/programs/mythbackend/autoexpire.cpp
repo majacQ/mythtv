@@ -12,12 +12,10 @@
 // POSIX headers
 #include <unistd.h>
 
-// C headers
-#include <cstdlib>
-
 // C++ headers
-#include <iostream>
 #include <algorithm>
+#include <cstdlib>
+#include <iostream>
 
 // Qt headers
 #include <QDateTime>
@@ -25,31 +23,36 @@
 #include <QList>
 
 // MythTV headers
-#include "filesysteminfo.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/filesysteminfo.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythprotoserver/requesthandler/fileserverutil.h"
+#include "libmythtv/remoteencoder.h"
+#include "libmythtv/tv_rec.h"
+
+// MythBackend
 #include "autoexpire.h"
-#include "programinfo.h"
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythdate.h"
-#include "storagegroup.h"
-#include "remoteutil.h"
-#include "remoteencoder.h"
+#include "backendcontext.h"
 #include "encoderlink.h"
-#include "requesthandler/fileserverutil.h"
 #include "mainserver.h"
-#include "compat.h"
-#include "mythlogging.h"
-#include "tv_rec.h"
 
 #define LOC     QString("AutoExpire: ")
 #define LOC_ERR QString("AutoExpire Error: ")
 
-extern AutoExpire *expirer;
-
-/** If calculated desired space for 10 min freq is > SPACE_TOO_BIG_KB
+/** If calculated desired space for 10 min freq is > kSpaceTooBigKB
  *  then we use 5 min expire frequency.
  */
-#define SPACE_TOO_BIG_KB (3*1024*1024)
+static constexpr uint64_t kSpaceTooBigKB { 3ULL * 1024 * 1024 };
+
+// Consider recordings within the last two hours to be too recent to
+// add to the autoexpire list.
+static constexpr int64_t kRecentInterval { 2LL * 60 * 60 };
 
 /// \brief This calls AutoExpire::RunExpirer() from within a new thread.
 void ExpireThread::run(void)
@@ -151,7 +154,7 @@ void AutoExpire::CalcParams()
                           << 20;
 
     QMap<int, uint64_t> fsMap;
-    QMap<int, vector<int> > fsEncoderMap;
+    QMap<int, std::vector<int> > fsEncoderMap;
 
     // We use this copying on purpose. The used_encoders map ensures
     // that every encoder writes only to one fs.
@@ -175,7 +178,7 @@ void AutoExpire::CalcParams()
         uint64_t thisKBperMin = 0;
 
         // append unknown recordings to all fsIDs
-        for (auto unknownfs : qAsConst(fsEncoderMap[-1]))
+        for (auto unknownfs : std::as_const(fsEncoderMap[-1]))
             fsEncoderMap[fsit->getFSysID()].push_back(unknownfs);
 
         if (fsEncoderMap.contains(fsit->getFSysID()))
@@ -187,9 +190,12 @@ void AutoExpire::CalcParams()
                 .arg(fsit->getUsedSpace() / 1024.0 / 1024.0, 7, 'f', 1)
                 .arg(fsit->getFreeSpace() / 1024.0 / 1024.0, 7, 'f', 1));
 
-            for (auto cardid : qAsConst(fsEncoderMap[fsit->getFSysID()]))
+            for (auto cardid : std::as_const(fsEncoderMap[fsit->getFSysID()]))
             {
-                EncoderLink *enc = *(m_encoderList->constFind(cardid));
+                auto iter = m_encoderList->constFind(cardid);
+                if (iter == m_encoderList->constEnd())
+                    continue;
+                EncoderLink *enc = *iter;
 
                 if (!enc->IsConnected() || !enc->IsBusy())
                 {
@@ -232,8 +238,8 @@ void AutoExpire::CalcParams()
     uint expireFreq = 15;
     if (maxKBperMin > 0)
     {
-        expireFreq = SPACE_TOO_BIG_KB / (maxKBperMin + maxKBperMin/3);
-        expireFreq = std::max(3U, std::min(expireFreq, 15U));
+        expireFreq = kSpaceTooBigKB / (maxKBperMin + maxKBperMin/3);
+        expireFreq = std::clamp(expireFreq, 3U, 15U);
     }
 
     double expireMinGB = ((maxKBperMin + maxKBperMin/3)
@@ -312,7 +318,7 @@ void AutoExpire::RunExpirer(void)
         {
             LOG(VB_FILE, LOG_INFO, LOC + "Running now!");
             next_expire =
-                MythDate::current().addSecs(m_desiredFreq * 60);
+                MythDate::current().addSecs(m_desiredFreq * 60LL);
 
             ExpireLiveTV(emNormalLiveTVPrograms);
 
@@ -938,7 +944,8 @@ void AutoExpire::FillDBOrdered(pginfolist_t &expireList, int expMethod)
             orderby = "starttime ASC";
             break;
         case emOldDeletedPrograms:
-            if ((maxAge = gCoreContext->GetNumSetting("DeletedMaxAge", 0)) <= 0)
+            maxAge = gCoreContext->GetNumSetting("DeletedMaxAge", 0);
+            if (maxAge <= 0)
                 return;
             msg = QString("Adding programs deleted more than %1 days ago")
                           .arg(maxAge);
@@ -1030,7 +1037,7 @@ void AutoExpire::FillDBOrdered(pginfolist_t &expireList, int expMethod)
  */
 void AutoExpire::Update(int encoder, int fsID, bool immediately)
 {
-    if (!expirer)
+    if (!gExpirer)
         return;
 
     if (encoder > 0)
@@ -1048,18 +1055,18 @@ void AutoExpire::Update(int encoder, int fsID, bool immediately)
     {
         if (encoder > 0)
         {
-            expirer->m_instanceLock.lock();
-            expirer->m_usedEncoders[encoder] = fsID;
-            expirer->m_instanceLock.unlock();
+            gExpirer->m_instanceLock.lock();
+            gExpirer->m_usedEncoders[encoder] = fsID;
+            gExpirer->m_instanceLock.unlock();
         }
-        expirer->CalcParams();
-        expirer->m_instanceCond.wakeAll();
+        gExpirer->CalcParams();
+        gExpirer->m_instanceCond.wakeAll();
     }
     else
     {
-        expirer->m_updateLock.lock();
-        expirer->m_updateQueue.append(UpdateEntry(encoder, fsID));
-        expirer->m_updateLock.unlock();
+        gExpirer->m_updateLock.lock();
+        gExpirer->m_updateQueue.append(UpdateEntry(encoder, fsID));
+        gExpirer->m_updateLock.unlock();
     }
 }
 
@@ -1084,7 +1091,7 @@ void AutoExpire::UpdateDontExpireSet(void)
         QDateTime recstartts = MythDate::as_utc(query.value(1).toDateTime());
         QDateTime lastupdate = MythDate::as_utc(query.value(2).toDateTime());
 
-        if (lastupdate.secsTo(curTime) < 2 * 60 * 60)
+        if (lastupdate.secsTo(curTime) < kRecentInterval)
         {
             QString key = QString("%1_%2")
                 .arg(chanid).arg(recstartts.toString(Qt::ISODate));

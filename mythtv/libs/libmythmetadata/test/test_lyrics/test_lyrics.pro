@@ -6,8 +6,9 @@ using_opengl: QT += opengl
 
 TEMPLATE = app
 TARGET = test_lyrics
-DEPENDPATH += . ../..
-INCLUDEPATH += . ../.. ../../../libmythbase 
+INCLUDEPATH += ../../..
+
+DEFINES += TEST_SOURCE_DIR='\'"$${PWD}"'\'
 
 LIBS += ../../$(OBJECTS_DIR)lyricsdata.o
 
@@ -28,7 +29,7 @@ LIBS += -L../../../../external/FFmpeg/libpostproc -lmythpostproc
 LIBS += -L../.. -lmythmetadata-$$LIBVERSION
 
 
-using_exiv2_external {
+using_system_libexiv2 {
 LIBS += -lexiv2
 } else {
 LIBS += -L../../../../external/libexiv2 -lmythexiv2-0.28

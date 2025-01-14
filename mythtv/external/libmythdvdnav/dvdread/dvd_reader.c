@@ -76,7 +76,7 @@ static inline int _private_gettimeofday( struct timeval *tv, void *tz )
 #include "dvdread_internal.h"
 #include "md5.h"
 #include "dvdread/ifo_read.h"
-#include "io/mythiowrapper.h"
+#include "libmythtv/io/mythiowrapper.h"
 
 #define DEFAULT_UDF_CACHE_LEVEL 1
 
@@ -609,7 +609,7 @@ static dvd_reader_t *DVDOpenCommon( const char *ppath,
 
 DVDOpen_error:
   /* If it's none of the above, screw it. */
-  fprintf( stderr, "libdvdread: Could not open %s\n", path );
+  fprintf( stderr, "libdvdread: Could not open %s\n", path ? path : "NULL" );
   free( path );
   free( path_copy );
   if ( cdir >= 0 )

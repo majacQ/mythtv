@@ -5,25 +5,16 @@
 #include <QMap>
 #include <QList>
 #include <QHostAddress>
-#include "mythsystemevent.h"
+
+#include "libmythtv/mythsystemevent.h"
 
 class EncoderLink;
 class AutoExpire;
-class Scheduler;
-class JobQueue;
-class HouseKeeper;
-class MediaServer;
 class BackendContext;
 
-extern QMap<int, EncoderLink *> tvList;
-extern AutoExpire  *expirer;
-extern JobQueue    *jobqueue;
-extern HouseKeeper *housekeeping;
-extern MediaServer *g_pUPnp;
+extern QMap<int, EncoderLink *> gTVList;
+extern AutoExpire  *gExpirer;
 extern BackendContext *gBackendContext;
-extern QString      pidfile;
-extern QString      logfile;
-extern MythSystemEventHandler *sysEventHandler;
 
 class Frontend
 {

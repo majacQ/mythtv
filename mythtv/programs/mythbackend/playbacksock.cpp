@@ -1,32 +1,34 @@
-#include <QStringList>
+// C++
 #include <utility>
 
-#include "compat.h"
-#include "playbacksock.h"
-#include "programinfo.h"
-#include "mainserver.h"
+// Qt
+#include <QStringList>
 
-#include "mythcorecontext.h"
-#include "mythdate.h"
-#include "inputinfo.h"
-#include "referencecounter.h"
+// MythTV
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/referencecounter.h"
+#include "libmythtv/inputinfo.h"
+
+// MythBackend
+#include "mainserver.h"
+#include "playbacksock.h"
 
 #define LOC QString("PlaybackSock: ")
 #define LOC_ERR QString("PlaybackSock, Error: ")
 
 PlaybackSock::PlaybackSock(
-    MainServer *parent, MythSocket *lsock,
+    MythSocket *lsock,
     QString lhostname, PlaybackSockEventsMode eventsMode) :
-    ReferenceCounter("PlaybackSock")
+    ReferenceCounter("PlaybackSock"),
+    m_sock(lsock),
+    m_hostname(std::move(lhostname)),
+    m_ip(""),
+    m_eventsMode(eventsMode)
 {
-    m_parent = parent;
     QString localhostname = gCoreContext->GetHostName();
-
-    m_sock = lsock;
-    m_hostname = std::move(lhostname);
-    m_eventsMode = eventsMode;
-    m_ip = "";
-
     m_local = (m_hostname == localhostname);
 }
 
@@ -323,7 +325,7 @@ QDateTime PlaybackSock::PixmapLastModified(const ProgramInfo *pginfo)
         return MythDate::fromSecsSinceEpoch(strlist[0].toLongLong());
     }
 
-    return QDateTime();
+    return {};
 }
 
 bool PlaybackSock::CheckFile(ProgramInfo *pginfo)
@@ -535,7 +537,7 @@ QStringList PlaybackSock::ForwardRequest(const QStringList &slist)
     if (SendReceiveStringList(strlist))
         return strlist;
 
-    return QStringList();
+    return {};
 }
 
 /** \brief Tells a slave to add a child input.

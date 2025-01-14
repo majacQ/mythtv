@@ -6,9 +6,8 @@ using_opengl: QT += opengl
 
 TEMPLATE = app
 TARGET = test_mpegtables
-DEPENDPATH += . ../..
-INCLUDEPATH += . ../.. ../../mpeg ../../../libmythui ../../../libmyth ../../../libmythbase
-INCLUDEPATH += ../../../libmythservicecontracts
+INCLUDEPATH += ../../..
+INCLUDEPATH += ../../../../external/FFmpeg
 
 LIBS += -L../../../libmythbase -lmythbase-$$LIBVERSION
 LIBS += -L../../../libmythui -lmythui-$$LIBVERSION

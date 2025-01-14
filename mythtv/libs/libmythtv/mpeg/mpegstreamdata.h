@@ -10,12 +10,13 @@
 // Qt
 #include <QMap>
 
-#include "tspacket.h"
-#include "mythtimer.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythtv/eitscanner.h"
+#include "libmythtv/mythtvexp.h"
+
 #include "streamlisteners.h"
-#include "eitscanner.h"
-#include "mythtvexp.h"
 #include "tablestatus.h"
+#include "tspacket.h"
 
 class EITHelper;
 class PSIPTable;
@@ -51,7 +52,7 @@ using ts_av_listener_vec_t   = std::vector<TSPacketListenerAV*>;
 using mpeg_sp_listener_vec_t = std::vector<MPEGSingleProgramStreamListener*>;
 using ps_listener_vec_t      = std::vector<PSStreamListener*>;
 
-enum CryptStatus
+enum CryptStatus : std::uint8_t
 {
     kEncUnknown   = 0,
     kEncDecrypted = 1,
@@ -72,7 +73,7 @@ class MTV_PUBLIC CryptInfo
     uint        m_decryptedMin     {8};
 };
 
-enum PIDPriority
+enum PIDPriority : std::uint8_t
 {
     kPIDPriorityNone   = 0,
     kPIDPriorityLow    = 1,
@@ -327,22 +328,14 @@ class MTV_PUBLIC MPEGStreamData : public EITSource
     bool                      m_listeningDisabled           {false};
 
     // Encryption monitoring
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex            m_encryptionLock              {QMutex::Recursive};
-#else
     mutable QRecursiveMutex   m_encryptionLock;
-#endif
     QMap<uint, CryptInfo>     m_encryptionPidToInfo;
     QMap<uint, uint_vec_t>    m_encryptionPnumToPids;
     QMap<uint, uint_vec_t>    m_encryptionPidToPnums;
     QMap<uint, CryptStatus>   m_encryptionPnumToStatus;
 
     // Signals
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex            m_listenerLock                {QMutex::Recursive};
-#else
     mutable QRecursiveMutex   m_listenerLock;
-#endif
     mpeg_listener_vec_t       m_mpegListeners;
     mpeg_sp_listener_vec_t    m_mpegSpListeners;
     ts_listener_vec_t         m_tsWritingListeners;
@@ -359,11 +352,7 @@ class MTV_PUBLIC MPEGStreamData : public EITSource
 
     // Caching
     bool                             m_cacheTables;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex                   m_cacheLock            {QMutex::Recursive};
-#else
     mutable QRecursiveMutex          m_cacheLock;
-#endif
     mutable pat_cache_t              m_cachedPats;
     mutable cat_cache_t              m_cachedCats;
     mutable pmt_cache_t              m_cachedPmts;

@@ -5,8 +5,8 @@
 #include <QMutex>
 #include <QEvent>
 
-#include "metadatacommon.h"
-#include "mthread.h"
+#include "libmythbase/mthread.h"
+#include "libmythmetadata/metadatacommon.h"
 
 class META_PUBLIC MetadataLookupEvent : public QEvent
 {
@@ -17,7 +17,7 @@ class META_PUBLIC MetadataLookupEvent : public QEvent
 
     MetadataLookupList m_lookupList;
 
-    static Type kEventType;
+    static const Type kEventType;
 };
 
 class META_PUBLIC MetadataLookupFailure : public QEvent
@@ -29,7 +29,7 @@ class META_PUBLIC MetadataLookupFailure : public QEvent
 
     MetadataLookupList m_lookupList;
 
-    static Type kEventType;
+    static const Type kEventType;
 };
 
 class META_PUBLIC MetadataDownload : public MThread

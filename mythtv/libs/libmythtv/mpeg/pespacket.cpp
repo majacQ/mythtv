@@ -1,11 +1,12 @@
 // -*- Mode: c++ -*-
 // Copyright (c) 2003-2004, Daniel Thor Kristjansson
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/sizetliteral.h"
 #include "pespacket.h"
 #include "mpegtables.h"
 
 extern "C" {
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 #include "libavutil/crc.h"
@@ -86,10 +87,21 @@ bool PESPacket::AddTSPacket(const TSPacket* packet, int cardid, bool &broken)
     }
     else if (int(m_ccLast) == cc)
     {
-        // do nothing with repeats
+        // Do nothing with repeats
+        if (VERBOSE_LEVEL_CHECK(VB_RECORD, LOG_DEBUG))
+        {
+            LOG(VB_RECORD, LOG_ERR,
+                QString("AddTSPacket[%1]: Repeat packet!! ").arg(cardid) +
+                QString("PID: 0x%1, continuity counter: %2 ").arg(packet->PID(),0,16).arg(cc) +
+                QString("(expected %1)").arg(ccExp));
+        }
+        return true;
     }
     else
     {
+        // Even if the packet is out of sync it is still the last packet received
+        m_ccLast = cc;
+
         LOG(VB_RECORD, LOG_ERR,
             QString("AddTSPacket[%1]: Out of sync!!! Need to wait for next payloadStart ").arg(cardid) +
             QString("PID: 0x%1, continuity counter: %2 ").arg(packet->PID(),0,16).arg(cc) +
@@ -120,7 +132,6 @@ bool PESPacket::AddTSPacket(const TSPacket* packet, int cardid, bool &broken)
  */
 void PESPacket::GetAsTSPackets(std::vector<TSPacket> &output, uint cc) const
 {
-#define INCR_CC(_CC_) do { (_CC_) = ((_CC_) + 1) & 0xf; } while (false)
     uint last_byte_of_pesdata = Length() + 4 - 1;
     uint size = last_byte_of_pesdata + m_pesData - m_fullBuffer;
 
@@ -147,7 +158,7 @@ void PESPacket::GetAsTSPackets(std::vector<TSPacket> &output, uint cc) const
     size -= TSPacket::kSize;
     while (size > 0)
     {
-        INCR_CC(cc);
+        cc = (cc + 1) & 0xF;
         header.SetContinuityCounter(cc);
         output.resize(output.size()+1);
         output[output.size()-1].InitHeader(header.data());
@@ -156,7 +167,6 @@ void PESPacket::GetAsTSPackets(std::vector<TSPacket> &output, uint cc) const
         data += write_size;
         size -= write_size;
     }
-#undef INCR_CC
 }
 
 uint PESPacket::CalcCRC(void) const
@@ -251,16 +261,16 @@ static std::vector<unsigned char*> mem4096;
 static std::vector<unsigned char*> free4096;
 static std::map<unsigned char*, bool> alloc4096;
 
-#define BLOCKS188 512
+static constexpr size_t BLOCKS188 { 512 };
 static unsigned char* get_188_block()
 {
     if (free188.empty())
     {
-        mem188.push_back((unsigned char*) malloc(188 * BLOCKS188));
+        mem188.push_back((unsigned char*) malloc(188_UZ * BLOCKS188));
         free188.reserve(BLOCKS188);
         unsigned char* block_start = mem188.back();
-        for (uint i = 0; i < BLOCKS188; ++i)
-            free188.push_back(i*188 + block_start);
+        for (size_t i = 0; i < BLOCKS188; ++i)
+            free188.push_back((i * 188_UZ) + block_start);
     }
 
     unsigned char *ptr = free188.back();
@@ -268,7 +278,6 @@ static unsigned char* get_188_block()
     alloc188[ptr] = true;
     return ptr;
 }
-#undef BLOCKS188
 
 static bool is_188_block(unsigned char* ptr)
 {
@@ -293,16 +302,16 @@ static void return_188_block(unsigned char* ptr)
     }
 }
 
-#define BLOCKS4096 128
+static constexpr size_t BLOCKS4096 { 128 };
 static unsigned char* get_4096_block()
 {
     if (free4096.empty())
     {
-        mem4096.push_back((unsigned char*) malloc(4096 * BLOCKS4096));
+        mem4096.push_back((unsigned char*) malloc(4096_UZ * BLOCKS4096));
         free4096.reserve(BLOCKS4096);
         unsigned char* block_start = mem4096.back();
-        for (uint i = 0; i < BLOCKS4096; ++i)
-            free4096.push_back(i*4096 + block_start);
+        for (size_t i = 0; i < BLOCKS4096; ++i)
+            free4096.push_back((i * 4096_UZ) + block_start);
     }
 
     unsigned char *ptr = free4096.back();
@@ -310,7 +319,6 @@ static unsigned char* get_4096_block()
     alloc4096[ptr] = true;
     return ptr;
 }
-#undef BLOCKS4096
 
 static bool is_4096_block(unsigned char* ptr)
 {

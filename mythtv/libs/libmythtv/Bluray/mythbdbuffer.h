@@ -8,11 +8,10 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "config.h"
-#include "io/mythopticalbuffer.h"
-#include "Bluray/mythbdoverlay.h"
+#include "libmythtv/Bluray/mythbdoverlay.h"
+#include "libmythtv/io/mythopticalbuffer.h"
 
-#define BD_BLOCK_SIZE 6144LL
+static constexpr int32_t BD_BLOCK_SIZE { 6144 };
 
 /** \class MythBDBuffer
  *   A class to allow a MythMediaBuffer to read from BDs.
@@ -133,11 +132,7 @@ class MTV_PUBLIC MythBDBuffer : public MythOpticalBuffer
     int64_t            m_timeDiff                    { 0       };
     QHash<uint32_t,BLURAY_TITLE_INFO*> m_cachedTitleInfo;
     QHash<uint32_t,BLURAY_TITLE_INFO*> m_cachedPlaylistInfo;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex             m_infoLock                    { QMutex::Recursive };
-#else
     QRecursiveMutex    m_infoLock;
-#endif
     QThread           *m_mainThread                  { nullptr };
 };
 #endif

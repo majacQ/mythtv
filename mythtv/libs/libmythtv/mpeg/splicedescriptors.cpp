@@ -21,8 +21,8 @@
 #ifndef SPLICE_DESCRIPTOR_H
 #define SPLICE_DESCRIPTOR_H
 
+#include "libmythbase/stringutil.h"
 #include "splicedescriptors.h"
-#include "mythmiscutil.h" // for xml_indent
 
 desc_list_t SpliceDescriptor::Parse(
     const unsigned char *data, uint len)
@@ -106,11 +106,11 @@ QString SpliceDescriptor::DescriptorTagString(void) const
     switch (DescriptorTag())
     {
         case SpliceDescriptorID::avail:
-            return QString("Avail");
+            return {"Avail"};
         case SpliceDescriptorID::dtmf:
-            return QString("DTMF");
+            return {"DTMF"};
         case SpliceDescriptorID::segmentation:
-            return QString("Segmentation");
+            return {"Segmentation"};
         default:
             return QString("Unknown(%1)").arg(DescriptorTag());
     }
@@ -157,8 +157,8 @@ QString SpliceDescriptor::toString(void) const
 /// When possible matching http://www.tsreader.com/tsreader/text-export.html
 QString SpliceDescriptor::toStringXML(uint level) const
 {
-    QString indent_0 = xml_indent(level);
-    QString indent_1 = xml_indent(level+1);
+    QString indent_0 = StringUtil::indentSpaces(level);
+    QString indent_1 = StringUtil::indentSpaces(level+1);
     QString str;
 
     str += indent_0 + "<DESCRIPTOR namespace=\"splice\">\n";
@@ -197,7 +197,7 @@ bool DTMFDescriptor::IsParsible(const unsigned char *data, uint safe_bytes)
 
 bool SegmentationDescriptor::Parse(void)
 {
-    _ptrs[0] = m_data + (IsProgramSegmentation() ? 12 : 13 + ComponentCount() * 6);
+    _ptrs[0] = m_data + (IsProgramSegmentation() ? 12 : 13 + (ComponentCount() * 6));
     _ptrs[1] = _ptrs[0] + (HasSegmentationDuration() ? 5 : 0);
     _ptrs[2] = _ptrs[1] + 2 + SegmentationUPIDLength();
     return true;

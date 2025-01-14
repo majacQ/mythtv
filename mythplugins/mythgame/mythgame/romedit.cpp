@@ -1,26 +1,28 @@
+// Qt
 #include <QImageReader>
 #include <QApplication>
 
-#include <mythcontext.h>
-#include <mythdirs.h>
+// MythtTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuifilebrowser.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythuibuttonlist.h>
-#include <mythuitext.h>
-#include <mythuitextedit.h>
-#include <mythuibutton.h>
-#include <mythuicheckbox.h>
-#include <mythuifilebrowser.h>
-
+//MythGame
 #include "romedit.h"
 #include "rominfo.h"
 
 EditRomInfoDialog::EditRomInfoDialog(MythScreenStack *parent,
                                      const QString& name, RomInfo *romInfo)
-    : MythScreenType(parent, name)
+    : MythScreenType(parent, name),
+      m_workingRomInfo(new RomInfo(*romInfo))
 {
-    m_workingRomInfo = new RomInfo(*romInfo);
 }
 
 EditRomInfoDialog::~EditRomInfoDialog()
@@ -87,7 +89,7 @@ namespace
         QStringList ret;
 
         QList<QByteArray> exts = QImageReader::supportedImageFormats();
-        for (const auto & ext : qAsConst(exts))
+        for (const auto & ext : std::as_const(exts))
             ret.append(QString("*.").append(ext));
 
         return ret;
@@ -109,7 +111,9 @@ namespace
             popupStack->AddScreen(fb);
         }
         else
+        {
             delete fb;
+        }
     }
 
     const QString CEID_SCREENSHOTFILE = "screenshotfile";

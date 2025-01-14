@@ -20,7 +20,10 @@ class PaneATSC : public GroupSetting
   public:
     PaneATSC(const QString &target, StandardSetting *setting) :
         m_atscTable(new ScanFrequencyTable()),
-        m_atscModulation(new ScanATSCModulation())
+        m_atscModulation(new ScanATSCModulation()),
+        m_transportStart(new TransMythUIComboBoxSetting()),
+        m_transportEnd(new TransMythUIComboBoxSetting()),
+        m_transportCount(new GroupSetting())
     {
         setVisible(false);
 
@@ -30,10 +33,17 @@ class PaneATSC : public GroupSetting
         connect(m_atscModulation, qOverload<const QString&>(&StandardSetting::valueChanged),
                 this,             &PaneATSC::ModulationChanged);
 
+        m_transportStart->setLabel(tr("First Channel"));
+        m_transportStart->setHelpText(tr("Start scanning at this channel."));
+
+        m_transportEnd->setLabel(tr("Last Channel"));
+        m_transportEnd->setHelpText(tr("Stop scanning after this channel."));
+
+        m_transportCount->setLabel(tr("Channel Count"));
+        m_transportCount->setHelpText(tr("Total number of channels to scan."));
+        m_transportCount->setReadOnly(true);
+
         auto *range = new GroupSetting();
-        m_transportStart = new TransMythUIComboBoxSetting();
-        m_transportEnd   = new TransMythUIComboBoxSetting();
-        m_transportCount = new TransTextEditSetting();
         range->setLabel(tr("Scanning Range"));
         range->addChild(m_transportStart);
         range->addChild(m_transportEnd);
@@ -175,7 +185,7 @@ class PaneATSC : public GroupSetting
     ScanATSCModulation         *m_atscModulation  {nullptr};
     TransMythUIComboBoxSetting *m_transportStart  {nullptr};
     TransMythUIComboBoxSetting *m_transportEnd    {nullptr};
-    TransTextEditSetting       *m_transportCount  {nullptr};
+    GroupSetting               *m_transportCount  {nullptr};
     QString                     m_tablesSig;
     freq_table_list_t           m_tables;
 };

@@ -5,9 +5,10 @@
 #include <vector>
 
 // MythTV headers
-#include "mthread.h"
-#include "standardsettings.h"
-#include "mythcontext.h"
+#include "libmyth/mythcontext.h"
+#include "libmythui/standardsettings.h"
+#include "libmythbase/mthread.h"
+
 #include "mythtvexp.h"
 
 class SignalTimeout;
@@ -31,9 +32,8 @@ static inline bool is_grabber_external(const QString &grabber)
              grabber == "/bin/true");
 }
 
-static inline bool is_grabber_labs(const QString &grabber)
+static inline bool is_grabber_labs([[maybe_unused]] const QString &grabber)
 {
-    Q_UNUSED(grabber);
     return false;
 }
 
@@ -101,14 +101,14 @@ protected:
 class TransFreqTableSelector : public TransMythUIComboBoxSetting
 {
   public:
-    explicit TransFreqTableSelector(uint _sourceid);
+    explicit TransFreqTableSelector(uint sourceid);
 
     void Load(void) override; // StandardSetting
 
     void Save(void) override; // StandardSetting
     virtual void Save(const QString& /*destination*/) { Save(); }
 
-    void SetSourceID(uint _sourceid);
+    void SetSourceID(uint sourceid);
 
   private:
     uint    m_sourceId;
@@ -883,9 +883,9 @@ class StartingChannel : public MythUIComboBoxSetting
                               false)
     {
         setLabel(QObject::tr("Starting channel"));
-        setHelpText(QObject::tr("Starting Live TV channel.") + " " +
-                    QObject::tr("This is updated on every successful "
-                                "channel change."));
+        setHelpText(QObject::tr("This channel is shown when 'Watch TV' is selected on the main menu. "
+                                "It is updated on every Live TV channel change. "
+                                "When the value is not valid a suitable default will be chosen."));
     }
     static void fillSelections(void) {;}
   public slots:

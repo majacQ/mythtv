@@ -140,6 +140,17 @@
             <area>805,80,250,25</area>
             <align>left,vcenter</align>
         </textarea>
+        <textarea name="display">
+            <font>medium</font>
+            <area>650,105,150,25</area>
+            <align>right,vcenter</align>
+            <value>Display :</value>
+        </textarea>
+        <textarea name="displayfps">
+            <font>medium</font>
+            <area>805,105,200,25</area>
+            <align>left,vcenter</align>
+        </textarea>
 
         <textarea name="audio">
             <font>medium</font>
@@ -238,8 +249,13 @@
         </shape>
         <textarea name="title">
             <font>small</font>
-            <area>10,10,600,30</area>
+            <area>10,10,1060,30</area>
             <align>left,top</align>
+        </textarea>
+        <textarea name="recordedtime">
+            <font>small</font>
+            <area>10,10,1060,30</area>
+            <align>hcenter,top</align>
         </textarea>
         <textarea name="description">
             <font>small</font>
@@ -248,7 +264,7 @@
             <template>%DESCRIPTION% %VALUE%%UNITS%</template>
         </textarea>
         <clock name="clock">
-            <area>770,10,300,30</area>
+            <area>10,10,1060,30</area>
             <font>small</font>
             <template>%TIME%</template>
             <align>right,top</align>

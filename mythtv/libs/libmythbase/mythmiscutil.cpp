@@ -1,3 +1,6 @@
+#ifdef _WIN32
+    #include <sys/stat.h>
+#endif
 
 #include "mythmiscutil.h"
 
@@ -15,14 +18,15 @@
 
 // System specific C headers
 #include "compat.h"
+#include <QtGlobal>
 
-#ifdef linux
+#ifdef __linux__
 #include <sys/vfs.h>
 #include <sys/sysinfo.h>
 #include <sys/stat.h> // for umask, chmod
 #endif
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #include <mach/mach.h>
 #endif
 
@@ -43,7 +47,6 @@
 #include <QDir>
 #include <QUrl>
 #include <QHostAddress>
-#include <QDataStream>
 #include <QRegularExpression>
 #include <QRegularExpressionMatchIterator>
 
@@ -55,11 +58,6 @@
 #include "mythcoreutil.h"
 #include "mythsystemlegacy.h"
 
-#include "mythconfig.h" // for CONFIG_DARWIN
-
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#define qEnvironmentVariable getenv
-#endif
 
 /** \fn getUptime(time_t&)
  *  \brief Returns uptime statistics.
@@ -76,7 +74,7 @@ bool getUptime(std::chrono::seconds &uptime)
     }
     uptime = std::chrono::seconds(sinfo.uptime);
 
-#elif defined(__FreeBSD__) || CONFIG_DARWIN
+#elif defined(__FreeBSD__) || defined(Q_OS_DARWIN)
 
     std::array<int,2> mib { CTL_KERN, KERN_BOOTTIME };
     struct timeval bootTime;
@@ -108,10 +106,13 @@ bool getUptime(std::chrono::seconds &uptime)
  *  \todo Memory Statistics are not supported (by MythTV) on NT or DOS.
  *  \return true if it succeeds, false otherwise.
  */
-bool getMemStats(int &totalMB, int &freeMB, int &totalVM, int &freeVM)
+bool getMemStats([[maybe_unused]] int &totalMB,
+                 [[maybe_unused]] int &freeMB,
+                 [[maybe_unused]] int &totalVM,
+                 [[maybe_unused]] int &freeVM)
 {
 #ifdef __linux__
-    const size_t MB = (1024*1024);
+    static constexpr size_t MB { 1024LL * 1024 };
     struct sysinfo sinfo {};
     if (sysinfo(&sinfo) == -1)
     {
@@ -125,7 +126,7 @@ bool getMemStats(int &totalMB, int &freeMB, int &totalVM, int &freeVM)
     totalVM = (int)((sinfo.totalswap * sinfo.mem_unit)/MB);
     freeVM  = (int)((sinfo.freeswap  * sinfo.mem_unit)/MB);
     return true;
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
     mach_port_t             mp;
     mach_msg_type_number_t  count;
     vm_size_t               pageSize;
@@ -161,10 +162,6 @@ bool getMemStats(int &totalMB, int &freeMB, int &totalVM, int &freeVM)
     freeVM = (int)(free >> 10);
     return true;
 #else
-    Q_UNUSED(totalMB);
-    Q_UNUSED(freeMB);
-    Q_UNUSED(totalVM);
-    Q_UNUSED(freeVM);
     return false;
 #endif
 }
@@ -183,51 +180,6 @@ loadArray getLoadAvgs (void)
         return loads;
 #endif
     return {-1, -1, -1};
-}
-
-/**
- * \brief Guess whether a string is UTF-8
- *
- * \note  This does not attempt to \e validate the whole string.
- *        It just checks if it has any UTF-8 sequences in it.
- */
-
-bool hasUtf8(const char *str)
-{
-    const uchar *c = (uchar *) str;
-
-    while (*c++)
-    {
-        // ASCII is < 0x80.
-        // 0xC2..0xF4 is probably UTF-8.
-        // Anything else probably ISO-8859-1 (Latin-1, Unicode)
-
-        if (*c > 0xC1 && *c < 0xF5)
-        {
-            int bytesToCheck = 2;  // Assume  0xC2-0xDF (2 byte sequence)
-
-            if (*c > 0xDF)         // Maybe   0xE0-0xEF (3 byte sequence)
-                ++bytesToCheck;
-            if (*c > 0xEF)         // Matches 0xF0-0xF4 (4 byte sequence)
-                ++bytesToCheck;
-
-            while (bytesToCheck--)
-            {
-                ++c;
-
-                if (! *c)                    // String ended in middle
-                    return false;            // Not valid UTF-8
-
-                if (*c < 0x80 || *c > 0xBF)  // Bad UTF-8 sequence
-                    break;                   // Keep checking in outer loop
-            }
-
-            if (!bytesToCheck)  // Have checked all the bytes in the sequence
-                return true;    // Hooray! We found valid UTF-8!
-        }
-    }
-
-    return false;
 }
 
 /**
@@ -254,14 +206,14 @@ bool ping(const QString &host, std::chrono::milliseconds timeout)
                          kMSProcessEvents) == GENERIC_EXIT_OK;
 #else
     QString addrstr =
-        MythCoreContext::resolveAddress(host, gCoreContext->ResolveAny, true);
+        MythCoreContext::resolveAddress(host, MythCoreContext::ResolveAny, true);
     QHostAddress addr = QHostAddress(addrstr);
-#if defined(__FreeBSD__) || CONFIG_DARWIN
+#if defined(__FreeBSD__) || defined(Q_OS_DARWIN)
     QString timeoutparam("-t");
 #else
     // Linux, NetBSD, OpenBSD
     QString timeoutparam("-w");
-#endif
+#endif // UNIX-like
     QString pingcmd =
         addr.protocol() == QAbstractSocket::IPv6Protocol ? "ping6" : "ping";
     QString cmd = QString("%1 %2 %3 -c 1  %4  >/dev/null 2>&1")
@@ -271,7 +223,7 @@ bool ping(const QString &host, std::chrono::milliseconds timeout)
 
     return myth_system(cmd, kMSDontBlockInputDevs | kMSDontDisableDrawing |
                          kMSProcessEvents) == GENERIC_EXIT_OK;
-#endif
+#endif // _WIN32
 }
 
 /**
@@ -287,7 +239,7 @@ bool telnet(const QString &host, int port)
     return connected;
 }
 
-/** \fn copy(QFile&,QFile&,uint)
+/**
  *  \brief Copies src file to dst file.
  *
  *   If the dst file is open, it must be open for writing.
@@ -308,7 +260,7 @@ bool telnet(const QString &host, int port)
  *                    otherwise the default of 16 KB will be used.
  *  \return bytes copied on success, -1 on failure.
  */
-long long copy(QFile &dst, QFile &src, uint block_size)
+long long MythFile::copy(QFile &dst, QFile &src, uint block_size)
 {
     uint buflen = (block_size < 1024) ? (16 * 1024) : block_size;
     char *buf = new char[buflen];
@@ -601,7 +553,7 @@ QString FileHash(const QString& filename)
     quint64 hash = 0;
 
     if (initialsize == 0)
-        return QString("NULL");
+        return {"NULL"};
 
     if (file.open(QIODevice::ReadOnly))
         hash = initialsize;
@@ -609,7 +561,7 @@ QString FileHash(const QString& filename)
     {
         LOG(VB_GENERAL, LOG_ERR,
             "Error: Unable to open selected file, missing read permissions?");
-        return QString("NULL");
+        return {"NULL"};
     }
 
     file.seek(0);
@@ -689,7 +641,7 @@ bool IsPulseAudioRunning(void)
     return false;
 #else
 
-#if CONFIG_DARWIN || (__FreeBSD__) || defined(__OpenBSD__)
+#if defined(Q_OS_DARWIN) || defined(__FreeBSD__) || defined(__OpenBSD__)
     const char *command = "ps -ax | grep -i pulseaudio | grep -v grep > /dev/null";
 #else
     const char *command = "ps ch -C pulseaudio -o pid > /dev/null";
@@ -746,56 +698,53 @@ void myth_yield(void)
                             defined(__x86_64__) || defined(__ia64__) )
 
 #include <cstdio>
-#include <cstdlib>
-#include <cerrno>
 #include <getopt.h>
-#include <unistd.h>
 #include <sys/ptrace.h>
-#include <asm/unistd.h>
-
-#if defined(__i386__)
-# define NR_ioprio_set  289
-# define NR_ioprio_get  290
-#elif defined(__ppc__)
-# define NR_ioprio_set  273
-# define NR_ioprio_get  274
-#elif defined(__x86_64__)
-# define NR_ioprio_set  251
-# define NR_ioprio_get  252
-#elif defined(__ia64__)
-# define NR_ioprio_set  1274
-# define NR_ioprio_get  1275
-#endif
-
-#define IOPRIO_BITS             (16)
-#define IOPRIO_CLASS_SHIFT      (13)
-#define IOPRIO_PRIO_MASK        ((1UL << IOPRIO_CLASS_SHIFT) - 1)
-#define IOPRIO_PRIO_CLASS(mask) ((mask) >> IOPRIO_CLASS_SHIFT)
-#define IOPRIO_PRIO_DATA(mask)  ((mask) & IOPRIO_PRIO_MASK)
-#define IOPRIO_PRIO_VALUE(class, data)  (((class) << IOPRIO_CLASS_SHIFT) | (data))
+#include <sys/syscall.h>
+#if __has_include(<linux/ioprio.h>)
+// Starting with kernel 6.5.0, the following include uses the C++
+// reserved keyword "class" as a variable name. Fortunately we can
+// redefine it without any ill effects.
+#define class class2
+#include <linux/ioprio.h>
+#undef class
+#else
+static constexpr int8_t IOPRIO_BITS        { 16 };
+static constexpr int8_t IOPRIO_CLASS_SHIFT { 13 };
+static constexpr int    IOPRIO_PRIO_MASK   { (1UL << IOPRIO_CLASS_SHIFT) - 1 };
+static constexpr int IOPRIO_PRIO_CLASS(int mask)
+    { return mask >> IOPRIO_CLASS_SHIFT; };
+static constexpr int IOPRIO_PRIO_DATA(int mask)
+    { return mask & IOPRIO_PRIO_MASK; };
+static constexpr int IOPRIO_PRIO_VALUE(int pclass, int data)
+    { return (pclass << IOPRIO_CLASS_SHIFT) | data; };
 
 enum { IOPRIO_CLASS_NONE,IOPRIO_CLASS_RT,IOPRIO_CLASS_BE,IOPRIO_CLASS_IDLE, };
 enum { IOPRIO_WHO_PROCESS = 1, IOPRIO_WHO_PGRP, IOPRIO_WHO_USER, };
+#endif // has_include(<linux/ioprio.h>)
 
 bool myth_ioprio(int val)
 {
-    int new_ioclass = (val < 0) ? IOPRIO_CLASS_RT :
-        (val > 7) ? IOPRIO_CLASS_IDLE : IOPRIO_CLASS_BE;
+    int new_ioclass {IOPRIO_CLASS_BE};
+    if (val < 0)
+        new_ioclass = IOPRIO_CLASS_RT;
+    else if (val > 7)
+        new_ioclass = IOPRIO_CLASS_IDLE;
     int new_iodata = (new_ioclass == IOPRIO_CLASS_BE) ? val : 0;
     int new_ioprio = IOPRIO_PRIO_VALUE(new_ioclass, new_iodata);
 
     int pid = getpid();
-    int old_ioprio = syscall(NR_ioprio_get, IOPRIO_WHO_PROCESS, pid);
+    int old_ioprio = syscall(SYS_ioprio_get, IOPRIO_WHO_PROCESS, pid);
     if (old_ioprio == new_ioprio)
         return true;
 
-    int ret = syscall(NR_ioprio_set, IOPRIO_WHO_PROCESS, pid, new_ioprio);
+    int ret = syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, pid, new_ioprio);
 
     if (-1 == ret && EPERM == errno && IOPRIO_CLASS_BE != new_ioclass)
     {
         new_iodata = (new_ioclass == IOPRIO_CLASS_RT) ? 0 : 7;
         new_ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, new_iodata);
-        ret = syscall(NR_ioprio_set, IOPRIO_WHO_PROCESS, pid, new_ioprio);
+        ret = syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, pid, new_ioprio);
     }
 
     return 0 == ret;
@@ -819,7 +768,7 @@ bool MythRemoveDirectory(QDir &aDir)
 
     for (int idx = 0; idx < count && !has_err; idx++)
     {
-        QFileInfo entryInfo = entries[idx];
+        const QFileInfo& entryInfo = entries[idx];
         QString path = entryInfo.absoluteFilePath();
         if (entryInfo.isDir())
         {
@@ -917,7 +866,7 @@ void setHttpProxy(void)
 
     proxies = QNetworkProxyFactory::systemProxyForQuery(query);
 
-    for (const auto& p : qAsConst(proxies))
+    for (const auto& p : std::as_const(proxies))
     {
         QString host = p.hostName();
         int     port = p.port();
@@ -958,348 +907,6 @@ void setHttpProxy(void)
     }
 
     LOG(VB_NETWORK, LOG_ERR, LOC + "failed to find a network proxy");
-}
-
-void wrapList(QStringList &list, int width)
-{
-    // if this is triggered, something has gone seriously wrong
-    // the result won't really be usable, but at least it won't crash
-    width = std::max(width, 5);
-
-    for (int i = 0; i < list.size(); i++)
-    {
-        QString string = list.at(i);
-
-        if( string.size() <= width )
-            continue;
-
-        QString left   = string.left(width);
-        bool inserted  = false;
-
-        while( !inserted && !left.endsWith(" " ))
-        {
-            if( string.mid(left.size(), 1) == " " )
-            {
-                list.replace(i, left);
-                list.insert(i+1, string.mid(left.size()).trimmed());
-                inserted = true;
-            }
-            else
-            {
-                left.chop(1);
-                if( !left.contains(" ") )
-                {
-                    // Line is too long, just hyphenate it
-                    list.replace(i, left + "-");
-                    list.insert(i+1, string.mid(left.size()));
-                    inserted = true;
-                }
-            }
-        }
-
-        if( !inserted )
-        {
-            left.chop(1);
-            list.replace(i, left);
-            list.insert(i+1, string.mid(left.size()).trimmed());
-        }
-    }
-}
-
-QString xml_indent(uint level)
-{
-    static QReadWriteLock s_rwLock;
-    static QMap<uint,QString> s_cache;
-
-    s_rwLock.lockForRead();
-    QMap<uint,QString>::const_iterator it = s_cache.constFind(level);
-    if (it != s_cache.constEnd())
-    {
-        QString tmp = *it;
-        s_rwLock.unlock();
-        return tmp;
-    }
-    s_rwLock.unlock();
-
-    QString ret = "";
-    for (uint i = 0; i < level; i++)
-        ret += "    ";
-
-    s_rwLock.lockForWrite();
-    s_cache[level] = ret;
-    s_rwLock.unlock();
-
-    return ret;
-}
-
-int naturalCompare(const QString &_a, const QString &_b, Qt::CaseSensitivity caseSensitivity)
-{
-    // This method chops the input a and b into pieces of
-    // digits and non-digits (a1.05 becomes a | 1 | . | 05)
-    // and compares these pieces of a and b to each other
-    // (first with first, second with second, ...).
-    //
-    // This is based on the natural sort order code code by Martin Pool
-    // http://sourcefrog.net/projects/natsort/
-    // Martin Pool agreed to license this under LGPL or GPL.
-
-    // FIXME: Using toLower() to implement case insensitive comparison is
-    // sub-optimal, but is needed because we compare strings with
-    // localeAwareCompare(), which does not know about case sensitivity.
-    // A task has been filled for this in Qt Task Tracker with ID 205990.
-    // http://trolltech.com/developer/task-tracker/index_html?method=entry&id=205990
-
-    QString a;
-    QString b;
-
-    if (caseSensitivity == Qt::CaseSensitive)
-    {
-        a = _a;
-        b = _b;
-    }
-    else
-    {
-        a = _a.toLower();
-        b = _b.toLower();
-    }
-
-    const QChar* currA = a.unicode(); // iterator over a
-    const QChar* currB = b.unicode(); // iterator over b
-
-    if (currA == currB)
-    {
-        return 0;
-    }
-
-    while (!currA->isNull() && !currB->isNull())
-    {
-        const QChar* begSeqA = currA; // beginning of a new character sequence of a
-        const QChar* begSeqB = currB;
-
-        if (currA->unicode() == QChar::ObjectReplacementCharacter)
-        {
-            return 1;
-        }
-
-        if (currB->unicode() == QChar::ObjectReplacementCharacter)
-        {
-            return -1;
-        }
-
-        if (currA->unicode() == QChar::ReplacementCharacter)
-        {
-            return 1;
-        }
-
-        if (currB->unicode() == QChar::ReplacementCharacter)
-        {
-            return -1;
-        }
-
-        // find sequence of characters ending at the first non-character
-        while (!currA->isNull() && !currA->isDigit() && !currA->isPunct() &&
-               !currA->isSpace())
-        {
-            ++currA;
-        }
-
-        while (!currB->isNull() && !currB->isDigit() && !currB->isPunct() &&
-               !currB->isSpace())
-        {
-            ++currB;
-        }
-
-        // compare these sequences
-        const QString& subA(a.mid(begSeqA - a.unicode(), currA - begSeqA));
-        const QString& subB(b.mid(begSeqB - b.unicode(), currB - begSeqB));
-        const int cmp = QString::localeAwareCompare(subA, subB);
-
-        if (cmp != 0)
-        {
-            return cmp < 0 ? -1 : +1;
-        }
-
-        if (currA->isNull() || currB->isNull())
-        {
-            break;
-        }
-
-        // find sequence of characters ending at the first non-character
-        while ((currA->isPunct() || currA->isSpace()) &&
-               (currB->isPunct() || currB->isSpace()))
-        {
-            if (*currA != *currB)
-            {
-                return (*currA < *currB) ? -1 : +1;
-            }
-            ++currA;
-            ++currB;
-            if (currA->isNull() || currB->isNull())
-            {
-                break;
-            }
-        }
-
-        // now some digits follow...
-        if ((*currA == QLatin1Char('0')) || (*currB == QLatin1Char('0')))
-        {
-            // one digit-sequence starts with 0 -> assume we are in a fraction part
-            // do left aligned comparison (numbers are considered left aligned)
-            while (true)
-            {
-                if (!currA->isDigit() && !currB->isDigit())
-                {
-                    break;
-                }
-                if (!currA->isDigit())
-                {
-                    return +1;
-                }
-                if (!currB->isDigit())
-                {
-                    return -1;
-                }
-                if (*currA < *currB)
-                {
-                    return -1;
-                }
-                if (*currA > *currB)
-                {
-                    return + 1;
-                }
-                ++currA;
-                ++currB;
-            }
-        }
-        else
-        {
-            // No digit-sequence starts with 0 -> assume we are looking at some integer
-            // do right aligned comparison.
-            //
-            // The longest run of digits wins. That aside, the greatest
-            // value wins, but we can't know that it will until we've scanned
-            // both numbers to know that they have the same magnitude.
-
-            bool isFirstRun = true;
-            int weight = 0;
-
-            while (true)
-            {
-                if (!currA->isDigit() && !currB->isDigit())
-                {
-                    if (weight != 0)
-                    {
-                        return weight;
-                    }
-                    break;
-                }
-                if (!currA->isDigit())
-                {
-                    if (isFirstRun)
-                    {
-                        return *currA < *currB ? -1 : +1;
-                    }
-                    return -1;
-                }
-                if (!currB->isDigit())
-                {
-                    if (isFirstRun)
-                    {
-                        return *currA < *currB ? -1 : +1;
-                    }
-                    return +1;
-                }
-                if ((*currA < *currB) && (weight == 0))
-                {
-                    weight = -1;
-                }
-                else if ((*currA > *currB) && (weight == 0))
-                {
-                    weight = + 1;
-                }
-                ++currA;
-                ++currB;
-                isFirstRun = false;
-            }
-        }
-    }
-
-    if (currA->isNull() && currB->isNull())
-    {
-        return 0;
-    }
-
-    return currA->isNull() ? -1 : + 1;
-}
-
-QString MythFormatTime(std::chrono::milliseconds msecs, const QString& fmt)
-{
-    return QTime::fromMSecsSinceStartOfDay(msecs.count()).toString(fmt);
-}
-
-/*
- * States for the command line parser.
- */
-enum states {
-    START,     // No current token.
-    INTEXT,    // Collecting token text.
-    INSQUOTE,  // Collecting token, inside single quotes.
-    INDQUOTE,  // Collecting token, inside double quotes.
-    ESCTEXT,   // Saw backslash. Returns to generic text.
-    ESCSQUOTE, // Saw backslash. Returns to single quotes.
-    ESCDQUOTE, // Saw backslash. Returns to double quotes.
-};
-
-/*
- * Parse a string into separate tokens. This function understands
- * quoting and the escape character.
- */
-QStringList MythSplitCommandString(const QString &line)
-{
-    QStringList fields;
-    states state = START;
-    int tokenStart = -1;
-
-    for (int i = 0; i < line.size(); i++)
-    {
-        const QChar c = line.at(i);
-
-        switch (state) {
-          case START:
-            tokenStart = i;
-            if      (c.isSpace()) break;
-            if      (c == '\'') state = INSQUOTE;
-            else if (c == '\"') state = INDQUOTE;
-            else if (c == '\\') state = ESCTEXT;
-            else                state = INTEXT;
-            break;
-          case INTEXT:
-            if (c.isSpace()) {
-                fields += line.mid(tokenStart, i - tokenStart);
-                state = START;
-                break;
-            }
-            else if (c == '\'') state = INSQUOTE;
-            else if (c == '\"') state = INDQUOTE;
-            else if (c == '\\') state = ESCTEXT;
-            break;
-          case INSQUOTE:
-            if      (c == '\'') state = INTEXT;
-            else if (c == '\\') state = ESCSQUOTE;
-            break;
-          case INDQUOTE:
-            if      (c == '\"') state = INTEXT;
-            else if (c == '\\') state = ESCDQUOTE;
-            break;
-          case ESCTEXT:   state = INTEXT;   break;
-          case ESCSQUOTE: state = INSQUOTE; break;
-          case ESCDQUOTE: state = INDQUOTE; break;
-        }
-    }
-
-    if (state != START)
-        fields += line.mid(tokenStart);
-    return fields;
 }
 
 /* vim: set expandtab tabstop=4 shiftwidth=4: */

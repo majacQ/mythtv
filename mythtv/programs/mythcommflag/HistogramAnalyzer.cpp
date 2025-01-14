@@ -3,18 +3,19 @@
 #include <utility>
 
 // MythTV headers
-#include "mythcorecontext.h"
-#include "mythplayer.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/sizetliteral.h"
+#include "libmythtv/mythplayer.h"
 
 // Commercial Flagging headers
+#include "BorderDetector.h"
 #include "CommDetector2.h"
 #include "FrameAnalyzer.h"
-#include "PGMConverter.h"
-#include "BorderDetector.h"
-#include "quickselect.h"
-#include "TemplateFinder.h"
 #include "HistogramAnalyzer.h"
+#include "PGMConverter.h"
+#include "TemplateFinder.h"
+#include "quickselect.h"
 
 using namespace commDetector2;
 using namespace frameAnalyzer;
@@ -190,11 +191,15 @@ HistogramAnalyzer::MythPlayerInited(MythPlayer *player, long long nframes)
     unsigned int width  = buf_dim.width();
     unsigned int height = buf_dim.height();
 
-    if (m_logoFinder && (m_logo = m_logoFinder->getTemplate(&m_logoRr1, &m_logoCc1,
-                    &m_logoWidth, &m_logoHeight)))
+    if (m_logoFinder != nullptr)
     {
-        m_logoRr2 = m_logoRr1 + m_logoHeight - 1;
-        m_logoCc2 = m_logoCc1 + m_logoWidth - 1;
+        m_logo = m_logoFinder->getTemplate(&m_logoRr1, &m_logoCc1,
+                                           &m_logoWidth, &m_logoHeight);
+        if (m_logo != nullptr)
+        {
+            m_logoRr2 = m_logoRr1 + m_logoHeight - 1;
+            m_logoCc2 = m_logoCc1 + m_logoWidth - 1;
+        }
     }
     QString details = m_logo ? QString("logo %1x%2@(%3,%4)")
         .arg(m_logoWidth).arg(m_logoHeight).arg(m_logoCc1).arg(m_logoRr1) :
@@ -255,6 +260,8 @@ HistogramAnalyzer::setLogoState(TemplateFinder *finder)
     m_logoFinder = finder;
 }
 
+static constexpr int ROUNDUP(int a, int b) { return (a + b - 1) / b * b; }
+
 enum FrameAnalyzer::analyzeFrameResult
 HistogramAnalyzer::analyzeFrame(const MythVideoFrame *frame, long long frameno)
 {
@@ -274,7 +281,6 @@ HistogramAnalyzer::analyzeFrame(const MythVideoFrame *frame, long long frameno)
      */
     static constexpr int kRInc = 4;
     static constexpr int kCInc = 4;
-#define ROUNDUP(a,b)    (((a) + (b) - 1) / (b) * (b))
 
     int                 pgmwidth = 0;
     int                 pgmheight = 0;
@@ -354,7 +360,7 @@ HistogramAnalyzer::analyzeFrame(const MythVideoFrame *frame, long long frameno)
             unsigned char val = pgm->data[0][rroffset + cc];
             *pp++ = val;
             sumval += val;
-            sumsquares += val * val;
+            sumsquares += 1ULL * val * val;
             livepixels++;
             m_histVal[val]++;
         }
@@ -375,8 +381,8 @@ HistogramAnalyzer::analyzeFrame(const MythVideoFrame *frame, long long frameno)
          * area.
          */
         bordercolor = (sumval + livepixels - 1) / livepixels;
-        sumval += borderpixels * bordercolor;
-        sumsquares += borderpixels * bordercolor * bordercolor;
+        sumval     += 1ULL * borderpixels * bordercolor;
+        sumsquares += 1ULL * borderpixels * bordercolor * bordercolor;
     }
 
     memset(m_buf, bordercolor, borderpixels * sizeof(*m_buf));

@@ -31,11 +31,12 @@
 #include <QDateTime>
 
 // MythTV headers
-#include "linuxfirewiredevice.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "firewirerecorder.h"
-#include "mythcorecontext.h"
 #include "linuxavcinfo.h"
-#include "mythlogging.h"
+#include "linuxfirewiredevice.h"
 
 #define LOC      QString("LFireDev(%1): ").arg(guid_to_string(m_guid))
 
@@ -51,7 +52,7 @@ class LFDPriv
 
     ~LFDPriv()
     {
-        for (const auto & device : qAsConst(m_devices))
+        for (const auto & device : std::as_const(m_devices))
             delete device;
         m_devices.clear();
 
@@ -820,7 +821,7 @@ std::vector<AVCInfo> LinuxFirewireDevice::GetSTBListPrivate(void)
 
     std::vector<AVCInfo> list;
 
-    for (const auto & device : qAsConst(m_priv->m_devices))
+    for (const auto & device : std::as_const(m_priv->m_devices))
     {
         if (device->IsSubunitType(kAVCSubunitTypeTuner) &&
             device->IsSubunitType(kAVCSubunitTypePanel))

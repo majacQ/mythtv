@@ -1,32 +1,28 @@
-
-#include "progfind.h"
-
 // Qt
-#include <QDateTime>
 #include <QCoreApplication>
-#include <QStringList>
+#include <QDateTime>
 #include <QEvent>
 #include <QList>                        // for QList
 #include <QRect>                        // for QRect
+#include <QStringList>
 
 // MythTV
-#include "mythdb.h"
-#include "mythdbcon.h"
-#include "mythcorecontext.h"
-#include "programtypes.h"               // for RecStatus
-#include "tv_play.h"
-#include "tv_actions.h"                 // for ACTION_CHANNELSEARCH
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/programtypes.h"       // for RecStatus
+#include "libmythtv/tv_actions.h"       // for ACTION_CHANNELSEARCH
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuiutils.h"      // for UIUtilE, UIUtilW
 
-// MythUI
-#include "mythuitext.h"
-#include "mythuibuttonlist.h"
-#include "mythuibutton.h"
-#include "mythscreenstack.h"
-#include "mythmainwindow.h"
-#include "mythuiutils.h"                // for UIUtilE, UIUtilW
-
-// mythfrontend
+// MythFrontend
 #include "guidegrid.h"
+#include "progfind.h"
 
 #define LOC      QString("ProgFinder: ")
 #define LOC_ERR  QString("ProgFinder, Error: ")
@@ -182,7 +178,7 @@ bool ProgFinder::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; ++i)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "EDIT")
@@ -210,7 +206,9 @@ bool ProgFinder::keyPressEvent(QKeyEvent *event)
                 GetScreenStack()->PopScreen(this, true);
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -256,7 +254,7 @@ void ProgFinder::ShowMenu(void)
 
 void ProgFinder::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
@@ -341,7 +339,9 @@ void ProgFinder::customEvent(QEvent *event)
             SetFocusWidget(m_showList);
         }
         else
+        {
             ScheduleCommon::customEvent(event);
+        }
     }
 }
 
@@ -626,9 +626,13 @@ bool ProgFinder::formatSelectedData(QString& data)
              // nothing, use as is
         }
         else if (data.startsWith("The T"))
+        {
             data = data.mid(4) + ", The";
+        }
         else if (data.startsWith("A T"))
+        {
             data = data.mid(2) + ", A";
+        }
         else
         {
             // don't add
@@ -642,11 +646,17 @@ bool ProgFinder::formatSelectedData(QString& data)
              // nothing, use as is
         }
         else if (data.startsWith("The A"))
+        {
             data = data.mid(4) + ", The";
+        }
         else if (data.startsWith("A A"))
+        {
              data = data.mid(2) + ", A";
+        }
         else if (data.startsWith("An A"))
+        {
              data = data.mid(3) + ", An";
+        }
         else
         {
             // don't add
@@ -727,7 +737,7 @@ const std::vector<QChar> JaProgFinder::kSearchChars
 
 void JaProgFinder::initAlphabetList()
 {
-    for (auto search_char : kSearchChars)
+    for (const auto& search_char : kSearchChars)
     {
         new MythUIButtonListItem(m_alphabetList, QString(search_char));
     }
@@ -799,22 +809,19 @@ void JaProgFinder::whereClauseGetSearchData(QString &where, MSqlBindings &bindin
 }
 
 
-bool JaProgFinder::formatSelectedData(QString& data)
+bool JaProgFinder::formatSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
     return true;
 }
 
-bool JaProgFinder::formatSelectedData(QString& data, int charNum)
+bool JaProgFinder::formatSelectedData([[maybe_unused]] QString& data,
+                                      [[maybe_unused]] int charNum)
 {
-    (void)data;
-    (void)charNum;
     return true;
 }
 
-void JaProgFinder::restoreSelectedData(QString& data)
+void JaProgFinder::restoreSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
 }
 
 // Hebrew specific program finder
@@ -838,7 +845,7 @@ const std::vector<QChar> HeProgFinder::kSearchChars
 
 void HeProgFinder::initAlphabetList()
 {
-    for (auto search_char : kSearchChars)
+    for (const auto& search_char : kSearchChars)
     {
         new MythUIButtonListItem(m_alphabetList, QString(search_char));
     }
@@ -886,22 +893,19 @@ void HeProgFinder::whereClauseGetSearchData(QString &where, MSqlBindings &bindin
     bindings[":STARTTIME"] = progStart.addSecs(50 - progStart.time().second());
 }
 
-bool HeProgFinder::formatSelectedData(QString& data)
+bool HeProgFinder::formatSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
     return true;
 }
 
-bool HeProgFinder::formatSelectedData(QString& data, int charNum)
+bool HeProgFinder::formatSelectedData([[maybe_unused]] QString& data,
+                                      [[maybe_unused]] int charNum)
 {
-    (void)data;
-    (void)charNum;
     return true;
 }
 
-void HeProgFinder::restoreSelectedData(QString& data)
+void HeProgFinder::restoreSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -941,7 +945,7 @@ const std::vector<QChar> RuProgFinder::kSearchChars
 
 void RuProgFinder::initAlphabetList()
 {
-    for (auto search_char : kSearchChars)
+    for (const auto& search_char : kSearchChars)
     {
         new MythUIButtonListItem(m_alphabetList, search_char);
     }
@@ -1017,22 +1021,19 @@ void RuProgFinder::whereClauseGetSearchData(QString &where, MSqlBindings
    }
 }
 
-bool RuProgFinder::formatSelectedData(QString& data)
+bool RuProgFinder::formatSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
     return true;
 }
 
-bool RuProgFinder::formatSelectedData(QString& data, int charNum)
+bool RuProgFinder::formatSelectedData([[maybe_unused]] QString& data,
+                                      [[maybe_unused]] int charNum)
 {
-    (void)data;
-    (void)charNum;
     return true;
 }
 
-void RuProgFinder::restoreSelectedData(QString& data)
+void RuProgFinder::restoreSelectedData([[maybe_unused]] QString& data)
 {
-    (void)data;
 }
 
 ProgramInfo *ProgFinder::GetCurrentProgram(void) const

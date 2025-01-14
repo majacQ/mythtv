@@ -4,20 +4,19 @@
 // C++
 #include <algorithm>
 #include <unistd.h> // for sleep()
-using std::max;
 
 // QT
 #include <QApplication>
 #include <QList>
 #include <QUrl>
 
-// libmythbase
-#include "mythlogging.h"
-#include "compat.h"
-
-// libmyth
-#include "mythcontext.h"
-#include "remoteutil.h"
+// mythtv
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/recordingrule.h"
 
 // libmythmetadata
 #include "videoutils.h"
@@ -32,11 +31,9 @@ using std::max;
 
 // Input for a lookup
 #include "videometadata.h"
-#include "programinfo.h"
-#include "recordingrule.h"
 
 
-QEvent::Type MetadataFactoryNoResult::kEventType =
+const QEvent::Type MetadataFactoryNoResult::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 MetadataFactoryNoResult::~MetadataFactoryNoResult()
@@ -48,7 +45,7 @@ MetadataFactoryNoResult::~MetadataFactoryNoResult()
     }
 }
 
-QEvent::Type MetadataFactorySingleResult::kEventType =
+const QEvent::Type MetadataFactorySingleResult::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 MetadataFactorySingleResult::~MetadataFactorySingleResult()
@@ -60,7 +57,7 @@ MetadataFactorySingleResult::~MetadataFactorySingleResult()
     }
 }
 
-QEvent::Type MetadataFactoryMultiResult::kEventType =
+const QEvent::Type MetadataFactoryMultiResult::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 // Force this class to have a vtable so that dynamic_cast works.
@@ -69,7 +66,7 @@ MetadataFactoryMultiResult::~MetadataFactoryMultiResult()
 {
 }
 
-QEvent::Type MetadataFactoryVideoChanges::kEventType =
+const QEvent::Type MetadataFactoryVideoChanges::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 // Force this class to have a vtable so that dynamic_cast works.
@@ -79,13 +76,12 @@ MetadataFactoryVideoChanges::~MetadataFactoryVideoChanges()
 }
 
 MetadataFactory::MetadataFactory(QObject *parent) :
-    QObject(parent)
+    QObject(parent),
+    m_lookupthread(new MetadataDownload(this)),
+    m_imagedownload(new MetadataImageDownload(this)),
+    m_videoscanner(new VideoScannerThread(this)),
+    m_mlm(new VideoMetadataListManager())
 {
-    m_lookupthread = new MetadataDownload(this);
-    m_imagedownload = new MetadataImageDownload(this);
-    m_videoscanner = new VideoScannerThread(this);
-
-    m_mlm = new VideoMetadataListManager();
 }
 
 MetadataFactory::~MetadataFactory()
@@ -242,7 +238,7 @@ META_PUBLIC MetadataLookupList MetadataFactory::SynchronousLookup(const QString&
 MetadataLookupList MetadataFactory::SynchronousLookup(MetadataLookup *lookup)
 {
     if (!lookup)
-        return MetadataLookupList();
+        return {};
 
     m_sync = true;
 
@@ -443,22 +439,21 @@ void MetadataFactory::OnVideoResult(MetadataLookup *lookup)
     QList<PersonInfo> actors = lookup->GetPeople(kPersonActor);
     QList<PersonInfo> gueststars = lookup->GetPeople(kPersonGuestStar);
 
-    for (const auto& actor : qAsConst(gueststars))
+    for (const auto& actor : std::as_const(gueststars))
         actors.append(actor);
 
     VideoMetadata::cast_list cast;
     QStringList cl;
 
-    for (const auto& actor : qAsConst(actors))
+    for (const auto& actor : std::as_const(actors))
         cl.append(actor.name);
 
-    for (const auto& name : qAsConst(cl))
+    for (const auto& name : std::as_const(cl))
     {
         QString cn = name.trimmed();
         if (!cn.isEmpty())
         {
-            cast.push_back(VideoMetadata::cast_list::
-                        value_type(-1, cn));
+            cast.emplace_back(-1, cn);
         }
     }
 
@@ -468,13 +463,12 @@ void MetadataFactory::OnVideoResult(MetadataLookup *lookup)
     VideoMetadata::genre_list video_genres;
     QStringList genres = lookup->GetCategories();
 
-    for (const auto& str : qAsConst(genres))
+    for (const auto& str : std::as_const(genres))
     {
         QString genre_name = str.trimmed();
         if (!genre_name.isEmpty())
         {
-            video_genres.push_back(
-                    VideoMetadata::genre_list::value_type(-1, genre_name));
+            video_genres.emplace_back(-1, genre_name);
         }
     }
 
@@ -484,14 +478,12 @@ void MetadataFactory::OnVideoResult(MetadataLookup *lookup)
     VideoMetadata::country_list video_countries;
     QStringList countries = lookup->GetCountries();
 
-    for (const auto& str : qAsConst(countries))
+    for (const auto& str : std::as_const(countries))
     {
         QString country_name = str.trimmed();
         if (!country_name.isEmpty())
         {
-            video_countries.push_back(
-                    VideoMetadata::country_list::value_type(-1,
-                            country_name));
+            video_countries.emplace_back(-1, country_name);
         }
     }
 
@@ -635,7 +627,7 @@ void MetadataFactory::customEvent(QEvent *levent)
             VideoMetadataListManager::loadAllFromDatabase(ml);
             m_mlm->setList(ml);
 
-            for (int id : qAsConst(additions))
+            for (int id : std::as_const(additions))
             {
                 VideoMetadata *metadata = m_mlm->byID(id).get();
 
@@ -682,17 +674,31 @@ LookupType GuessLookupType(ProgramInfo *pginfo)
         // weird combination of both, we've got to try everything.
         auto *rule = new RecordingRule();
         rule->m_recordID = pginfo->GetRecordingRuleID();
+        // Load rule information from the database
         rule->Load();
         int ruleepisode = rule->m_episode;
+        RecordingType rulerectype = rule->m_type;
         delete rule;
 
-        if (ruleepisode == 0 && pginfo->GetEpisode() == 0 &&
+        // If recording rule is periodic, it's probably a TV show.
+        if ((rulerectype == kDailyRecord) ||
+            (rulerectype == kWeeklyRecord))
+        {
+            ret = kProbableTelevision;
+        }
+        else if (ruleepisode == 0 && pginfo->GetEpisode() == 0 &&
             pginfo->GetSubtitle().isEmpty())
+        {
             ret = kProbableMovie;
+        }
         else if (ruleepisode > 0 && pginfo->GetSubtitle().isEmpty())
+        {
             ret = kProbableGenericTelevision;
+        }
         else
+        {
             ret = kUnknownVideo;
+        }
     }
 
     return ret;
@@ -738,6 +744,8 @@ LookupType GuessLookupType(RecordingRule *recrule)
         return ret;
 
     if (recrule->m_season > 0 || recrule->m_episode > 0 ||
+        (recrule->m_type == kDailyRecord) ||
+        (recrule->m_type == kWeeklyRecord) ||
         !recrule->m_subtitle.isEmpty())
         ret = kProbableTelevision;
     else

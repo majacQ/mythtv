@@ -10,11 +10,12 @@
 #include <QStringList>
 #include <QMutexLocker>
 
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+
 #include "requesthandler/deletethread.h"
-#include "mythmiscutil.h"
-#include "mythdb.h"
-#include "mythcorecontext.h"
-#include "mythlogging.h"
 
 /*
  Rather than attempt to calculate a delete speed from tuner card information
@@ -58,7 +59,9 @@ void DeleteThread::run(void)
         m_files.clear();
     }
     else
+    {
         LOG(VB_FILE, LOG_DEBUG, "Delete thread self-terminating due to idle.");
+    }
 
     RunEpilog();
 }
@@ -155,7 +158,9 @@ void DeleteThread::ProcessNew(void)
                     handler->DeleteFailed();
                 }
                 else
+                {
                     handler->DeleteFailed();
+                }
 
                 handler->DecrRef();
                 continue;
@@ -168,17 +173,22 @@ void DeleteThread::ProcessNew(void)
         int fd = open(cpath, O_WRONLY);
         if (fd == -1)
         {
-            LOG(VB_GENERAL, LOG_ERR,
-                QString("Error deleting '%1': could not open ")
-                    .arg(handler->m_path) + ENO);
-            handler->DeleteFailed();
-            handler->DecrRef();
-            continue;
-        }
+            LOG(VB_FILE, LOG_INFO, QString("About to unlink/delete file"));
 
+            QDir dir(cpath);
+            if(MythRemoveDirectory(dir))
+            {
+                LOG(VB_GENERAL, LOG_ERR,
+                QString("Error deleting '%1': is no directory ")
+                    .arg(cpath) + ENO);
+                handler->DeleteFailed();
+                handler->DecrRef();
+                continue;
+            }
+        }
         // unlink the file so as soon as it is closed, the system will
         // delete it from the filesystem
-        if (unlink(cpath))
+        else if (unlink(cpath))
         {
             LOG(VB_GENERAL, LOG_ERR,
                 QString("Error deleting '%1': could not unlink ")
@@ -232,7 +242,9 @@ void DeleteThread::ProcessOld(void)
             }
         }
         else
+        {
             handler->m_size = 0;
+        }
 
         if (handler->m_size == 0)
         {

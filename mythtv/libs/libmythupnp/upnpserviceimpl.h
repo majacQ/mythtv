@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -44,7 +44,7 @@ class UPNP_PUBLIC UPnpServiceImpl
     /// Provices the URL of the service description XML
     virtual QString GetServiceDescURL(void)    = 0;
     /// Provides the URL of the event portion of the service
-    virtual QString GetServiceEventURL(void) { return QString(); }
+    virtual QString GetServiceEventURL(void) { return {}; }
 };
 
 class UPNP_PUBLIC UPnPFeature

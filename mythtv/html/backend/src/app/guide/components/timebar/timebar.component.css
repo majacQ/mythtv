@@ -1,0 +1,29 @@
+.timebarbox {
+    grid-template-columns: 90px auto;
+    grid-template-rows: 28px;
+    width: 100%;
+}
+
+.datebox {
+    padding: 5px 8px 4px 7px;
+    color: var(--primary-color-text);
+    background: linear-gradient(to bottom, var(--surface-800) 1%, var(--surface-500) 90%, var(--surface-200) 99%);
+    border-radius: 10px;
+}
+
+.segmentsbox {
+    display: block;
+    float: left;
+    position: relative;
+    height: 100%;
+    width: calc(100% - 91px);
+}
+
+.segmentbox {
+    width: 25%;
+    padding: 5px 8px 4px 7px;
+    color: var(--primary-color-text);
+    background: linear-gradient(to bottom, var(--surface-800) 1%, var(--surface-500) 90%, var(--surface-200) 99%);
+    height: auto;
+    border-radius: 10px;
+}

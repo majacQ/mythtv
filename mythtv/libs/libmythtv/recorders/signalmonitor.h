@@ -12,20 +12,16 @@
 #include <QWaitCondition>
 #include <QMutex>
 #include <QCoreApplication>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 
 // MythTV headers
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythtimer.h"
+
+#include "cardutil.h"
+#include "channelbase.h"
 #include "signalmonitorlistener.h"
 #include "signalmonitorvalue.h"
-#include "channelbase.h"
-#include "mythtimer.h"
-#include "cardutil.h"
-#include "mthread.h"
-
-#define DBG_SM(FUNC, MSG) LOG(VB_CHANNEL, LOG_DEBUG, \
-    QString("SM(%1)::%2: %3") .arg(channel->GetDevice()).arg(FUNC).arg(<(MSG)));
 
 inline QString sm_flags_to_string(uint64_t flags);
 
@@ -228,11 +224,7 @@ class SignalMonitor : protected MThread
     volatile bool      m_running      {false}; // protected by startStopLock
     volatile bool      m_exit         {false}; // protected by startStopLock
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex     m_statusLock   {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_statusLock;
-#endif
     mutable QMutex     m_listenerLock;
 };
 

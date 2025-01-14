@@ -4,10 +4,7 @@
 #include "netstream.h"
 
 // C/C++ lib
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#include <cstdlib>
-using std::getenv;
-#endif
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cinttypes>
@@ -28,8 +25,8 @@ using std::getenv;
 #include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QScopedPointer>
 #include <QThread>
+#include <QTimeZone>
 #include <QUrl>
 #ifndef QT_NO_OPENSSL
 #include <QSslConfiguration>
@@ -39,18 +36,14 @@ using std::getenv;
 #endif
 
 // Myth
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythdirs.h"
-
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#define qEnvironmentVariable getenv
-#endif
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
 
 /*
  * Constants
  */
-#define LOC "[netstream] "
+static const QString LOC { QStringLiteral("[netstream] ") };
 
 
 /*
@@ -58,7 +51,7 @@ using std::getenv;
  */
 static QAtomicInt s_nRequest(1); // Unique NetStream request ID
 static QMutex s_mtx; // Guard local static data e.g. NAMThread singleton
-const qint64 kMaxBuffer = 4 * 1024 * 1024L; // 0= unlimited, 1MB => 4secs @ 1.5Mbps
+static constexpr qint64 kMaxBuffer = 4LL * 1024 * 1024L; // 0= unlimited, 1MB => 4secs @ 1.5Mbps
 
 
 /*
@@ -73,13 +66,12 @@ public:
     NetStreamRequest(int id, const QNetworkRequest &req) :
         QEvent(kType),
         m_id(id),
-        m_req(req),
-        m_bCancelled(false)
+        m_req(req)
     { }
 
     const int m_id;
     const QNetworkRequest m_req;
-    volatile bool m_bCancelled;
+    volatile bool m_bCancelled { false };
 };
 
 class NetStreamAbort : public QEvent
@@ -109,11 +101,14 @@ NetStream::NetStream(const QUrl &url, EMode mode /*= kPreferCache*/,
 {
     setObjectName("NetStream " + url.toString());
 
-    m_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
-        mode == kAlwaysCache ? QNetworkRequest::AlwaysCache :
-        mode == kPreferCache ? QNetworkRequest::PreferCache :
-        mode == kNeverCache ? QNetworkRequest::AlwaysNetwork :
-            QNetworkRequest::PreferNetwork );
+    QNetworkRequest::CacheLoadControl attr {QNetworkRequest::PreferNetwork};
+    if (mode == kAlwaysCache)
+        attr =  QNetworkRequest::AlwaysCache;
+    else if (mode == kPreferCache)
+        attr = QNetworkRequest::PreferCache;
+    else if (mode == kNeverCache)
+        attr = QNetworkRequest::AlwaysNetwork;
+    m_request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, attr);
 
     // Receive requestStarted signals from NAMThread when it processes a NetStreamRequest
     connect(&NAMThread::manager(), &NAMThread::requestStarted,
@@ -313,8 +308,10 @@ void NetStream::slotRequestStarted(int id, QNetworkReply *reply)
         connect(reply, &QIODevice::readyRead, this, &NetStream::slotReadyRead, Qt::DirectConnection );
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC +
             QString("(%1) Started but m_reply not NULL").arg(m_id));
+    }
 }
 
 static qlonglong inline ContentLength(const QNetworkReply *reply)
@@ -402,8 +399,7 @@ void NetStream::slotReadyRead()
             }
         }
 
-        if (m_state < kReady)
-            m_state = kReady;
+        m_state = std::max(m_state, kReady);
 
         locker.unlock();
         emit ReadyRead(this);
@@ -412,8 +408,10 @@ void NetStream::slotReadyRead()
         m_ready.wakeAll();
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC +
             QString("(%1) ReadyRead but m_reply = NULL").arg(m_id));
+    }
 }
 
 // signal from QNetworkReply
@@ -439,16 +437,20 @@ void NetStream::slotFinished()
                     .arg(m_id));
                 m_state = kFinished;
             }
-            else if ((url = m_request.url().resolved(url)) == m_request.url())
-            {
-                LOG(VB_FILE, LOG_WARNING, LOC + QString("(%1) Redirection loop to %2")
-                    .arg(m_id).arg(url.toString()) );
-                m_state = kFinished;
-            }
             else
             {
-                LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Redirecting").arg(m_id));
-                m_state = Request(url) ? kPending : kFinished;
+                url = m_request.url().resolved(url);
+                if (url == m_request.url())
+                {
+                    LOG(VB_FILE, LOG_WARNING, LOC + QString("(%1) Redirection loop to %2")
+                        .arg(m_id).arg(url.toString()) );
+                    m_state = kFinished;
+                }
+                else
+                {
+                    LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) Redirecting").arg(m_id));
+                    m_state = Request(url) ? kPending : kFinished;
+                }
             }
         }
         else
@@ -474,8 +476,10 @@ void NetStream::slotFinished()
         }
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC + QString("(%1) Finished but m_reply = NULL")
             .arg(m_id));
+    }
 }
 
 #ifndef QT_NO_OPENSSL
@@ -487,7 +491,7 @@ void NetStream::slotSslErrors(const QList<QSslError> &errors)
     if (m_reply)
     {
         bool bIgnore = true;
-        for (const auto& e : qAsConst(errors))
+        for (const auto& e : std::as_const(errors))
         {
             LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) SSL error %2: ")
                 .arg(m_id).arg(e.error()) + e.errorString() );
@@ -510,8 +514,10 @@ void NetStream::slotSslErrors(const QList<QSslError> &errors)
         }
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC +
             QString("(%1) SSL error but m_reply = NULL").arg(m_id) );
+    }
 }
 #endif
 
@@ -767,18 +773,18 @@ NAMThread::~NAMThread()
 // virtual
 void NAMThread::run()
 {
-    LOG(VB_FILE, LOG_INFO, LOC "NAMThread starting");
+    LOG(VB_FILE, LOG_INFO, LOC + "NAMThread starting");
 
     m_nam = new QNetworkAccessManager();
     m_nam->setObjectName("NetStream NAM");
 
     // Setup cache
-    QScopedPointer<QNetworkDiskCache> cache(new QNetworkDiskCache());
+    std::unique_ptr<QNetworkDiskCache> cache(new QNetworkDiskCache());
 
     cache->setCacheDirectory(GetConfDir() + "/cache/netstream-" +
                              gCoreContext->GetHostName());
 
-    m_nam->setCache(cache.take());
+    m_nam->setCache(cache.release());
 
     // Setup a network proxy e.g. for TOR: socks://localhost:9050
     // TODO get this from mythdb
@@ -786,17 +792,21 @@ void NAMThread::run()
     if (!proxy.isEmpty())
     {
         QUrl url(proxy, QUrl::TolerantMode);
-        QNetworkProxy::ProxyType type =
-            url.scheme().isEmpty() ? QNetworkProxy::HttpProxy :
-            url.scheme() == "socks" ? QNetworkProxy::Socks5Proxy :
-            url.scheme() == "http" ? QNetworkProxy::HttpProxy :
-            url.scheme() == "https" ? QNetworkProxy::HttpProxy :
-            url.scheme() == "cache" ? QNetworkProxy::HttpCachingProxy :
-            url.scheme() == "ftp" ? QNetworkProxy::FtpCachingProxy :
-            QNetworkProxy::NoProxy;
+        QNetworkProxy::ProxyType type {QNetworkProxy::NoProxy};
+        if (url.scheme().isEmpty()
+            || (url.scheme() == "http")
+            || (url.scheme() == "https"))
+            type = QNetworkProxy::HttpProxy;
+        else if (url.scheme() == "socks")
+            type = QNetworkProxy::Socks5Proxy;
+        else if (url.scheme() == "cache")
+            type = QNetworkProxy::HttpCachingProxy;
+        else if (url.scheme() == "ftp")
+            type = QNetworkProxy::FtpCachingProxy;
+
         if (QNetworkProxy::NoProxy != type)
         {
-            LOG(VB_GENERAL, LOG_INFO, LOC "Using proxy: " + proxy);
+            LOG(VB_GENERAL, LOG_INFO, LOC + "Using proxy: " + proxy);
             m_nam->setProxy(QNetworkProxy(
                 type, url.host(), url.port(), url.userName(), url.password() ));
         }
@@ -840,7 +850,7 @@ void NAMThread::run()
     delete m_nam;
     m_nam = nullptr;
 
-    LOG(VB_FILE, LOG_INFO, LOC "NAMThread stopped");
+    LOG(VB_FILE, LOG_INFO, LOC + "NAMThread stopped");
 }
 
 // slot
@@ -877,7 +887,7 @@ bool NAMThread::StartRequest(NetStreamRequest *p)
 {
     if (!p)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC "Invalid NetStreamRequest");
+        LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid NetStreamRequest");
         return false;
     }
 
@@ -889,7 +899,9 @@ bool NAMThread::StartRequest(NetStreamRequest *p)
         emit requestStarted(p->m_id, reply);
     }
     else
+    {
         LOG(VB_FILE, LOG_INFO, LOC + QString("(%1) NetStreamRequest cancelled").arg(p->m_id) );
+    }
     return true;
 }
 
@@ -897,7 +909,7 @@ bool NAMThread::AbortRequest(NetStreamAbort *p)
 {
     if (!p)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC "Invalid NetStreamAbort");
+        LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid NetStreamAbort");
         return false;
     }
 
@@ -932,18 +944,18 @@ QDateTime NAMThread::GetLastModified(const QUrl &url)
     QMutexLocker locker(&m.m_mutex);
 
     if (!m.m_nam)
-        return QDateTime(); // Invalid
+        return {}; // Invalid
 
     QAbstractNetworkCache *cache = m.m_nam->cache();
     if (!cache)
-        return QDateTime(); // Invalid
+        return {}; // Invalid
 
     QNetworkCacheMetaData meta = cache->metaData(url);
     if (!meta.isValid())
     {
         LOG(VB_FILE, LOG_DEBUG, LOC + QString("GetLastModified('%1') not in cache")
             .arg(url.toString()));
-        return QDateTime(); // Invalid
+        return {}; // Invalid
     }
 
     // Check if expired
@@ -953,14 +965,14 @@ QDateTime NAMThread::GetLastModified(const QUrl &url)
     {
         LOG(VB_FILE, LOG_INFO, LOC + QString("GetLastModified('%1') past expiration %2")
             .arg(url.toString(), expire.toString()));
-        return QDateTime(); // Invalid
+        return {}; // Invalid
     }
 
     // Get time URI was modified (Last-Modified header)  NB this may be invalid
     QDateTime lastMod = meta.lastModified();
 
     QNetworkCacheMetaData::RawHeaderList headers = meta.rawHeaders();
-    for (const auto& h : qAsConst(headers))
+    for (const auto& h : std::as_const(headers))
     {
         // RFC 1123 date format: Thu, 01 Dec 1994 16:00:00 GMT
         static const QString kSzFormat { "ddd, dd MMM yyyy HH:mm:ss 'GMT'" };
@@ -975,7 +987,7 @@ QDateTime NAMThread::GetLastModified(const QUrl &url)
                     QString("GetLastModified('%1') Cache-Control disabled")
                         .arg(url.toString()) );
                 cache->remove(url);
-                return QDateTime(); // Invalid
+                return {}; // Invalid
             }
         }
         else if (first == "date")
@@ -988,7 +1000,11 @@ QDateTime NAMThread::GetLastModified(const QUrl &url)
                     .arg(h.second.constData()));
                 continue;
             }
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
             d.setTimeSpec(Qt::UTC);
+#else
+            d.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
             lastMod = d;
         }
     }

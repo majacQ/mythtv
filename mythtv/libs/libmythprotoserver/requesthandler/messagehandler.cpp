@@ -1,5 +1,5 @@
-#include "mythcorecontext.h"
-#include "mythevent.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythevent.h"
 
 #include "requesthandler/messagehandler.h"
 
@@ -15,7 +15,7 @@ MessageHandler::MessageHandler(void)
 
 void MessageHandler::customEvent(QEvent *e)
 {
-    if (e->type() != MythEvent::MythEventMessage)
+    if (e->type() != MythEvent::kMythEventMessage)
         return;
 
     if (!gCoreContext->IsMasterBackend())
@@ -33,7 +33,7 @@ void MessageHandler::customEvent(QEvent *e)
 bool MessageHandler::HandleQuery(SocketHandler *socket, QStringList &commands,
                                  QStringList &slist)
 {
-    QString command = commands[0];
+    const QString& command = commands[0];
     bool res = false;
 
     if (command == "MESSAGE")
@@ -55,7 +55,7 @@ bool MessageHandler::HandleInbound(SocketHandler *sock, QStringList &slist)
         return true;
     }
 
-    QString message = slist[1];
+    const QString& message = slist[1];
     QStringList extra_data;
     for (uint i = 2; i < (uint) slist.size(); i++)
         extra_data.push_back(slist[i]);

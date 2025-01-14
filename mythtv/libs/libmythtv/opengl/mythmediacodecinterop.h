@@ -4,7 +4,14 @@
 // Qt
 #include <QMutex>
 #include <QWaitCondition>
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtAndroidExtras>
+#else
+#include <QJniEnvironment>
+#include <QJniObject>
+#define QAndroidJniEnvironment QJniEnvironment
+#define QAndroidJniObject QJniObject
+#endif
 
 // MythTV
 #include "mythopenglinterop.h"
@@ -15,9 +22,9 @@ class MythMediaCodecInterop : public MythOpenGLInterop
 {
   public:
     static MythMediaCodecInterop* CreateMediaCodec(MythPlayerUI* Player, MythRenderOpenGL* Context, QSize Size);
-    virtual vector<MythVideoTextureOpenGL*> Acquire(MythRenderOpenGL *Context,
-                                                    MythVideoColourSpace *ColourSpace,
-                                                    MythVideoFrame *Frame, FrameScanType Scan) override;
+    virtual std::vector<MythVideoTextureOpenGL*> Acquire(MythRenderOpenGL *Context,
+                                                         MythVideoColourSpace *ColourSpace,
+                                                         MythVideoFrame *Frame, FrameScanType Scan) override;
     void* GetSurface(void);
 
   protected:

@@ -2,38 +2,37 @@
 #define OSD_H
 
 // MythTV
-#include "mythtvexp.h"
-#include "programtypes.h"
-#include "mythscreentype.h"
-#include "mythtypes.h"
-#include "mythplayerstate.h"
-#include "mythmediaoverlay.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythbase/programtypes.h"
+#include "libmythtv/mythmediaoverlay.h"
+#include "libmythtv/mythplayerstate.h"
+#include "libmythui/mythscreentype.h"
 
 // Screen names are prepended with alphanumerics to force the correct ordering
 // when displayed. This is slightly complicated by the default windows
 // (e.g. osd_window) whose names are hard coded into existing themes.
 
 // menu dialogs should always be on top
-#define OSD_DLG_VIDEOEXIT "xx_OSD_VIDEO_EXIT"
-#define OSD_DLG_MENU      "xx_OSD_MENU"
-#define OSD_DLG_SLEEP     "xx_OSD_SLEEP"
-#define OSD_DLG_IDLE      "xx_OSD_IDLE"
-#define OSD_DLG_INFO      "xx_OSD_INFO"
-#define OSD_DLG_EDITING   "xx_OSD_EDITING"
-#define OSD_DLG_ASKALLOW  "xx_OSD_ASKALLOW"
-#define OSD_DLG_EDITOR    "xx_OSD_EDITOR"
-#define OSD_DLG_CUTPOINT  "xx_OSD_CUTPOINT"
-#define OSD_DLG_DELETE    "xx_OSD_DELETE"
-#define OSD_DLG_NAVIGATE  "xx_OSD_NAVIGATE"
-#define OSD_DLG_CONFIRM   "mythconfirmpopup"
+static constexpr const char* OSD_DLG_VIDEOEXIT { "xx_OSD_VIDEO_EXIT" };
+static constexpr const char* OSD_DLG_MENU      { "xx_OSD_MENU"       };
+static constexpr const char* OSD_DLG_SLEEP     { "xx_OSD_SLEEP"      };
+static constexpr const char* OSD_DLG_IDLE      { "xx_OSD_IDLE"       };
+static constexpr const char* OSD_DLG_INFO      { "xx_OSD_INFO"       };
+static constexpr const char* OSD_DLG_EDITING   { "xx_OSD_EDITING"    };
+static constexpr const char* OSD_DLG_ASKALLOW  { "xx_OSD_ASKALLOW"   };
+static constexpr const char* OSD_DLG_EDITOR    { "xx_OSD_EDITOR"     };
+static constexpr const char* OSD_DLG_CUTPOINT  { "xx_OSD_CUTPOINT"   };
+static constexpr const char* OSD_DLG_DELETE    { "xx_OSD_DELETE"     };
+static constexpr const char* OSD_DLG_NAVIGATE  { "xx_OSD_NAVIGATE"   };
+static constexpr const char* OSD_DLG_CONFIRM   { "mythconfirmpopup"  };
 
-#define OSD_WIN_MESSAGE  "osd_message"
-#define OSD_WIN_INPUT    "osd_input"
-#define OSD_WIN_PROGINFO "program_info"
-#define OSD_WIN_STATUS   "osd_status"
-#define OSD_WIN_DEBUG    "osd_debug"
-#define OSD_WIN_BROWSE   "browse_info"
-#define OSD_WIN_PROGEDIT "osd_program_editor"
+static constexpr const char* OSD_WIN_MESSAGE  { "osd_message"        };
+static constexpr const char* OSD_WIN_INPUT    { "osd_input"          };
+static constexpr const char* OSD_WIN_PROGINFO { "program_info"       };
+static constexpr const char* OSD_WIN_STATUS   { "osd_status"         };
+static constexpr const char* OSD_WIN_DEBUG    { "osd_debug"          };
+static constexpr const char* OSD_WIN_BROWSE   { "browse_info"        };
+static constexpr const char* OSD_WIN_PROGEDIT { "osd_program_editor" };
 
 static constexpr std::chrono::milliseconds kOSDFadeTime { 1s };
 
@@ -42,7 +41,7 @@ class MythMainWindow;
 class MythPlayerUI;
 
 
-enum OSDFunctionalType
+enum OSDFunctionalType : std::uint8_t
 {
     kOSDFunctionalType_Default = 0,
     kOSDFunctionalType_PictureAdjust,
@@ -53,7 +52,7 @@ enum OSDFunctionalType
     kOSDFunctionalType_SubtitleDelayAdjust
 };
 
-enum OSDTimeout
+enum OSDTimeout : std::int8_t
 {
     kOSDTimeout_Ignore = -1, // Don't update existing timeout
     kOSDTimeout_None   = 0,  // Don't timeout
@@ -68,8 +67,8 @@ class MythOSDDialogData
     class MythOSDDialogButton
     {
       public:
-        QString  m_text    { };
-        QVariant m_data    { };
+        QString  m_text;
+        QVariant m_data;
         bool     m_menu    { false };
         bool     m_current { false };
     };
@@ -77,15 +76,15 @@ class MythOSDDialogData
     class MythOSDBackButton
     {
       public:
-        QString  m_text { };
+        QString  m_text;
         QVariant m_data { 0 };
         bool     m_exit { false };
     };
 
     QString m_dialogName;
-    QString m_message { };
+    QString m_message { }; //NOLINT(readability-redundant-member-init)
     std::chrono::milliseconds m_timeout { 0ms };
-    std::vector<MythOSDDialogButton> m_buttons { };
+    std::vector<MythOSDDialogButton> m_buttons { }; //NOLINT(readability-redundant-member-init)
     MythOSDBackButton m_back { };
 };
 
@@ -146,12 +145,12 @@ class OSD : public MythMediaOverlay
     bool            m_embedded          { false };
     std::chrono::milliseconds m_fadeTime { kOSDFadeTime };
     MythScreenType* m_dialog            { nullptr };
-    QString         m_pulsedDialogText  { };
-    QDateTime       m_nextPulseUpdate   { };
+    QString         m_pulsedDialogText;
+    QDateTime       m_nextPulseUpdate;
     std::array<std::chrono::milliseconds,4> m_timeouts  { -1ms, 3s, 5s, 13s };
     enum OSDFunctionalType m_functionalType { kOSDFunctionalType_Default };
-    QString                m_functionalWindow { };
-    QHash<MythScreenType*, QDateTime> m_expireTimes { };
+    QString                m_functionalWindow;
+    QHash<MythScreenType*, QDateTime> m_expireTimes;
 };
 
 #endif

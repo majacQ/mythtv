@@ -1,5 +1,6 @@
+#include <libmythbase/netutils.h>
+
 #include "treeeditor.h"
-#include <netutils.h>
 
 bool TreeEditor::InsertInDB(GrabberScript *script)
 {

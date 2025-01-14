@@ -24,6 +24,7 @@
 #include "mpeg2config.h"
 
 #include <string.h>	/* memcmp/memset, try to remove */
+#include <stddef.h>
 #include <stdlib.h>
 #include <inttypes.h>
 
@@ -33,7 +34,7 @@
 
 static int mpeg2_accels = 0;
 
-#define BUFFER_SIZE (1194 * 1024)
+static size_t BUFFER_SIZE = 1194 * 1024;
 
 const mpeg2_info_t * mpeg2_info (mpeg2dec_t * mpeg2dec)
 {
@@ -338,8 +339,8 @@ void mpeg2_skip (mpeg2dec_t * mpeg2dec, int skip)
 
 void mpeg2_slice_region (mpeg2dec_t * mpeg2dec, int start, int end)
 {
-    start = (start < 1) ? 1 : (start > 0xb0) ? 0xb0 : start;
-    end = (end < start) ? start : (end > 0xb0) ? 0xb0 : end;
+    start = clamp(start, 1, 0xb0);
+    end = clamp(end, start, 0xb0);
     mpeg2dec->first_decode_slice = start;
     mpeg2dec->nb_decode_slices = end - start;
 }
@@ -395,8 +396,8 @@ mpeg2dec_t * mpeg2_init (void)
     if (mpeg2dec == NULL)
 	return NULL;
 
-    memset (mpeg2dec->decoder.DCTblock, 0, 64 * sizeof (int16_t));
-    memset (mpeg2dec->quantizer_matrix, 0, 4 * 64 * sizeof (uint8_t));
+    memset (mpeg2dec->decoder.DCTblock, 0, sizeof(int16_t) * 64);
+    memset (mpeg2dec->quantizer_matrix, 0, sizeof(uint8_t) * 64 * 4);
 
     mpeg2dec->chunk_buffer = (uint8_t *) mpeg2_malloc (BUFFER_SIZE + 4,
 						       MPEG2_ALLOC_CHUNK);

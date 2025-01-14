@@ -4,8 +4,8 @@
 #include <QHostAddress>
 
 // MythTV
-#include "mythcorecontext.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 #include "mythmainwindow.h"
 #include "mythudplistener.h"
 
@@ -62,12 +62,22 @@ void MythUDPListener::Process(const QByteArray& Buffer, const QHostAddress& /*Se
     int line = 0;
     int column = 0;
     QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     if (!doc.setContent(Buffer, false, &errormsg, &line, &column))
     {
         LOG(VB_GENERAL, LOG_ERR, LOC + QString("Error parsing xml: Line: %1 Column: %2 Error: %3")
             .arg(line).arg(column).arg(errormsg));
         return;
     }
+#else
+    auto parseResult = doc.setContent(Buffer);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("Error parsing xml: Line: %1 Column: %2 Error: %3")
+            .arg(parseResult.errorLine).arg(parseResult.errorColumn).arg(parseResult.errorMessage));
+        return;
+    }
+#endif
 
     auto element = doc.documentElement();
     bool notification = false;
@@ -156,7 +166,7 @@ void MythUDPListener::Process(const QByteArray& Buffer, const QHostAddress& /*Se
         if (notification)
         {
             origin = origin.isEmpty() ? tr("UDP Listener") : origin;
-            ShowNotification(error ? MythNotification::Error :
+            ShowNotification(error ? MythNotification::kError :
                              MythNotification::TypeFromString(type),
                              msg, origin, description, image, extra,
                              progress_text, progress, timeout,
@@ -165,7 +175,7 @@ void MythUDPListener::Process(const QByteArray& Buffer, const QHostAddress& /*Se
         else
         {
             QStringList args(QString::number(timeout.count()));
-            qApp->postEvent(GetMythMainWindow(), new MythEvent(MythEvent::MythUserMessage, msg, args));
+            qApp->postEvent(GetMythMainWindow(), new MythEvent(MythEvent::kMythUserMessage, msg, args));
         }
     }
 }

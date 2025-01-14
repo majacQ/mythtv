@@ -24,43 +24,40 @@
 #include <QTextStream>
 
 // MythTV headers
-#include "httpstatus.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/mythversion.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/jobqueue.h"
+#include "libmythtv/tv.h"
+#include "libmythtv/tv_rec.h"
+#include "libmythupnp/upnp.h"
 
-#include "mythcorecontext.h"
-#include "mythversion.h"
-#include "mythdbcon.h"
-#include "compat.h"
-#include "mythconfig.h"
+// MythBackend
 #include "autoexpire.h"
-#include "tv.h"
 #include "encoderlink.h"
-#include "scheduler.h"
+#include "httpstatus.h"
 #include "mainserver.h"
-#include "cardutil.h"
-#include "mythmiscutil.h"
-#include "mythsystemlegacy.h"
-#include "exitcodes.h"
-#include "jobqueue.h"
-#include "upnp.h"
-#include "mythdate.h"
-#include "tv_rec.h"
+#include "scheduler.h"
 
 /////////////////////////////////////////////////////////////////////////////
 //
 /////////////////////////////////////////////////////////////////////////////
 
 HttpStatus::HttpStatus( QMap<int, EncoderLink *> *tvList, Scheduler *sched,
-                        AutoExpire *expirer, bool bIsMaster )
-          : HttpServerExtension( "HttpStatus" , QString())
+                        bool bIsMaster )
+          : HttpServerExtension( "HttpStatus" , QString()),
+            m_pSched(sched),
+            m_pEncoders(tvList),
+            m_bIsMaster(bIsMaster)
 {
-    m_pEncoders = tvList;
-    m_pSched    = sched;
-    m_pExpirer  = expirer;
-    m_bIsMaster = bIsMaster;
-
     m_nPreRollSeconds = gCoreContext->GetNumSetting("RecordPreRoll", 0);
-
-    m_pMainServer = nullptr;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -205,7 +202,7 @@ void HttpStatus::FillStatusXML( QDomDocument *pDoc )
 
     TVRec::s_inputsLock.lockForRead();
 
-    for (auto * elink : qAsConst(*m_pEncoders))
+    for (auto * elink : std::as_const(*m_pEncoders))
     {
         if (elink != nullptr)
         {
@@ -309,7 +306,7 @@ void HttpStatus::FillStatusXML( QDomDocument *pDoc )
         fes = nullptr;
 
         frontends.setAttribute( "count", map.size() );
-        for (const auto & entry : qAsConst(map))
+        for (const auto & entry : std::as_const(map))
         {
             QDomElement fe = pDoc->createElement("Frontend");
             frontends.appendChild(fe);
@@ -354,7 +351,7 @@ void HttpStatus::FillStatusXML( QDomDocument *pDoc )
         sbes->DecrRef();
         sbes = nullptr;
 
-        for (const auto & entry : qAsConst(map))
+        for (const auto & entry : std::as_const(map))
         {
             QUrl url(entry->m_sLocation);
             if (url.host() != ipaddress)
@@ -507,7 +504,9 @@ void HttpStatus::FillStatusXML( QDomDocument *pDoc )
             total = group;
         }
         else
+        {
             fsXML << group;
+        }
     }
 
     storage.appendChild(total);
@@ -585,15 +584,9 @@ void HttpStatus::FillStatusXML( QDomDocument *pDoc )
 
         QByteArray input = ms.ReadAll();
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList output = QString(input).split('\n',
-                                                  QString::SkipEmptyParts);
-#else
         QStringList output = QString(input).split('\n',
                                                   Qt::SkipEmptyParts);
-#endif
-
-        for (const auto & line : qAsConst(output))
+        for (const auto & line : std::as_const(output))
         {
             QDomElement info = pDoc->createElement("Information");
 
@@ -1199,7 +1192,9 @@ int HttpStatus::PrintJobQueue( QTextStream &os, const QDomElement& jobs )
         os << "      </div>\r\n";
     }
     else
+    {
         os << "    Job Queue is currently empty.\r\n\r\n";
+    }
 
     os << "  </div>\r\n\r\n ";
 
@@ -1446,8 +1441,10 @@ int HttpStatus::PrintMachineInfo( QTextStream &os, const QDomElement& info )
                     os << " <strong>WARNING</strong>: is mythfilldatabase running?";
             }
             else
+            {
                 os << "    There's <strong>no guide data</strong> available! "
                    << "Have you run mythfilldatabase?";
+            }
         }
     }
     os << "\r\n  </div>\r\n";
@@ -1497,7 +1494,9 @@ int HttpStatus::PrintMiscellaneousInfo( QTextStream &os, const QDomElement& info
                 linebreak = "\r\n";
             }
             else
+            {
                 linebreak = "<br />\r\n";
+            }
 
             os << "    " << display << linebreak;
         }

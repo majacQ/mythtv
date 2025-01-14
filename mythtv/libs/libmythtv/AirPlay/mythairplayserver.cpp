@@ -17,38 +17,35 @@
 #include <QTimer>
 #include <QUrlQuery>
 
-#include "mthread.h"
-#include "mythdate.h"
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythuiactions.h"
-#include "mythuistatetracker.h"
-#include "mythbinaryplist.h"
-#include "tv_play.h"
-#include "mythmainwindow.h"
-#include "tv_actions.h"
+#include "libmythbase/bonjourregister.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythbinaryplist.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuiactions.h"
+#include "libmythui/mythuistatetracker.h"
 
-#include "bonjourregister.h"
 #include "mythairplayserver.h"
+#include "tv_actions.h"
+#include "tv_play.h"
 
 MythAirplayServer* MythAirplayServer::gMythAirplayServer = nullptr;
 MThread*           MythAirplayServer::gMythAirplayServerThread = nullptr;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-QMutex*            MythAirplayServer::gMythAirplayServerMutex = new QMutex(QMutex::Recursive);
-#else
 QRecursiveMutex*   MythAirplayServer::gMythAirplayServerMutex = new QRecursiveMutex();
-#endif
 
 #define LOC QString("AirPlay: ")
 
-#define HTTP_STATUS_OK                  200
-#define HTTP_STATUS_SWITCHING_PROTOCOLS 101
-#define HTTP_STATUS_NOT_IMPLEMENTED     501
-#define HTTP_STATUS_UNAUTHORIZED        401
-#define HTTP_STATUS_NOT_FOUND           404
+static constexpr uint16_t HTTP_STATUS_OK                  { 200 };
+static constexpr uint16_t HTTP_STATUS_SWITCHING_PROTOCOLS { 101 };
+static constexpr uint16_t HTTP_STATUS_NOT_IMPLEMENTED     { 501 };
+static constexpr uint16_t HTTP_STATUS_UNAUTHORIZED        { 401 };
+static constexpr uint16_t HTTP_STATUS_NOT_FOUND           { 404 };
 
-#define AIRPLAY_SERVER_VERSION_STR "115.2"
-#define SERVER_INFO  QString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"\
+static constexpr const char* AIRPLAY_SERVER_VERSION_STR { "115.2" };
+static const QString SERVER_INFO { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n" \
 "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\r\n"\
 "<plist version=\"1.0\">\r\n"\
 "<dict>\r\n"\
@@ -61,11 +58,11 @@ QRecursiveMutex*   MythAirplayServer::gMythAirplayServerMutex = new QRecursiveMu
 "<key>protovers</key>\r\n"\
 "<string>1.0</string>\r\n"\
 "<key>srcvers</key>\r\n"\
-"<string>" AIRPLAY_SERVER_VERSION_STR "</string>\r\n"\
+"<string>%1</string>\r\n"\
 "</dict>\r\n"\
-"</plist>\r\n")
+"</plist>\r\n" };
 
-#define EVENT_INFO QString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\r\n"\
+static const QString EVENT_INFO { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\r\n" \
 "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\r\n"\
 "<plist version=\"1.0\">\r\n"\
 "<dict>\r\n"\
@@ -74,9 +71,9 @@ QRecursiveMutex*   MythAirplayServer::gMythAirplayServerMutex = new QRecursiveMu
 "<key>state</key>\r\n"\
 "<string>%1</string>\r\n"\
 "</dict>\r\n"\
-"</plist>\r\n")
+"</plist>\r\n" };
 
-#define PLAYBACK_INFO  QString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"\
+static const QString PLAYBACK_INFO { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n" \
 "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\r\n"\
 "<plist version=\"1.0\">\r\n"\
 "<dict>\r\n"\
@@ -113,16 +110,16 @@ QRecursiveMutex*   MythAirplayServer::gMythAirplayServerMutex = new QRecursiveMu
 "\t\t</dict>\r\n"\
 "</array>\r\n"\
 "</dict>\r\n"\
-"</plist>\r\n")
+"</plist>\r\n" };
 
-#define NOT_READY  QString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"\
+static const QString NOT_READY { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n" \
 "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\r\n"\
 "<plist version=\"1.0\">\r\n"\
 "<dict>\r\n"\
 "<key>readyToPlay</key>\r\n"\
 "<false/>\r\n"\
 "</dict>\r\n"\
-"</plist>\r\n")
+"</plist>\r\n" };
 
 QString AirPlayHardwareId()
 {
@@ -134,8 +131,10 @@ QString AirPlayHardwareId()
     if (size != 12)
     {
         QByteArray ba;
-        for (int i = 0; i < AIRPLAY_HARDWARE_ID_SIZE; i++)
-            ba.append((MythRandom() % 80) + 33);
+        for (size_t i = 0; i < AIRPLAY_HARDWARE_ID_SIZE; i++)
+        {
+            ba.append(MythRandom(33, 33 + 80 - 1));
+        }
         id = ba.toHex();
     }
     id = id.toUpper();
@@ -146,16 +145,12 @@ QString AirPlayHardwareId()
 
 QString GenerateNonce(void)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5,10,0)
-    auto *randgen = QRandomGenerator::global();
     std::array<uint32_t,4> nonceParts {
-        randgen->generate(), randgen->generate(),
-        randgen->generate(), randgen->generate() };
-#else
-    std::srand(std::time(nullptr));
-    std::array<int32_t,4> nonceParts {
-        std::rand(), std::rand(), std::rand(), std::rand() };
-#endif
+        MythRandom(),
+        MythRandom(),
+        MythRandom(),
+        MythRandom()
+    };
 
     QString nonce;
     nonce =  QString::number(nonceParts[0], 16).toUpper();
@@ -188,10 +183,11 @@ QByteArray DigestMd5Response(const QString& response, const QString& option,
     QByteArray passwd   = password.toLatin1();
 
     QCryptographicHash hash(QCryptographicHash::Md5);
+    QByteArray colon(":", 1);
     hash.addData(user);
-    hash.addData(":", 1);
+    hash.addData(colon);
     hash.addData(realm);
-    hash.addData(":", 1);
+    hash.addData(colon);
     hash.addData(passwd);
     QByteArray ha1 = hash.result();
     ha1 = ha1.toHex();
@@ -199,16 +195,16 @@ QByteArray DigestMd5Response(const QString& response, const QString& option,
     // calculate H(A2)
     hash.reset();
     hash.addData(option.toLatin1());
-    hash.addData(":", 1);
+    hash.addData(colon);
     hash.addData(uri);
     QByteArray ha2 = hash.result().toHex();
 
     // calculate response
     hash.reset();
     hash.addData(ha1);
-    hash.addData(":", 1);
+    hash.addData(colon);
     hash.addData(nonce.toLatin1());
-    hash.addData(":", 1);
+    hash.addData(colon);
     hash.addData(ha2);
     return hash.result().toHex();
 }
@@ -246,7 +242,7 @@ class APHTTPRequest
     {
         QMap<QByteArray,QByteArray> result;
         QList<QByteArray> lines = m_body.split('\n');;
-        for (const QByteArray& line : qAsConst(lines))
+        for (const QByteArray& line : std::as_const(lines))
         {
             int index = line.indexOf(":");
             if (index > 0)
@@ -267,7 +263,7 @@ class APHTTPRequest
     QByteArray GetLine(void)
     {
         int next = m_data.indexOf("\r\n", m_readPos);
-        if (next < 0) return QByteArray();
+        if (next < 0) return {};
         QByteArray line = m_data.mid(m_readPos, next - m_readPos);
         m_readPos = next + 2;
         return line;
@@ -436,7 +432,7 @@ void MythAirplayServer::Teardown(void)
     m_bonjour = nullptr;
 
     // disconnect connections
-    for (QTcpSocket* connection : qAsConst(m_sockets))
+    for (QTcpSocket* connection : std::as_const(m_sockets))
     {
         disconnect(connection, nullptr, nullptr, nullptr);
         delete connection;
@@ -444,7 +440,7 @@ void MythAirplayServer::Teardown(void)
     m_sockets.clear();
 
     // remove all incoming buffers
-    for (APHTTPRequest* request : qAsConst(m_incoming))
+    for (APHTTPRequest* request : std::as_const(m_incoming))
     {
         delete request;
     }
@@ -497,7 +493,7 @@ void MythAirplayServer::Start(void)
         // 9: Audio, 10: ? (but important without it it fails) 11: Audio redundant
         txt.append(13); txt.append("features=0xF7");
         txt.append(14); txt.append("model=MythTV,1");
-        txt.append(13); txt.append("srcvers=" AIRPLAY_SERVER_VERSION_STR);
+        txt.append(13); txt.append("srcvers=").append(AIRPLAY_SERVER_VERSION_STR);
 
         if (!m_bonjour->Register(m_setupPort, type, name, txt))
         {
@@ -634,7 +630,7 @@ void MythAirplayServer::read(void)
     }
 }
 
-QByteArray MythAirplayServer::StatusToString(int status)
+QByteArray MythAirplayServer::StatusToString(uint16_t status)
 {
     switch (status)
     {
@@ -656,7 +652,7 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
     QByteArray session;
     QByteArray header;
     QString    body;
-    int status = HTTP_STATUS_OK;
+    uint16_t status = HTTP_STATUS_OK;
     QByteArray content_type;
 
     if (req->GetURI() != "/playback-info")
@@ -737,8 +733,8 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
         GetNotificationCenter()->Queue(n);
     }
 
-    double position    = 0.0F;
-    double duration    = 0.0F;
+    double position    = 0.0;
+    double duration    = 0.0;
     float  playerspeed = 0.0F;
     bool   playing     = false;
     QString pathname;
@@ -802,7 +798,7 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
     if (req->GetURI() == "/server-info")
     {
         content_type = "text/x-apple-plist+xml\r\n";
-        body = SERVER_INFO;
+        body = SERVER_INFO.arg(AIRPLAY_SERVER_VERSION_STR);
         body.replace("%1", GetMacAddress());
         LOG(VB_GENERAL, LOG_INFO, body);
     }
@@ -864,7 +860,7 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
                     GetNotificationCenter()->Register(this);
             }
             // send full screen display notification
-            MythImageNotification n(MythNotification::New, image);
+            MythImageNotification n(MythNotification::kNew, image);
             n.SetId(m_connections[session].m_notificationid);
             n.SetParent(this);
             n.SetFullScreen(true);
@@ -914,7 +910,7 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
     else if (req->GetURI() == "/play")
     {
         QByteArray file;
-        double start_pos = 0.0F;
+        double start_pos = 0.0;
         if (req->GetHeaders().contains("Content-Type") &&
             req->GetHeaders()["Content-Type"] == "application/x-apple-binary-plist")
         {
@@ -982,7 +978,7 @@ void MythAirplayServer::HandleResponse(APHTTPRequest *req,
 }
 
 void MythAirplayServer::SendResponse(QTcpSocket *socket,
-                                     int status, const QByteArray& header,
+                                     uint16_t status, const QByteArray& header,
                                      const QByteArray& content_type, const QString& body)
 {
     if (!socket || !m_incoming.contains(socket) ||
@@ -1140,8 +1136,8 @@ void MythAirplayServer::StopSession(const QByteArray &session)
         return;
     }
     cnx.m_stopped = true;
-    double position    = 0.0F;
-    double duration    = 0.0F;
+    double position    = 0.0;
+    double duration    = 0.0;
     float  playerspeed = 0.0F;
     bool   playing     = false;
     QString pathname;

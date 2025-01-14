@@ -4,30 +4,29 @@
 // warranty, or liability of any kind.
 //
 
+// qt
+#include <QDir>
+
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmyth/output.h>
+#include <libmyth/visual.h>
+#include <libmythmetadata/metaio.h>
+#include <libmythmetadata/musicmetadata.h>
+
 // mythmusic
+#include "config.h"
 #include "decoder.h"
 #include "constants.h"
 #include "musicplayer.h"
 
-// qt
-#include <QDir>
-
-// libmyth
-#include <mythcontext.h>
-#include <output.h>
-#include <visual.h>
-
-// libmythmetadata
-#include "musicmetadata.h"
-#include "metaio.h"
-
-QEvent::Type DecoderEvent::Decoding =
+const QEvent::Type DecoderEvent::kDecoding =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type DecoderEvent::Stopped =
+const QEvent::Type DecoderEvent::kStopped =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type DecoderEvent::Finished =
+const QEvent::Type DecoderEvent::kFinished =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type DecoderEvent::Error =
+const QEvent::Type DecoderEvent::kError =
     (QEvent::Type) QEvent::registerEventType();
 
 Decoder::~Decoder()

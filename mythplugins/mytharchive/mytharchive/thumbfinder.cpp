@@ -25,6 +25,7 @@
  */
 
 // c++
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
@@ -33,29 +34,30 @@
 
 // qt
 #include <QApplication>
+#include <QDir>
 #include <QDomDocument>
 #include <QFile>
-#include <QDir>
 #include <QPainter>
 
 // myth
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <programinfo.h>
-#include <mythuihelper.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythdirs.h>
-#include <mythmiscutil.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuiimage.h>
-#include <mythuibuttonlist.h>
-#include <mythimage.h>
 #include <mythconfig.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythmiscutil.h> // for MythFile::copy
+#include <libmythbase/programinfo.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythimage.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 extern "C" {
-#include "libavutil/imgutils.h"
+    #include <libavutil/imgutils.h>
 }
 
 #ifndef INT64_C    // Used in FFmpeg headers to define some constants
@@ -66,7 +68,7 @@ extern "C" {
 #include "thumbfinder.h"
 
 // the amount to seek before the required frame
-#define PRE_SEEK_AMOUNT 50
+static constexpr int8_t PRE_SEEK_AMOUNT { 50 };
 
 static const std::array<const SeekAmount,9> kSeekAmounts
 {{
@@ -90,7 +92,7 @@ ThumbFinder::ThumbFinder(MythScreenStack *parent, ArchiveItem *archiveItem,
 {
     // copy thumbList so we can abandon changes if required
     m_thumbList.clear();
-    for (const auto *item : qAsConst(m_archiveItem->thumbList))
+    for (const auto *item : std::as_const(m_archiveItem->thumbList))
     {
         auto *thumb = new ThumbImage;
         *thumb = *item;
@@ -162,7 +164,7 @@ bool ThumbFinder::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -212,10 +214,14 @@ bool ThumbFinder::keyPressEvent(QKeyEvent *event)
                 updateThumb();
             }
             else
+            {
                 handled = false;
+            }
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -286,7 +292,7 @@ void ThumbFinder::savePressed()
          delete m_archiveItem->thumbList.takeFirst();
     m_archiveItem->thumbList.clear();
 
-    for (const auto *item : qAsConst(m_thumbList))
+    for (const auto *item : std::as_const(m_thumbList))
     {
         auto *thumb = new ThumbImage;
         *thumb = *item;
@@ -330,10 +336,8 @@ void ThumbFinder::changeSeekAmount(bool up)
     m_seekAmountText->SetText(kSeekAmounts[m_currentSeek].name);
 }
 
-void ThumbFinder::gridItemChanged(MythUIButtonListItem *item)
+void ThumbFinder::gridItemChanged([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void) item;
-
     int itemNo = m_imageGrid->GetCurrentPos();
     ThumbImage *thumb = m_thumbList.at(itemNo);
     if (thumb)
@@ -382,12 +386,12 @@ void ThumbFinder::updateThumb(void)
     QString imageFile = thumb->filename;
     QFile dst(imageFile);
     QFile src(m_frameFile);
-    copy(dst, src);
+    MythFile::copy(dst, src);
 
     item->SetImage(imageFile, "", true);
 
     // update the image grid item
-    int64_t pos = (int) ((m_currentPTS - m_startPTS) / m_frameTime);
+    int64_t pos = (m_currentPTS - m_startPTS) / m_frameTime;
     thumb->frame = pos - m_offset;
     if (itemNo != 0)
     {
@@ -403,7 +407,7 @@ QString ThumbFinder::frameToTime(int64_t frame, bool addFrame) const
     int sec = (int) (frame / m_fps);
     frame = frame - (int) (sec * m_fps);
 
-    QString str = MythFormatTime(std::chrono::seconds(sec), "HH:mm:ss");
+    QString str = MythDate::formatTime(std::chrono::seconds(sec), "HH:mm:ss");
     if (addFrame)
         str += QString(".%1").arg(frame,10,2,QChar('0'));
     return str;
@@ -461,7 +465,9 @@ bool ThumbFinder::getThumbImages()
         m_thumbList.append(thumb);
     }
     else
+    {
         m_frameFile = thumb->filename;
+    }
 
     seekToFrame(thumb->frame);
     getFrameImage();
@@ -500,7 +506,9 @@ bool ThumbFinder::getThumbImages()
             m_thumbList.append(thumb);
         }
         else
+        {
             m_frameFile = thumb->filename;
+        }
 
         seekToFrame(thumb->frame);
         QCoreApplication::processEvents();
@@ -582,7 +590,6 @@ bool ThumbFinder::initAVCodec(const QString &inFile)
 
     // get the codec context for the video stream
     m_codecCtx = m_codecMap.GetCodecContext(m_inputFC->streams[m_videostream]);
-    m_codecCtx->debug_mv = 0;
     m_codecCtx->debug = 0;
     m_codecCtx->workaround_bugs = 1;
     m_codecCtx->lowres = 0;
@@ -658,8 +665,7 @@ bool ThumbFinder::seekToFrame(int frame, bool checkPos)
                         (PRE_SEEK_AMOUNT * m_frameTime);
     int64_t requiredPTS = m_startPTS + (frame * m_frameTime);
 
-    if (timestamp < m_startTime)
-        timestamp = m_startTime;
+    timestamp = std::max(timestamp, m_startTime);
 
     if (av_seek_frame(m_inputFC, m_videostream, timestamp, AVSEEK_FLAG_ANY) < 0)
     {
@@ -699,7 +705,9 @@ bool ThumbFinder::seekForward()
         return true;
     }
     else
+    {
         inc = (int) (inc * ceil(m_fps));
+    }
 
     int64_t newFrame = currentFrame + inc - m_offset;
     if (newFrame == currentFrame + 1)
@@ -736,7 +744,9 @@ bool ThumbFinder::seekBackward()
         return true;
     }
     else
+    {
         inc = (int) (-inc * ceil(m_fps));
+    }
 
     int64_t newFrame = currentFrame + inc - m_offset;
     seekToFrame(newFrame);
@@ -746,30 +756,31 @@ bool ThumbFinder::seekBackward()
 
 bool ThumbFinder::getFrameImage(bool needKeyFrame, int64_t requiredPTS)
 {
-    AVPacket pkt;
     AVFrame orig;
     AVFrame retbuf;
     memset(&orig, 0, sizeof(AVFrame));
     memset(&retbuf, 0, sizeof(AVFrame));
 
-    av_init_packet(&pkt);
+    AVPacket *pkt = av_packet_alloc();
+    if (pkt == nullptr)
+    {
+        LOG(VB_GENERAL, LOG_ERR, "packet allocation failed");
+        return false;
+    }
 
     bool frameFinished = false;
-    int frameCount = 0;
     bool gotKeyFrame = false;
 
-    while (av_read_frame(m_inputFC, &pkt) >= 0 && !frameFinished)
+    while (av_read_frame(m_inputFC, pkt) >= 0 && !frameFinished)
     {
-        if (pkt.stream_index == m_videostream)
+        if (pkt->stream_index == m_videostream)
         {
-            frameCount++;
+            int keyFrame = pkt->flags & AV_PKT_FLAG_KEY;
 
-            int keyFrame = pkt.flags & AV_PKT_FLAG_KEY;
-
-            if (m_startPTS == -1 && pkt.dts != AV_NOPTS_VALUE)
+            if (m_startPTS == -1 && pkt->dts != AV_NOPTS_VALUE)
             {
-                m_startPTS = pkt.dts;
-                m_frameTime = pkt.duration;
+                m_startPTS = pkt->dts;
+                m_frameTime = pkt->duration;
             }
 
             if (keyFrame)
@@ -777,12 +788,12 @@ bool ThumbFinder::getFrameImage(bool needKeyFrame, int64_t requiredPTS)
 
             if (!gotKeyFrame && needKeyFrame)
             {
-                av_packet_unref(&pkt);
+                av_packet_unref(pkt);
                 continue;
             }
 
             if (m_firstIFramePTS == -1)
-                m_firstIFramePTS = pkt.dts;
+                m_firstIFramePTS = pkt->dts;
 
             av_frame_unref(m_frame);
             frameFinished = false;
@@ -790,15 +801,16 @@ bool ThumbFinder::getFrameImage(bool needKeyFrame, int64_t requiredPTS)
             if (ret == 0)
                 frameFinished = true;
             if (ret == 0 || ret == AVERROR(EAGAIN))
-                avcodec_send_packet(m_codecCtx, &pkt);
-            if (requiredPTS != -1 && pkt.dts != AV_NOPTS_VALUE && pkt.dts < requiredPTS)
+                avcodec_send_packet(m_codecCtx, pkt);
+            if (requiredPTS != -1 && pkt->dts != AV_NOPTS_VALUE && pkt->dts < requiredPTS)
                 frameFinished = false;
 
-            m_currentPTS = pkt.dts;
+            m_currentPTS = pkt->dts;
         }
 
-        av_packet_unref(&pkt);
+        av_packet_unref(pkt);
     }
+    av_packet_free(&pkt);
 
     if (frameFinished)
     {

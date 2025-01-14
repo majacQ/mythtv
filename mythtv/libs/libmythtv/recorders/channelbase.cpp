@@ -16,6 +16,11 @@
 #include <QCoreApplication>
 
 // MythTV headers
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #ifdef USING_OSX_FIREWIRE
 #include "darwinfirewiredevice.h"
 #endif
@@ -23,7 +28,6 @@
 #include "linuxfirewiredevice.h"
 #endif
 #include "firewirechannel.h"
-#include "mythcorecontext.h"
 #include "cetonchannel.h"
 #include "dummychannel.h"
 #include "tvremoteutil.h"
@@ -32,20 +36,25 @@
 #include "frequencies.h"
 #include "hdhrchannel.h"
 #include "iptvchannel.h"
-#include "mythlogging.h"
 #include "asichannel.h"
 #include "dtvchannel.h"
 #include "dvbchannel.h"
 #include "v4lchannel.h"
 #include "ExternalChannel.h"
 #include "sourceutil.h"
-#include "exitcodes.h"
 #include "cardutil.h"
-#include "compat.h"
 #include "inputinfo.h"
 #include "satipchannel.h"
 
 #define LOC QString("ChannelBase[%1]: ").arg(m_inputId)
+
+ChannelBase::ChannelBase(TVRec *parent) : m_pParent(parent)
+{
+    if (m_pParent)
+    {
+        m_inputId = m_pParent->GetInputId();
+    }
+}
 
 ChannelBase::~ChannelBase(void)
 {
@@ -103,7 +112,9 @@ bool ChannelBase::Init(QString &startchannel, bool setchan)
                                ? (*cit).m_chanNum : startchannel);
             }
             else
+            {
                 ok = SetChannelByString((*cit).m_chanNum);
+            }
 
             if (ok)
             {
@@ -335,7 +346,9 @@ void ChannelBase::HandleScript(const QString &freqid)
                 m_systemStatus = 2; // failed
             }
             else
+            {
                 m_systemStatus = 3; // success
+            }
 
             HandleScriptEnd(ok);
         }
@@ -352,8 +365,8 @@ void ChannelBase::HandleScript(const QString &freqid)
     }
 }
 
-bool ChannelBase::ChangeInternalChannel(const QString &freqid,
-                                        uint inputid) const
+bool ChannelBase::ChangeInternalChannel([[maybe_unused]] const QString &freqid,
+                                        [[maybe_unused]] uint inputid) const
 {
 #ifdef USING_FIREWIRE
     FirewireDevice *device = nullptr;
@@ -393,8 +406,6 @@ bool ChannelBase::ChangeInternalChannel(const QString &freqid,
     device = nullptr;
     return true;
 #else
-    Q_UNUSED(freqid);
-    Q_UNUSED(inputid);
     return false;
 #endif
 }
@@ -515,7 +526,9 @@ int ChannelBase::GetChanID(void) const
             visible = query.value(0).toInt();
         }
         else
+        {
             id = query.value(0).toInt();
+        }
     }
 
     if (!found)
@@ -678,7 +691,9 @@ bool ChannelBase::CheckChannel(const QString &channum) const
         MythDB::DBError("checkchannel", query);
     }
     else if (query.size() > 0)
+    {
         return true;
+    }
 
     LOG(VB_CHANNEL, LOG_ERR, LOC +
         QString("Failed to find channel(%1) on input (%2).")
@@ -690,7 +705,7 @@ ChannelBase *ChannelBase::CreateChannel(
     TVRec                    *tvrec,
     const GeneralDBOptions   &genOpt,
     const DVBDBOptions       &dvbOpt,
-    const FireWireDBOptions  &fwOpt,
+    [[maybe_unused]] const FireWireDBOptions  &fwOpt,
     const QString            &startchannel,
     bool                      enter_power_save_mode,
     QString                  &rbFileExt,
@@ -712,8 +727,6 @@ ChannelBase *ChannelBase::CreateChannel(
     {
 #ifdef USING_FIREWIRE
         channel = new FirewireChannel(tvrec, genOpt.m_videoDev, fwOpt);
-#else
-        Q_UNUSED(fwOpt);
 #endif
     }
 #ifdef USING_HDHOMERUN
@@ -736,14 +749,9 @@ ChannelBase *ChannelBase::CreateChannel(
         channel = new DummyChannel(tvrec);
         rbFileExt = "mpg";
     }
-#ifdef USING_IPTV
-    else if (genOpt.m_inputType == "FREEBOX") // IPTV
-    {   // NOLINTNEXTLINE(bugprone-branch-clone)
-        channel = new IPTVChannel(tvrec, genOpt.m_videoDev);
-    }
-#endif
-#ifdef USING_VBOX
-    else if (genOpt.m_inputType == "VBOX")
+#if defined(USING_IPTV) || defined(USING_VBOX)
+    else if ((genOpt.m_inputType == "FREEBOX") || // IPTV
+             (genOpt.m_inputType == "VBOX"))
     {
         channel = new IPTVChannel(tvrec, genOpt.m_videoDev);
     }

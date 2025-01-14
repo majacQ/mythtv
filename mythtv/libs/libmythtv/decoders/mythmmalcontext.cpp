@@ -38,7 +38,7 @@ bool MythMMALContext::CheckCodecSize(int Width, int Height, MythCodecContext::Co
 }
 
 MythCodecID MythMMALContext::GetSupportedCodec(AVCodecContext **Context,
-                                               AVCodec **Codec,
+                                               const AVCodec **Codec,
                                                const QString &Decoder,
                                                AVStream *Stream,
                                                uint StreamType)
@@ -87,7 +87,7 @@ MythCodecID MythMMALContext::GetSupportedCodec(AVCodecContext **Context,
     QString name = QString((*Codec)->name) + "_mmal";
     if (name == "mpeg2video_mmal")
         name = "mpeg2_mmal";
-    AVCodec *codec = avcodec_find_decoder_by_name(name.toLocal8Bit());
+    const AVCodec *codec = avcodec_find_decoder_by_name(name.toLocal8Bit());
     AvFormatDecoder *decoder = dynamic_cast<AvFormatDecoder*>(reinterpret_cast<DecoderBase*>((*Context)->opaque));
     if (!codec || !decoder)
     {
@@ -148,7 +148,7 @@ int MythMMALContext::HwDecoderInit(AVCodecContext *Context)
     return m_interop ? 0 : -1;
 }
 
-void MythMMALContext::SetDecoderOptions(AVCodecContext *Context, AVCodec *Codec)
+void MythMMALContext::SetDecoderOptions(AVCodecContext *Context, const AVCodec *Codec)
 {
     if (!(codec_is_mmal(m_codecID)))
         return;
@@ -190,7 +190,6 @@ bool MythMMALContext::GetBuffer(AVCodecContext *Context, MythVideoFrame *Frame, 
                                   MythVideoFrame::GetHeightForPlane(Frame->m_type, AvFrame->height, plane));
     }
 
-    AvFrame->reordered_opaque = Context->reordered_opaque;
     return true;
 }
 
@@ -216,7 +215,6 @@ bool MythMMALContext::GetBuffer2(AVCodecContext *Context, MythVideoFrame *Frame,
     Frame->m_swPixFmt = Context->sw_pix_fmt;
     Frame->m_directRendering = 1;
     AvFrame->opaque = Frame;
-    AvFrame->reordered_opaque = Context->reordered_opaque;
 
     // Frame->data[3] holds MMAL_BUFFER_HEADER_T
     Frame->m_buffer = AvFrame->data[3];
@@ -243,11 +241,7 @@ AVPixelFormat MythMMALContext::GetFormat(AVCodecContext*, const AVPixelFormat *P
 
 bool MythMMALContext::HaveMMAL(bool Reinit /*=false*/)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     QMutexLocker locker(&lock);
     static bool s_checked = false;
     static bool s_available = false;
@@ -263,7 +257,7 @@ bool MythMMALContext::HaveMMAL(bool Reinit /*=false*/)
     LOG(VB_GENERAL, LOG_INFO, LOC + "Supported/available MMAL decoders:");
     s_available = true;
     QSize size{0, 0};
-    for (auto profile : qAsConst(profiles))
+    for (auto profile : std::as_const(profiles))
         LOG(VB_GENERAL, LOG_INFO, LOC + MythCodecContext::GetProfileDescription(profile, size));
     return s_available;
 }
@@ -287,11 +281,7 @@ extern "C" {
 
 const MMALProfiles& MythMMALContext::GetProfiles(void)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static MMALProfiles s_profiles;
 

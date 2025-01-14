@@ -1,7 +1,10 @@
-#include "playbackboxlistitem.h"
-#include "programinfo.h"
+// MythTV
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+
+//  MythFrontend
 #include "playbackbox.h"
-#include "mythlogging.h"
+#include "playbackboxlistitem.h"
 
 #ifdef INCLUDE_UNFINISHED
 PlaybackBoxListItem::PlaybackBoxListItem(
@@ -23,9 +26,9 @@ void PlaybackBoxListItem::SetToRealButton(
 }
 #else
 PlaybackBoxListItem::PlaybackBoxListItem(
-    PlaybackBox *parent, MythUIButtonList *lbtype, ProgramInfo *pi) :
+    [[maybe_unused]] PlaybackBox *parent,
+    MythUIButtonList *lbtype, ProgramInfo *pi) :
     MythUIButtonListItem(lbtype, "", QVariant::fromValue(pi))
 {
-    (void) parent;
 }
 #endif

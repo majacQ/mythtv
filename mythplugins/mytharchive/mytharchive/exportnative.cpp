@@ -1,4 +1,4 @@
-#include <cstdlib>
+// C++
 #include <cstdlib>
 #include <iostream>
 #include <unistd.h>
@@ -10,27 +10,28 @@
 #include <QDomDocument>
 
 // myth
-#include <mythcontext.h>
-#include <remoteutil.h>
-#include <programinfo.h>
-#include <mythdb.h>
-#include <mythdialogbox.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuicheckbox.h>
-#include <mythuibuttonlist.h>
-#include <mythuiprogressbar.h>
-#include <mythmainwindow.h>
-#include <mythsystemlegacy.h>
-#include <exitcodes.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/exitcodes.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/programinfo.h>
+#include <libmythbase/remoteutil.h>
+#include <libmythbase/stringutil.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
+#include "archiveutil.h"
 #include "exportnative.h"
 #include "fileselector.h"
-#include "archiveutil.h"
+#include "logviewer.h"
 #include "recordingselector.h"
 #include "videoselector.h"
-#include "logviewer.h"
 
 ExportNative::~ExportNative(void)
 {
@@ -105,7 +106,7 @@ bool ExportNative::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -118,7 +119,9 @@ bool ExportNative::keyPressEvent(QKeyEvent *event)
         }
 
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -131,7 +134,7 @@ void ExportNative::updateSizeBar()
 {
     int64_t size = 0;
 
-    for (const auto *a : qAsConst(m_archiveList))
+    for (const auto *a : std::as_const(m_archiveList))
         size += a->size;
 
     m_usedSpace = size / 1024 / 1024;
@@ -187,7 +190,7 @@ void ExportNative::titleChanged(MythUIButtonListItem *item)
     m_descriptionText->SetText(
                 (a->subtitle != "" ? a->subtitle + "\n" : "") + a->description);
 
-    m_filesizeText->SetText(formatSize(a->size / 1024, 2));
+    m_filesizeText->SetText(StringUtil::formatKBytes(a->size / 1024, 2));
 }
 
 void ExportNative::handleNextPage()
@@ -229,7 +232,7 @@ void ExportNative::updateArchiveList(void)
     }
     else
     {
-        for (auto *a : qAsConst(m_archiveList))
+        for (auto *a : std::as_const(m_archiveList))
         {
             auto* item = new MythUIButtonListItem(m_archiveButtonList, a->title);
             item->SetData(QVariant::fromValue(a));
@@ -311,7 +314,7 @@ void ExportNative::saveConfiguration(void)
                     ":STARTTIME, :SIZE, :FILENAME, :HASCUTLIST, :DURATION, "
                     ":CUTDURATION, :VIDEOWIDTH, :VIDEOHEIGHT, :FILECODEC, "
                     ":VIDEOCODEC, :ENCODERPROFILE);");
-    for (const auto * a : qAsConst(m_archiveList))
+    for (const auto * a : std::as_const(m_archiveList))
     {
         query.bindValue(":TYPE", a->type);
         query.bindValue(":TITLE", a->title);
@@ -380,7 +383,7 @@ void ExportNative::createConfigFile(const QString &filename)
     job.appendChild(media);
 
     // now loop though selected archive items and add them to the xml file
-    for (const auto * a : qAsConst(m_archiveList))
+    for (const auto * a : std::as_const(m_archiveList))
     {
         QDomElement file = doc.createElement("file");
         file.setAttribute("type", a->type.toLower() );

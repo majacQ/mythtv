@@ -31,21 +31,22 @@
 #define SISCAN_H
 
 // Qt includes
-#include <QRunnable>
-#include <QString>
+#include <QElapsedTimer>
 #include <QList>
-#include <QPair>
 #include <QMap>
-#include <QSet>
 #include <QMutex>
+#include <QPair>
+#include <QRunnable>
+#include <QSet>
+#include <QString>
 
 // MythTV includes
+#include "dtvconfparserhelpers.h" // for DTVTunerType
 #include "frequencytables.h"
 #include "iptvchannelfetcher.h"
-#include "streamlisteners.h"
+#include "mpeg/streamlisteners.h"
 #include "scanmonitor.h"
 #include "signalmonitorlistener.h"
-#include "dtvconfparserhelpers.h" // for DTVTunerType
 
 class MThread;
 class MSqlQuery;
@@ -91,10 +92,10 @@ class ChannelScanSM : public MPEGStreamListener,
     friend class AnalogSignalHandler;
 
   public:
-    ChannelScanSM(ScanMonitor *_scan_monitor,
-                  const QString &_cardtype, ChannelBase* _channel, int _sourceID,
+    ChannelScanSM(ScanMonitor *scan_monitor,
+                  const QString &cardtype, ChannelBase* channel, int sourceID,
                   std::chrono::milliseconds signal_timeout, std::chrono::milliseconds channel_timeout,
-                  QString _inputname, bool test_decryption);
+                  QString inputname, bool test_decryption);
     ~ChannelScanSM() override;
 
     void StartScanner(void);

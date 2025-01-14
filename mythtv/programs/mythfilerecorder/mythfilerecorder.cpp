@@ -1,26 +1,31 @@
 
-#include <sys/stat.h>
+// C/C++
+#include <algorithm>
+#include <array>
 #include <fcntl.h>
-
-#include <termios.h>
 #include <iostream>
 #include <sys/poll.h>
+#include <sys/stat.h>
+#include <termios.h>
 
+// Qt
 #include <QCoreApplication>
 #include <QDir>
 #include <QThread>
 #include <QTime>
 
-#include "commandlineparser.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+
+// MythFileRecorder
 #include "mythfilerecorder.h"
+#include "mythfilerecorder_commandlineparser.h"
 
-#include "exitcodes.h"
-#include "mythcontext.h"
-#include "mythversion.h"
-#include "mythlogging.h"
-
-#define API_VERSION 1
-#define VERSION "1.0.0"
+static constexpr int API_VERSION { 1 };
+static constexpr const char* VERSION { "1.0.0" };
 #define LOC QString("File(%1): ").arg(m_fileName)
 
 Streamer::Streamer(Commands *parent, QString fname,
@@ -89,11 +94,15 @@ void Streamer::SendBytes(void)
         int read_sz = m_blockSize.loadAcquire();
         if (!m_startTime.isValid())
             m_startTime = MythDate::current();
-        int delta = m_startTime.secsTo(MythDate::current()) + 1;
+        qint64 delta = m_startTime.secsTo(MythDate::current()) + 1;
         int rate  = (delta * m_dataRate) - m_dataRead;
 
         read_sz = std::min(rate, read_sz);
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        read_sz = std::min((m_bufferMax - m_buffer.size()), read_sz);
+#else
         read_sz = std::min(static_cast<int>(m_bufferMax - m_buffer.size()), read_sz);
+#endif
 
         if (read_sz > 0)
         {
@@ -129,8 +138,7 @@ void Streamer::SendBytes(void)
         .arg(pkt_size).arg(buf_size));
 
     int write_len = m_blockSize.loadAcquire();
-    if (write_len > buf_size)
-        write_len = buf_size;
+    write_len = std::min(write_len, buf_size);
     LOG(VB_RECORD, LOG_DEBUG, LOC +
         QString("SendBytes -- writing %1 bytes").arg(write_len));
 
@@ -146,7 +154,9 @@ void Streamer::SendBytes(void)
             QString("%1 bytes unwritten").arg(m_buffer.size()));
     }
     else
+    {
         m_buffer.clear();
+    }
 
     LOG(VB_RECORD, LOG_DEBUG, LOC + "SendBytes -- end");
 }

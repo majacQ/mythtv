@@ -2,10 +2,11 @@
 #include <QDir>
 
 // MythTV
-#include "mythlogging.h"
-#include "storagegroup.h"
-#include "mythdirs.h"
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/storagegroup.h"
+
 #include "mythuithemehelper.h"
 
 #define LOC QString("ThemeHelper: ")
@@ -65,7 +66,7 @@ QString MythUIThemeHelper::FindThemeDir(const QString& ThemeName, bool Fallback)
     }
 
     if (!Fallback)
-        return QString();
+        return {};
 
     testdir = GetThemesParentDir() + DEFAULT_UI_THEME;
     dir.setPath(testdir);
@@ -91,7 +92,7 @@ QString MythUIThemeHelper::FindThemeDir(const QString& ThemeName, bool Fallback)
     }
 
     LOG(VB_GENERAL, LOG_ERR, LOC + QString("No fallback GUI theme dir: '%1'").arg(dir.absolutePath()));
-    return QString();
+    return {};
 }
 
 /**
@@ -129,7 +130,7 @@ QString MythUIThemeHelper::FindMenuThemeDir(const QString& MenuName)
 
     LOG(VB_GENERAL, LOG_ERR, LOC + QString("Could not find menu theme: %1 - Fallback to default failed.")
         .arg(MenuName));
-    return QString();
+    return {};
 }
 
 QString MythUIThemeHelper::GetMenuThemeDir()
@@ -187,7 +188,9 @@ QStringList MythUIThemeHelper::GetThemeSearchPath()
                 m_searchPaths.append(themedir + '/');
             }
             else
+            {
                 LOG(VB_GENERAL, LOG_ERR, LOC + QString("Could not find ui theme location: %1").arg(themedir));
+            }
         }
         else
         {
@@ -215,7 +218,7 @@ QList<ThemeInfo> MythUIThemeHelper::GetThemes(ThemeType Type)
     fileList.append(themeDirs.entryInfoList());
 
     QList<ThemeInfo> themeList;
-    for (const auto & theme : qAsConst(fileList))
+    for (const auto & theme : std::as_const(fileList))
     {
         if (theme.baseName() == "default" || theme.baseName() == "default-wide" ||
             theme.baseName() == "Slave")
@@ -247,7 +250,7 @@ bool MythUIThemeHelper::FindThemeFile(QString& Path)
     bool foundit = false;
     const QStringList searchpath = GetThemeSearchPath();
 
-    for (const auto & ii : qAsConst(searchpath))
+    for (const auto & ii : std::as_const(searchpath))
     {
         if (fi.isRelative())
             file = ii + fi.filePath();

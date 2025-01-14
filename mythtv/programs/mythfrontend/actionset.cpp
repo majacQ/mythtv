@@ -21,7 +21,7 @@
  */
 
 // MythTV headers
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 // MythContext headers
 #include "action.h"
@@ -32,15 +32,17 @@ const QString ActionSet::kGlobalContext = "Global";
 
 ActionSet::~ActionSet()
 {
-    while (!m_contexts.empty())
+    for (auto iter1 = m_contexts.begin();
+         iter1 != m_contexts.end();
+         iter1 = m_contexts.erase(iter1))
     {
-        ActionContext &ctx = *m_contexts.begin();
-        while (!ctx.empty())
+        ActionContext &ctx = iter1.value();
+        for (auto iter2 = ctx.begin();
+             iter2 != ctx.end();
+             iter2 = ctx.erase(iter2))
         {
-            delete *ctx.begin();
-            ctx.erase(ctx.begin());
+            delete iter2.value();
         }
-        m_contexts.erase(m_contexts.begin());
     }
 }
 
@@ -209,7 +211,7 @@ bool ActionSet::AddAction(const ActionID &id,
     (*cit).insert(id.GetAction(), a);
 
     const QStringList keylist = a->GetKeys();
-    for (const auto & key : qAsConst(keylist))
+    for (const auto & key : std::as_const(keylist))
         m_keyToActionMap[key].push_back(id);
 
     return true;
@@ -223,13 +225,13 @@ QString ActionSet::GetKeyString(const ActionID &id) const
 {
     ContextMap::const_iterator cit = m_contexts.find(id.GetContext());
     if (cit == m_contexts.end())
-        return QString();
+        return {};
 
     ActionContext::const_iterator it = (*cit).find(id.GetAction());
     if (it != (*cit).end())
         return (*it)->GetKeyString();
 
-    return QString();
+    return {};
 }
 
 /** \fn ActionSet::GetKeys(const ActionID&) const
@@ -256,7 +258,7 @@ QStringList ActionSet::GetContextKeys(const QString &context_name) const
     if (cit == m_contexts.end())
         return keys;
 
-    for (const auto *ctx : qAsConst(*cit))
+    for (const auto *ctx : std::as_const(*cit))
         keys += ctx->GetKeys();
     keys.sort();
     return keys;
@@ -283,13 +285,13 @@ QString ActionSet::GetDescription(const ActionID &id) const
 {
     ContextMap::const_iterator cit = m_contexts.find(id.GetContext());
     if (cit == m_contexts.end())
-        return QString();
+        return {};
 
     ActionContext::const_iterator it = (*cit).find(id.GetAction());
     if (it != (*cit).end())
         return (*it)->GetDescription();
 
-    return QString();
+    return {};
 }
 
 /** \fn ActionSet::GetAction(const ActionID&)

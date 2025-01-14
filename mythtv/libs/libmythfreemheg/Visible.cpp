@@ -18,9 +18,14 @@
    Or, point your browser to http://www.gnu.org/copyleft/gpl.html
 
 */
-#include "compat.h"
-
 #include "Visible.h"
+
+#include <array>
+#include <cstdio>
+
+#include <QRect>
+#include <QString>
+
 #include "Presentable.h"
 #include "Ingredients.h"
 #include "Root.h"
@@ -33,16 +38,17 @@
 
 
 // Copy constructor for cloning
-MHVisible::MHVisible(const MHVisible &ref): MHPresentable(ref)
+MHVisible::MHVisible(const MHVisible &ref)
+  : MHPresentable(ref),
+    m_nOriginalBoxWidth(ref.m_nOriginalBoxWidth),
+    m_nOriginalBoxHeight(ref.m_nOriginalBoxHeight),
+    m_nOriginalPosX(ref.m_nOriginalPosX),
+    m_nOriginalPosY(ref.m_nOriginalPosY),
+    m_nBoxWidth(ref.m_nBoxWidth),
+    m_nBoxHeight(ref.m_nBoxHeight),
+    m_nPosX(ref.m_nPosX),
+    m_nPosY(ref.m_nPosY)
 {
-    m_nOriginalBoxWidth = ref.m_nOriginalBoxWidth;
-    m_nOriginalBoxHeight = ref.m_nOriginalBoxHeight;
-    m_nOriginalPosX = ref.m_nOriginalPosX;
-    m_nOriginalPosY = ref.m_nOriginalPosY;
-    m_nBoxWidth = ref.m_nBoxWidth;
-    m_nBoxHeight = ref.m_nBoxHeight;
-    m_nPosX = ref.m_nPosX;
-    m_nPosY = ref.m_nPosY;
     m_originalPaletteRef.Copy(ref.m_originalPaletteRef);
 }
 
@@ -198,9 +204,9 @@ QRegion MHVisible::GetVisibleArea()
 {
     if (! m_fRunning)
     {
-        return QRegion();    // Not visible at all.
+        return {};    // Not visible at all.
     }
-    return QRegion(QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight));
+    return {QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight)};
 }
 
 // MHEG actions.
@@ -264,15 +270,16 @@ void MHVisible::PutBehind(const MHRoot *pRef, MHEngine *engine)
 }
 
 // Copy constructor for cloning
-MHLineArt::MHLineArt(const MHLineArt &ref): MHVisible(ref)
+MHLineArt::MHLineArt(const MHLineArt &ref)
+  : MHVisible(ref),
+    m_fBorderedBBox(ref.m_fBorderedBBox),
+    m_nOriginalLineWidth(ref.m_nOriginalLineWidth),
+    m_originalLineStyle(ref.m_originalLineStyle),
+    m_nLineWidth(ref.m_nLineWidth),
+    m_lineStyle(ref.m_lineStyle)
 {
-    m_fBorderedBBox = ref.m_fBorderedBBox;
-    m_nOriginalLineWidth = ref.m_nOriginalLineWidth;
-    m_originalLineStyle = ref.m_originalLineStyle;
     m_origLineColour.Copy(ref.m_origLineColour);
     m_origFillColour.Copy(ref.m_origFillColour);
-    m_nLineWidth = ref.m_nLineWidth;
-    m_lineStyle = ref.m_lineStyle;
 }
 
 void MHLineArt::Initialise(MHParseNode *p, MHEngine *engine)
@@ -431,7 +438,7 @@ QRegion MHRectangle::GetOpaqueArea()
 {
     if (! m_fRunning)
     {
-        return QRegion();
+        return {};
     }
 
     MHRgba lineColour = GetColour(m_lineColour);
@@ -441,20 +448,20 @@ QRegion MHRectangle::GetOpaqueArea()
     // ignore the special case where the surrounding box is opaque.
     if (fillColour.alpha() != 255)
     {
-        return QRegion();
+        return {};
     }
 
     if (lineColour.alpha() == 255 || m_nLineWidth == 0)
     {
-        return QRegion(QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight));
+        return {QRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nBoxHeight)};
     }
 
     if (m_nBoxWidth <= 2 * m_nLineWidth || m_nBoxHeight <= 2 * m_nLineWidth)
     {
-        return QRegion();
+        return {};
     }
-    return QRegion(QRect(m_nPosX + m_nLineWidth, m_nPosY + m_nLineWidth,
-                         m_nBoxWidth - m_nLineWidth * 2, m_nBoxHeight - m_nLineWidth * 2));
+    return {QRect(m_nPosX + m_nLineWidth, m_nPosY + m_nLineWidth,
+                  m_nBoxWidth - (m_nLineWidth * 2), m_nBoxHeight - (m_nLineWidth * 2))};
 }
 
 void MHRectangle::Display(MHEngine *engine)
@@ -484,14 +491,14 @@ void MHRectangle::Display(MHEngine *engine)
     else
     {
         d->DrawRect(m_nPosX + m_nLineWidth, m_nPosY + m_nLineWidth,
-                    m_nBoxWidth - m_nLineWidth * 2, m_nBoxHeight - m_nLineWidth * 2, fillColour);
+                    m_nBoxWidth - (m_nLineWidth * 2), m_nBoxHeight - (m_nLineWidth * 2), fillColour);
         // Draw the lines round the outside.  UK MHEG allows us to treat all line styles as solid.
         // It isn't clear when we draw dashed and dotted lines what colour to put in the spaces.
         d->DrawRect(m_nPosX, m_nPosY, m_nBoxWidth, m_nLineWidth, lineColour);
         d->DrawRect(m_nPosX, m_nPosY + m_nBoxHeight - m_nLineWidth, m_nBoxWidth, m_nLineWidth, lineColour);
-        d->DrawRect(m_nPosX, m_nPosY + m_nLineWidth, m_nLineWidth, m_nBoxHeight - m_nLineWidth * 2, lineColour);
+        d->DrawRect(m_nPosX, m_nPosY + m_nLineWidth, m_nLineWidth, m_nBoxHeight - (m_nLineWidth * 2), lineColour);
         d->DrawRect(m_nPosX + m_nBoxWidth - m_nLineWidth, m_nPosY + m_nLineWidth,
-                    m_nLineWidth, m_nBoxHeight - m_nLineWidth * 2, lineColour);
+                    m_nLineWidth, m_nBoxHeight - (m_nLineWidth * 2), lineColour);
     }
 }
 

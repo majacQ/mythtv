@@ -1,50 +1,43 @@
+// C++
+#include <utility>
 
-#include "scheduleeditor.h"
-
-// QT
+// Qt
 #include <QCoreApplication>
 #include <QHash>
 #include <QString>
-#include <utility>
 
-// Libmyth
-#include "mythcorecontext.h"
-#include "storagegroup.h"
-#include "programtypes.h"
-#include "recordingtypes.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythbase/programtypes.h"
+#include "libmythbase/recordingtypes.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythmetadata/mythuiimageresults.h"
+#include "libmythmetadata/mythuimetadataresults.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/metadataimagehelper.h"
+#include "libmythtv/playgroup.h"
+#include "libmythtv/recordingprofile.h"
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuicheckbox.h"
+#include "libmythui/mythuifilebrowser.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuispinbox.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuiutils.h"
 
-// Libmythtv
-#include "playgroup.h"
-#include "tv_play.h"
-#include "recordingprofile.h"
-#include "cardutil.h"
-
-// Libmythui
-#include "mythmainwindow.h"
-#include "mythuihelper.h"
-#include "mythuibuttonlist.h"
-#include "mythuibutton.h"
-#include "mythuitext.h"
-#include "mythuiimage.h"
-#include "mythuistatetype.h"
-#include "mythuispinbox.h"
-#include "mythuicheckbox.h"
-#include "mythdialogbox.h"
-#include "mythprogressdialog.h"
-#include "mythuifilebrowser.h"
-#include "mythuimetadataresults.h"
-#include "mythuiimageresults.h"
-#include "videoutils.h"
-#include "mythuiutils.h"
-#include "mythtypes.h"
-
-#include "metadataimagehelper.h"
-
-// Mythfrontend
+// MythFrontend
 #include "proglist.h"
+#include "scheduleeditor.h"
 #include "viewschedulediff.h"
-
-#define ENUM_TO_QVARIANT(a) QVariant::fromValue(static_cast<int>(a))
 
 //static const QString _Location = QObject::tr("Schedule Editor");
 
@@ -90,9 +83,9 @@ ScheduleEditor::ScheduleEditor(MythScreenStack *parent,
             SchedOptMixin(*this, nullptr), FilterOptMixin(*this, nullptr),
             StoreOptMixin(*this, nullptr), PostProcMixin(*this, nullptr),
             m_recInfo(new RecordingInfo(*recInfo)),
+            m_recordingRule(new RecordingRule()),
             m_player(player)
 {
-    m_recordingRule = new RecordingRule();
     m_recordingRule->m_recordID = m_recInfo->GetRecordingRuleID();
     SchedOptMixin::SetRule(m_recordingRule);
     FilterOptMixin::SetRule(m_recordingRule);
@@ -261,23 +254,23 @@ void ScheduleEditor::Load()
             {
                 new MythUIButtonListItem(m_rulesList,
                                      tr("Delete this recording rule template"),
-                                         ENUM_TO_QVARIANT(kNotRecording));
+                                         toVariant(kNotRecording));
             }
             new MythUIButtonListItem(m_rulesList,
                                      toDescription(kTemplateRecord),
-                                     ENUM_TO_QVARIANT(kTemplateRecord));
+                                     toVariant(kTemplateRecord));
         }
         else if (m_recordingRule->m_isOverride)
         {
             new MythUIButtonListItem(m_rulesList,
                                      tr("Record this showing with normal options"),
-                                     ENUM_TO_QVARIANT(kNotRecording));
+                                     toVariant(kNotRecording));
             new MythUIButtonListItem(m_rulesList,
                                      toDescription(kOverrideRecord),
-                                     ENUM_TO_QVARIANT(kOverrideRecord));
+                                     toVariant(kOverrideRecord));
             new MythUIButtonListItem(m_rulesList,
                                      toDescription(kDontRecord),
-                                     ENUM_TO_QVARIANT(kDontRecord));
+                                     toVariant(kDontRecord));
         }
         else
         {
@@ -286,39 +279,39 @@ void ScheduleEditor::Load()
 
             new MythUIButtonListItem(m_rulesList,
                                      toDescription(kNotRecording),
-                                     ENUM_TO_QVARIANT(kNotRecording));
+                                     toVariant(kNotRecording));
             if (hasChannel)
             {
                 new MythUIButtonListItem(m_rulesList,
                                          toDescription(kSingleRecord),
-                                         ENUM_TO_QVARIANT(kSingleRecord));
+                                         toVariant(kSingleRecord));
             }
             if (!isManual)
             {
                 new MythUIButtonListItem(m_rulesList,
                                          toDescription(kOneRecord),
-                                         ENUM_TO_QVARIANT(kOneRecord));
+                                         toVariant(kOneRecord));
             }
             if (!hasChannel || isManual)
             {
                 new MythUIButtonListItem(m_rulesList,
                                          toDescription(kWeeklyRecord),
-                                         ENUM_TO_QVARIANT(kWeeklyRecord));
+                                         toVariant(kWeeklyRecord));
                 new MythUIButtonListItem(m_rulesList,
                                          toDescription(kDailyRecord),
-                                         ENUM_TO_QVARIANT(kDailyRecord));
+                                         toVariant(kDailyRecord));
             }
             if (!isManual)
             {
                 new MythUIButtonListItem(m_rulesList,
                                          toDescription(kAllRecord),
-                                         ENUM_TO_QVARIANT(kAllRecord));
+                                         toVariant(kAllRecord));
             }
         }
 
         m_recordingRule->m_type = type;
     }
-    m_rulesList->SetValueByData(ENUM_TO_QVARIANT(m_recordingRule->m_type));
+    m_rulesList->SetValueByData(toVariant(m_recordingRule->m_type));
 
     InfoMap progMap;
 
@@ -522,7 +515,9 @@ void ScheduleEditor::ShowSchedInfo()
         popupStack->AddScreen(menuPopup);
     }
     else
+    {
         delete menuPopup;
+    }
 }
 
 bool ScheduleEditor::keyPressEvent(QKeyEvent *event)
@@ -536,7 +531,7 @@ bool ScheduleEditor::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -893,7 +888,7 @@ bool SchedEditChild::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -1249,14 +1244,12 @@ MetadataOptions::MetadataOptions(MythScreenStack *parent,
                                  ScheduleEditor &editor,
                                  RecordingRule &rule,
                                  RecordingInfo *recInfo)
-    : SchedEditChild(parent, "MetadataOptions", editor, rule, recInfo)
+    : SchedEditChild(parent, "MetadataOptions", editor, rule, recInfo),
+      m_metadataFactory(new MetadataFactory(this)),
+      m_imageLookup(new MetadataDownload(this)),
+      m_imageDownload(new MetadataImageDownload(this))
 {
     m_popupStack = GetMythMainWindow()->GetStack("popup stack");
-
-    m_metadataFactory = new MetadataFactory(this);
-    m_imageLookup = new MetadataDownload(this);
-    m_imageDownload = new MetadataImageDownload(this);
-
     m_artworkMap = GetArtwork(m_recordingRule->m_inetref,
                               m_recordingRule->m_season);
 }
@@ -1336,11 +1329,21 @@ bool MetadataOptions::Create()
 
     // Season
     m_seasonSpin->SetRange(0,9999,1,5);
-    m_seasonSpin->SetValue(m_recordingRule->m_season != 0 ? m_recordingRule->m_season : m_recInfo ? m_recInfo->GetSeason() : 0);
+    int season {0};
+    if (m_recordingRule->m_season != 0)
+        season = m_recordingRule->m_season;
+    else if (m_recInfo)
+        season = m_recInfo->GetSeason();
+    m_seasonSpin->SetValue(season);
 
     // Episode
     m_episodeSpin->SetRange(0,9999,1,10);
-    m_episodeSpin->SetValue(m_recordingRule->m_episode != 0 ? m_recordingRule->m_episode : m_recInfo ? m_recInfo->GetEpisode() : 0);
+    int episode {0};
+    if (m_recordingRule->m_episode != 0)
+        episode = m_recordingRule->m_episode;
+    else if (m_recInfo)
+        episode = m_recInfo->GetEpisode();
+    m_episodeSpin->SetValue(episode);
 
     if (m_coverart)
     {
@@ -1537,7 +1540,9 @@ void MetadataOptions::FindImagePopup(const QString &prefix,
         popupStack->AddScreen(fb);
     }
     else
+    {
         delete fb;
+    }
 }
 
 QStringList MetadataOptions::GetSupportedImageExtensionFilter()
@@ -1545,7 +1550,7 @@ QStringList MetadataOptions::GetSupportedImageExtensionFilter()
     QStringList ret;
 
     QList<QByteArray> exts = QImageReader::supportedImageFormats();
-    for (const auto & ext : qAsConst(exts))
+    for (const auto & ext : std::as_const(exts))
     {
         ret.append(QString("*.").append(ext));
     }
@@ -1956,6 +1961,11 @@ void SchedOptMixin::Create(bool *err)
     else
         UIUtilW::Assign(m_screen, m_dupscopeList, "dupscope");
 
+    if (m_other && !m_other->m_autoExtendList)
+        UIUtilE::Assign(m_screen, m_autoExtendList, "autoextend", err);
+    else
+        UIUtilW::Assign(m_screen, m_autoExtendList, "autoextend");
+
     if (m_other && !m_other->m_inputList)
         UIUtilE::Assign(m_screen, m_inputList, "input", err);
     else
@@ -2007,23 +2017,23 @@ void SchedOptMixin::Load(void)
 
             new MythUIButtonListItem(m_dupmethodList,
                                      toDescription(kDupCheckSubDesc),
-                                     ENUM_TO_QVARIANT(kDupCheckSubDesc));
+                                     toVariant(kDupCheckSubDesc));
             new MythUIButtonListItem(m_dupmethodList,
                                      toDescription(kDupCheckSubThenDesc),
-                                     ENUM_TO_QVARIANT(kDupCheckSubThenDesc));
+                                     toVariant(kDupCheckSubThenDesc));
             new MythUIButtonListItem(m_dupmethodList,
                                      toDescription(kDupCheckSub),
-                                     ENUM_TO_QVARIANT(kDupCheckSub));
+                                     toVariant(kDupCheckSub));
             new MythUIButtonListItem(m_dupmethodList,
                                      toDescription(kDupCheckDesc),
-                                     ENUM_TO_QVARIANT(kDupCheckDesc));
+                                     toVariant(kDupCheckDesc));
             new MythUIButtonListItem(m_dupmethodList,
                                      toDescription(kDupCheckNone),
-                                     ENUM_TO_QVARIANT(kDupCheckNone));
+                                     toVariant(kDupCheckNone));
 
             m_rule->m_dupMethod = dupMethod;
         }
-        m_dupmethodList->SetValueByData(ENUM_TO_QVARIANT(m_rule->m_dupMethod));
+        m_dupmethodList->SetValueByData(toVariant(m_rule->m_dupMethod));
     }
 
     // Duplicate Matching Scope
@@ -2033,22 +2043,41 @@ void SchedOptMixin::Load(void)
         {
             new MythUIButtonListItem(m_dupscopeList,
                                      toDescription(kDupsInAll),
-                                     ENUM_TO_QVARIANT(kDupsInAll));
+                                     toVariant(kDupsInAll));
             new MythUIButtonListItem(m_dupscopeList,
                                      toDescription(kDupsInRecorded),
-                                     ENUM_TO_QVARIANT(kDupsInRecorded));
+                                     toVariant(kDupsInRecorded));
             new MythUIButtonListItem(m_dupscopeList,
                                      toDescription(kDupsInOldRecorded),
-                                     ENUM_TO_QVARIANT(kDupsInOldRecorded));
+                                     toVariant(kDupsInOldRecorded));
             if (m_haveRepeats && !m_newrepeatList &&
                 (!m_other || !m_other->m_newrepeatList))
             {
+                int value = static_cast<int>(kDupsNewEpi|kDupsInAll);
                 new MythUIButtonListItem(m_dupscopeList,
                                  toDescription(kDupsNewEpi),
-                                 ENUM_TO_QVARIANT(kDupsNewEpi|kDupsInAll));
+                                 QVariant::fromValue(value));
             }
         }
-        m_dupscopeList->SetValueByData(ENUM_TO_QVARIANT(m_rule->m_dupIn));
+        m_dupscopeList->SetValueByData(toVariant(m_rule->m_dupIn));
+    }
+
+    // Auto Extend Services
+    if (m_autoExtendList)
+    {
+        if (!m_loaded)
+        {
+            new MythUIButtonListItem(m_autoExtendList,
+                                     toDescription(AutoExtendType::None),
+                                     toVariant(AutoExtendType::None));
+            new MythUIButtonListItem(m_autoExtendList,
+                                     toDescription(AutoExtendType::ESPN),
+                                     toVariant(AutoExtendType::ESPN));
+            new MythUIButtonListItem(m_autoExtendList,
+                                     toDescription(AutoExtendType::MLB),
+                                     toVariant(AutoExtendType::MLB));
+        }
+        m_autoExtendList->SetValueByData(toVariant(m_rule->m_autoExtend));
     }
 
     // Preferred Input
@@ -2071,10 +2100,15 @@ void SchedOptMixin::Load(void)
         m_inputList->SetValueByData(m_rule->m_prefInput);
     }
 
+    bool isOverride = (m_rule->m_type != kNotRecording &&
+                        m_rule->m_type != kDontRecord &&
+                        m_rule->m_type != kOverrideRecord);
+
     // Active/Disabled
     if (m_ruleactiveCheck)
     {
         m_ruleactiveCheck->SetCheckState(!m_rule->m_isInactive);
+        m_ruleactiveCheck->SetEnabled(isOverride);
     }
 
     // Record new and repeat
@@ -2084,13 +2118,14 @@ void SchedOptMixin::Load(void)
         {
             new MythUIButtonListItem(m_newrepeatList,
                                      QObject::tr("Record new and repeat "
-                                         "episodes"), ENUM_TO_QVARIANT(0));
+                                         "episodes"), toVariant(kDupsUnset));
             new MythUIButtonListItem(m_newrepeatList,
                                      QObject::tr("Record new episodes only"),
-                                     ENUM_TO_QVARIANT(kDupsNewEpi));
+                                     toVariant(kDupsNewEpi));
         }
-        m_newrepeatList->SetValueByData(ENUM_TO_QVARIANT
-                                        (m_rule->m_dupIn & kDupsNewEpi));
+        RecordingDupInType value =
+            (m_rule->m_dupIn & kDupsNewEpi)?kDupsNewEpi:kDupsUnset;
+        m_newrepeatList->SetValueByData(toVariant(value));
     }
 
     m_loaded = true;
@@ -2119,6 +2154,11 @@ void SchedOptMixin::Save(void)
         int val = ((m_rule->m_dupIn & ~mask) |
                    m_dupscopeList->GetDataValue().toInt());
         m_rule->m_dupIn = static_cast<RecordingDupInType>(val);
+    }
+    if (m_autoExtendList)
+    {
+        int val = m_autoExtendList->GetDataValue().toInt();
+        m_rule->m_autoExtend = static_cast<AutoExtendType>(val);
     }
     if (m_inputList)
         m_rule->m_prefInput = m_inputList->GetDataValue().toInt();
@@ -2160,8 +2200,11 @@ void SchedOptMixin::RuleChanged(void)
                                    m_rule->m_dupMethod != kDupCheckNone);
     if (m_inputList)
         m_inputList->SetEnabled(isScheduled);
+    bool isOverride = (m_rule->m_type != kNotRecording &&
+                        m_rule->m_type != kDontRecord &&
+                        m_rule->m_type != kOverrideRecord);
     if (m_ruleactiveCheck)
-        m_ruleactiveCheck->SetEnabled(isScheduled);
+        m_ruleactiveCheck->SetEnabled(isOverride);
     if (m_newrepeatList)
         m_newrepeatList->SetEnabled(isScheduled && !isSingle && m_haveRepeats);
 }
@@ -2216,8 +2259,8 @@ void FilterOptMixin::Load(void)
         {
             while (query.next())
             {
-                m_descriptions << QObject::tr(query.value(1).toString()
-                                              .toUtf8().constData());
+                m_descriptions << QCoreApplication::translate("SchedFilterEditor",
+                                    query.value(1).toString().toUtf8().constData());
             }
         }
         m_loaded = true;
@@ -2603,7 +2646,7 @@ void StoreOptMixin::SetRecGroup(int recgroupID, QString recgroup)
 
         QString label = QObject::tr("Include in the \"%1\" recording group");
         auto *item = new MythUIButtonListItem(m_recgroupList, label.arg(recgroup),
-                                              QVariant::fromValue(recgroup));
+                                              QVariant::fromValue(recgroupID));
         m_recgroupList->SetItemCurrent(item);
 
         if (m_other && m_other->m_recgroupList)

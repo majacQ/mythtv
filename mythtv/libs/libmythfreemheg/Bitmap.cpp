@@ -31,6 +31,7 @@
 #include "Logging.h"
 #include "freemheg.h"
 
+#include <algorithm>
 #include <cinttypes>
 
 /*
@@ -161,15 +162,7 @@ void MHBitmap::SetTransparency(int nTransPerCent, MHEngine * /*engine*/)
 {
     // The object transparency isn't actually used in UK MHEG.
     // We want a value between 0 and 255
-    if (nTransPerCent < 0)
-    {
-        nTransPerCent = 0;    // Make sure it's in the bounds
-    }
-
-    if (nTransPerCent > 100)
-    {
-        nTransPerCent = 100;
-    }
+    nTransPerCent = std::clamp(nTransPerCent, 0, 100);
 
     m_nTransparency = ((nTransPerCent * 255) + 50) / 100;
 }
@@ -217,7 +210,7 @@ QRegion MHBitmap::GetVisibleArea()
 {
     if (! m_fRunning || m_pContent == nullptr)
     {
-        return QRegion();
+        return {};
     }
 
     // The visible area is the intersection of the containing box with the, possibly offset,
@@ -236,7 +229,7 @@ QRegion MHBitmap::GetOpaqueArea()
     // and it's not a BBC MPEG I-frame background
     if (! m_fRunning || m_nContentHook == 5 || m_pContent == nullptr || ! m_pContent->IsOpaque())
     {
-        return QRegion();
+        return {};
     }
     return GetVisibleArea();
 }

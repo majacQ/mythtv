@@ -11,13 +11,14 @@
 #include <QUrl>
 
 // MythTV headers
-#include "channelinfo.h"
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mpegstreamdata.h" // for CryptStatus
-#include "remotefile.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/remotefile.h"
+
 #include "channelgroup.h"
+#include "channelinfo.h"
+#include "mpeg/mpegstreamdata.h" // for CryptStatus
 #include "sourceutil.h"
 
 ////////////////////////////////////////////////////////////////////////////
@@ -109,6 +110,7 @@ ChannelInfo &ChannelInfo::operator=(const ChannelInfo &other)
     m_useOnAirGuide     = other.m_useOnAirGuide;
     m_mplexId           = (other.m_mplexId == 32767) ? 0 : other.m_mplexId;
     m_serviceId         = other.m_serviceId;
+    m_serviceType       = other.m_serviceType;
     m_atscMajorChan     = other.m_atscMajorChan;
     m_atscMinorChan     = other.m_atscMinorChan;
     m_lastRecord        = other.m_lastRecord;
@@ -198,7 +200,7 @@ QString ChannelInfo::GetFormatted(ChannelFormat format) const
 
 
     if (tmp.isEmpty())
-        return QString();
+        return {};
 
     tmp.replace("<num>",  m_chanNum);
     tmp.replace("<sign>", m_callSign);
@@ -306,7 +308,7 @@ bool ChannelInsertInfo::SaveScan(uint scanid, uint transportid) const
         "    in_nit,             in_sdt,             is_encrypted,       "
         "    is_data_service,    is_audio_service,   is_opencable,       "
         "    could_be_opencable, decryption_status,  default_authority,  "
-        "    service_type "
+        "    service_type,       logical_channel,    simulcast_channel   "
         " )  "
         "VALUES "
         " ( :SCANID,            :TRANSPORTID,                            "
@@ -322,7 +324,7 @@ bool ChannelInsertInfo::SaveScan(uint scanid, uint transportid) const
         "   :IN_NIT,            :IN_SDT,            :IS_ENCRYPTED,       "
         "   :IS_DATA_SERVICE,   :IS_AUDIO_SERVICE,  :IS_OPENCABLE,       "
         "   :COULD_BE_OPENCABLE,:DECRYPTION_STATUS, :DEFAULT_AUTHORITY,  "
-        "   :SERVICE_TYPE "
+        "   :SERVICE_TYPE,      :LOGICAL_CHANNEL,   :SIMULCAST_CHANNEL   "
         " );");
 
     query.bindValue(":SCANID", scanid);
@@ -364,6 +366,8 @@ bool ChannelInsertInfo::SaveScan(uint scanid, uint transportid) const
     query.bindValue(":DECRYPTION_STATUS", m_decryptionStatus);
     query.bindValueNoNull(":DEFAULT_AUTHORITY", m_defaultAuthority);
     query.bindValue(":SERVICE_TYPE", m_serviceType);
+    query.bindValue(":LOGICAL_CHANNEL", m_logicalChannel);
+    query.bindValue(":SIMULCAST_CHANNEL", m_simulcastChannel);
 
     if (!query.exec())
     {
@@ -522,15 +526,15 @@ QString toRawString(ChannelVisibleType type)
     switch (type)
     {
         case kChannelAlwaysVisible:
-            return QString("Always Visible");
+            return {"Always Visible"};
         case kChannelVisible:
-            return QString("Visible");
+            return {"Visible"};
         case kChannelNotVisible:
-            return QString("Not Visible");
+            return {"Not Visible"};
         case kChannelNeverVisible:
-            return QString("Never Visible");
+            return {"Never Visible"};
         default:
-            return QString("Unknown");
+            return {"Unknown"};
     }
 }
 

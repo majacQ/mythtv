@@ -12,13 +12,6 @@
 #define MMX
 #endif
 
-#include "mythconfig.h"
-
-#undef HAVE_AV_CONFIG_H
-extern "C" {
-#include "libavcodec/avcodec.h"
-}
-
 // C++ std headers
 #include <cstdint>
 #include <ctime>
@@ -28,16 +21,22 @@ extern "C" {
 #include <QString>
 
 // MythTV headers
-#include "v4lrecorder.h"
-#include "format.h"
-#include "captions/cc608decoder.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythtv/captions/cc608decoder.h"
+#include "libmythtv/format.h"
+#include "libmythtv/mythframe.h"
+#include "libmythtv/mythtvexp.h"
+
 #include "lzo/lzo1x.h"
-#include "mthread.h"
-#include "mythframe.h"
+#include "v4lrecorder.h"
 
-#include "mythtvexp.h"
+#undef HAVE_AV_CONFIG_H
+extern "C" {
+#include "libavcodec/avcodec.h"
+}
 
-#define KEYFRAMEDIST   30
+static constexpr int8_t KEYFRAMEDIST { 30 };
 
 struct video_audio;
 class RTjpeg;
@@ -146,9 +145,7 @@ class MTV_PUBLIC NuppelVideoRecorder : public V4LRecorder, public CC608Input
 
     void ProbeV4L2(void);
     bool SetFormatV4L2(void);
-    void DoV4L1(void);
     void DoV4L2(void);
-    void DoMJPEG(void);
 
     void FormatTT(struct VBIData *vbidata) override; // V4LRecorder
     void FormatCC(uint code1, uint code2) override; // V4LRecorder
@@ -188,11 +185,10 @@ class MTV_PUBLIC NuppelVideoRecorder : public V4LRecorder, public CC608Input
 
     RTjpeg             *m_rtjc                   {nullptr};
 
-#define OUT_LEN (1024*1024 + 1024*1024 / 64 + 16 + 3)    
-    std::array<lzo_byte,OUT_LEN> m_out                {};
-#define HEAP_ALLOC(var,size) \
-    std::array<long,((size) + (sizeof(long) - 1)) / sizeof(long)>  __LZO_MMODEL var
-    HEAP_ALLOC(wrkmem, LZO1X_1_MEM_COMPRESS) {};
+    static constexpr size_t kOutLen {(1024*1024) + (1024*1024 / 64) + 16 + 3};
+    std::array<lzo_byte,kOutLen> m_out                {};
+
+    alignas(8) std::array<uint8_t,LZO1X_1_MEM_COMPRESS> __LZO_MMODEL m_wrkmem {0} ;
 
     std::vector<struct vidbuffertype *> m_videoBuffer;
     std::vector<struct audbuffertype *> m_audioBuffer;
@@ -249,7 +245,7 @@ class MTV_PUBLIC NuppelVideoRecorder : public V4LRecorder, public CC608Input
     
     bool                m_useAvCodec             {false};
 
-    AVCodec            *m_mpaVidCodec            {nullptr};
+    const AVCodec      *m_mpaVidCodec            {nullptr};
     AVCodecContext     *m_mpaVidCtx              {nullptr};
 
     int                 m_targetBitRate          {2200};

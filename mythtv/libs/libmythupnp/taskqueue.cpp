@@ -6,16 +6,17 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include "taskqueue.h"
-#include "mythlogging.h"
+#include <iostream>
 
 #include <QDateTime>
 
-#include <iostream>
+#include "libmythbase/mythlogging.h"
+
+#include "taskqueue.h"
 
 /////////////////////////////////////////////////////////////////////////////
 // Define Global instance 
@@ -38,9 +39,10 @@ long Task::m_nTaskCount = 0;
 //
 /////////////////////////////////////////////////////////////////////////////
 
-Task::Task(const QString &debugName) : ReferenceCounter(debugName)
+Task::Task(const QString &debugName)
+  : ReferenceCounter(debugName),
+    m_nTaskId(m_nTaskCount++)
 {
-    m_nTaskId = m_nTaskCount++;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -164,8 +166,8 @@ void TaskQueue::Clear( )
 
 /////////////////////////////////////////////////////////////////////////////
 /// \brief Add a task to run in the future.
-//  \param msec The number of milliseconds in the future to run this task
-//  \param pTask A pointer to the task.
+/// \param msec The number of milliseconds in the future to run this task
+/// \param pTask A pointer to the task.
 /////////////////////////////////////////////////////////////////////////////
 
 void TaskQueue::AddTask( std::chrono::milliseconds msec, Task *pTask )
@@ -177,8 +179,8 @@ void TaskQueue::AddTask( std::chrono::milliseconds msec, Task *pTask )
 
 /////////////////////////////////////////////////////////////////////////////
 /// \brief Add a task to run at a specific time.
-//  \param msec The time when this task should run
-//  \param pTask A pointer to the task.
+/// \param msec The time when this task should run
+/// \param pTask A pointer to the task.
 /////////////////////////////////////////////////////////////////////////////
 
 void TaskQueue::AddTaskAbsolute( TaskTime ttKey, Task *pTask )
@@ -194,7 +196,7 @@ void TaskQueue::AddTaskAbsolute( TaskTime ttKey, Task *pTask )
 
 /////////////////////////////////////////////////////////////////////////////
 /// \brief Add a task to run now.
-//  \param pTask A pointer to the task.
+/// \param pTask A pointer to the task.
 /////////////////////////////////////////////////////////////////////////////
 
 void TaskQueue::AddTask( Task *pTask )

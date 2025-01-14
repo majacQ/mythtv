@@ -1,29 +1,28 @@
 // MythTV
-#include "config.h"
-#include "mythlogging.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythavutil.h"
-#include "mythvideoprofile.h"
 #include "mythdeinterlacer.h"
+#include "mythvideoprofile.h"
+
+#include <algorithm>
+#include <thread>
 
 extern "C" {
 #include "libavfilter/buffersrc.h"
 #include "libavfilter/buffersink.h"
+#include "libavutil/cpu.h"
 }
 
-#if (HAVE_SSE2 && ARCH_X86_64)
-#include "libavutil/x86/cpu.h"
-#include <emmintrin.h>
-bool MythDeinterlacer::s_haveSIMD = av_get_cpu_flags() & AV_CPU_FLAG_SSE2;
+#include <QtGlobal>
+
+#ifdef Q_PROCESSOR_X86_64
+#   include <emmintrin.h>
+static const bool s_haveSIMD = true;
 #elif HAVE_INTRINSICS_NEON
-#if ARCH_AARCH64
-#include "libavutil/aarch64/cpu.h"
-#elif ARCH_ARM
-#include "libavutil/arm/cpu.h"
-#endif
-#include <arm_neon.h>
-bool MythDeinterlacer::s_haveSIMD = have_neon(av_get_cpu_flags());
-#else
-bool MythDeinterlacer::s_haveSIMD = false;
+#   include <arm_neon.h>
+static const bool s_haveSIMD = av_get_cpu_flags() & AV_CPU_FLAG_NEON;
 #endif
 
 #define LOC QString("MythDeint: ")
@@ -344,16 +343,19 @@ bool MythDeinterlacer::Initialise(MythVideoFrame *Frame, MythDeintType Deinterla
     uint threads = 1;
     if (Profile)
     {
-        threads = Profile->GetMaxCPUs();
-        if (threads < 1 || threads > 8)
-            threads = 1;
+        threads = std::clamp(Profile->GetMaxCPUs(), 1U, std::max(8U, std::thread::hardware_concurrency()));
     }
 
     AVFilterInOut* inputs = nullptr;
     AVFilterInOut* outputs = nullptr;
 
+    int parity {1};
+    if (m_autoFieldOrder)
+        parity = -1;
+    else if (TopFieldFirst)
+        parity = 0;
     auto deint = QString("yadif=mode=%1:parity=%2:threads=%3")
-        .arg(DoubleRate ? 1 : 0).arg(m_autoFieldOrder ? -1 : TopFieldFirst ? 0 : 1).arg(threads);
+        .arg(DoubleRate ? 1 : 0).arg(parity).arg(threads);
 
     auto graph = QString("buffer=video_size=%1x%2:pix_fmt=%3:time_base=1/1[in];[in]%4[out];[out] buffersink")
         .arg(m_width).arg(m_height).arg(m_inputFmt).arg(deint);
@@ -443,7 +445,7 @@ void MythDeinterlacer::OneField(MythVideoFrame *Frame, FrameScanType Scan)
 
     // Fake the frame height and stride to simulate a single field
     m_frame->height = Frame->m_height >> 1;
-    m_frame->interlaced_frame = 0;
+    m_frame->flags &= ~AV_FRAME_FLAG_INTERLACED;
     uint nbplanes = MythVideoFrame::GetNumPlanes(m_inputType);
     for (uint i = 0; i < nbplanes; i++)
     {
@@ -477,12 +479,12 @@ static inline void BlendC4x4(unsigned char *Src, int Width, int FirstRow, int La
     int dstpitch = DstPitch << 1;
     int maxrows  = LastRow - 3;
 
-    unsigned char *above   = Src + ((FirstRow - 1) * Pitch);
-    unsigned char *dest1   = Dst + (FirstRow * DstPitch);
+    unsigned char *above   = Src + ((FirstRow - 1) * static_cast<ptrdiff_t>(Pitch));
+    unsigned char *dest1   = Dst + (FirstRow * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *middle  = above + srcpitch;
     unsigned char *dest2   = dest1 + dstpitch;
     unsigned char *below   = middle + srcpitch;
-    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * DstPitch);
+    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *dstcpy2 = dstcpy1 + dstpitch;
 
     srcpitch <<= 1;
@@ -514,7 +516,7 @@ static inline void BlendC4x4(unsigned char *Src, int Width, int FirstRow, int La
     }
 }
 
-#if (HAVE_SSE2 && ARCH_X86_64) || HAVE_INTRINSICS_NEON
+#if defined(Q_PROCESSOR_X86_64) || HAVE_INTRINSICS_NEON
 // SIMD optimised version with 16x4 alignment
 static inline void BlendSIMD16x4(unsigned char *Src, int Width, int FirstRow, int LastRow, int Pitch,
                                  unsigned char *Dst, int DstPitch, bool Second)
@@ -523,12 +525,12 @@ static inline void BlendSIMD16x4(unsigned char *Src, int Width, int FirstRow, in
     int dstpitch = DstPitch << 1;
     int maxrows  = LastRow - 3;
 
-    unsigned char *above   = Src + ((FirstRow - 1) * Pitch);
-    unsigned char *dest1   = Dst + (FirstRow * DstPitch);
+    unsigned char *above   = Src + ((FirstRow - 1) * static_cast<ptrdiff_t>(Pitch));
+    unsigned char *dest1   = Dst + (FirstRow * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *middle  = above + srcpitch;
     unsigned char *dest2   = dest1 + dstpitch;
     unsigned char *below   = middle + srcpitch;
-    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * DstPitch);
+    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *dstcpy2 = dstcpy1 + dstpitch;
 
     srcpitch <<= 1;
@@ -547,7 +549,7 @@ static inline void BlendSIMD16x4(unsigned char *Src, int Width, int FirstRow, in
         }
         for (int col = 0; col < Width; col += 16)
         {
-#if (HAVE_SSE2 && ARCH_X86_64)
+#if defined(Q_PROCESSOR_X86_64)
             __m128i mid = *reinterpret_cast<__m128i*>(&middle[col]);
             *reinterpret_cast<__m128i*>(&dest1[col]) =
                     _mm_avg_epu8(*reinterpret_cast<__m128i*>(&above[col]), mid);
@@ -578,12 +580,12 @@ static inline void BlendSIMD8x4(unsigned char *Src, int Width, int FirstRow, int
     int dstpitch = DstPitch << 1;
     int maxrows  = LastRow - 3;
 
-    unsigned char *above   = Src + ((FirstRow - 1) * Pitch);
-    unsigned char *dest1   = Dst + (FirstRow * DstPitch);
+    unsigned char *above   = Src + ((FirstRow - 1) * static_cast<ptrdiff_t>(Pitch));
+    unsigned char *dest1   = Dst + (FirstRow * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *middle  = above + srcpitch;
     unsigned char *dest2   = dest1 + dstpitch;
     unsigned char *below   = middle + srcpitch;
-    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * DstPitch);
+    unsigned char *dstcpy1 = Dst + ((FirstRow - 1) * static_cast<ptrdiff_t>(DstPitch));
     unsigned char *dstcpy2 = dstcpy1 + dstpitch;
 
     srcpitch <<= 1;
@@ -602,7 +604,7 @@ static inline void BlendSIMD8x4(unsigned char *Src, int Width, int FirstRow, int
         }
         for (int col = 0; col < Width; col += 16)
         {
-#if (HAVE_SSE2 && ARCH_X86_64)
+#if defined(Q_PROCESSOR_X86_64)
             __m128i mid = *reinterpret_cast<__m128i*>(&middle[col]);
             *reinterpret_cast<__m128i*>(&dest1[col]) =
                     _mm_avg_epu16(*reinterpret_cast<__m128i*>(&above[col]), mid);
@@ -657,7 +659,7 @@ void MythDeinterlacer::Blend(MythVideoFrame *Frame, FrameScanType Scan)
         bool width4  = (src->m_pitches[plane] % 4) == 0;
         // N.B. all frames allocated by MythTV should have 16 byte alignment
         // for all planes
-#if (HAVE_SSE2 && ARCH_X86_64) || HAVE_INTRINSICS_NEON
+#if defined(Q_PROCESSOR_X86_64) || HAVE_INTRINSICS_NEON
         bool width16 = (src->m_pitches[plane] % 16) == 0;
         // profiling SSE2 suggests it is usually 4x faster - as expected
         if (s_haveSIMD && height4 && width16)

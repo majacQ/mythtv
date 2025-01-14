@@ -5,21 +5,21 @@
 
 #include <QString>
 
-#include <remotefile.h>
-#include <mythlogging.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/remotefile.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 }
 
-class RemoteAVFormatContext
+class ArchiveRemoteAVFormatContext
 {
   public:
-    explicit RemoteAVFormatContext(const QString &filename = "")
+    explicit ArchiveRemoteAVFormatContext(const QString &filename = "")
     { if (!filename.isEmpty()) Open(filename); }
 
-    ~RemoteAVFormatContext()
+    ~ArchiveRemoteAVFormatContext()
     {
         Close();
         if (m_buffer)
@@ -64,7 +64,7 @@ class RemoteAVFormatContext
             probe_data.buf_size = m_rf->Read(m_buffer, BUFFER_SIZE);
             probe_data.buf = m_buffer;
 
-            AVInputFormat *fmt = av_probe_input_format(&probe_data, 1);
+            const AVInputFormat *fmt = av_probe_input_format(&probe_data, 1);
             if (!fmt)
                 return false;
 
@@ -118,7 +118,7 @@ class RemoteAVFormatContext
         return rf->Read(buf, buf_size);
     }
 
-    static int WriteFunc(void */*opaque*/, uint8_t */*buf*/, int /*buf_size*/)
+    static int WriteFunc(void */*opaque*/, const uint8_t */*buf*/, int /*buf_size*/)
         {  return -1; }
 
     static int64_t SeekFunc(void *opaque, int64_t offset, int whence)

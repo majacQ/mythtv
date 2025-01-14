@@ -8,16 +8,16 @@
 #include <QMutex>
 #include <QSize>
 
-#include "referencecounter.h"
-#include "programinfo.h" // ProgramInfo
-#include "programtypes.h" // RecStatus::Type
-#include "inputinfo.h"
+#include "libmythbase/programinfo.h"  // ProgramInfo
+#include "libmythbase/programtypes.h" // RecStatus::Type
+#include "libmythbase/referencecounter.h"
+#include "libmythtv/inputinfo.h"
 
 class MythSocket;
 class MainServer;
 class ProgramInfo;
 
-enum PlaybackSockEventsMode {
+enum PlaybackSockEventsMode : std::uint8_t {
     kPBSEvents_None       = 0,
     kPBSEvents_Normal     = 1,
     kPBSEvents_NonSystem  = 2,
@@ -27,7 +27,7 @@ enum PlaybackSockEventsMode {
 class PlaybackSock : public ReferenceCounter
 {
   public:
-    PlaybackSock(MainServer *parent, MythSocket *lsock,
+    PlaybackSock(MythSocket *lsock,
                  QString lhostname, PlaybackSockEventsMode eventsMode);
 
     void SetDisconnected(void) { m_disconnected = true; }
@@ -128,8 +128,6 @@ class PlaybackSock : public ReferenceCounter
     QMutex                  m_sockLock;
 
     bool                    m_disconnected  {false};
-
-    MainServer             *m_parent        {nullptr};
 };
 
 #endif

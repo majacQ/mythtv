@@ -24,14 +24,15 @@
 #define AVCPARSER_H
 
 #include <array>
-#include <H2645Parser.h>
+
+#include "mpeg/H2645Parser.h"
 
 class AVCParser : public H2645Parser
 {
   public:
 
     // ITU-T Rec. H.264 table 7-1
-    enum NAL_unit_type {
+    enum NAL_unit_type : std::int8_t {
         UNKOWN          = -1,
         SLICE           = 1,   // 1 - 5 are VCL NAL units
         SLICE_DPA       = 2,
@@ -52,7 +53,7 @@ class AVCParser : public H2645Parser
         SLICE_EXTENSION = 20
     };
 
-    enum SEI_type {
+    enum SEI_type : std::uint8_t {
         SEI_TYPE_PIC_TIMING             = 1,
         SEI_FILLER_PAYLOAD              = 3,
         SEI_TYPE_USER_DATA_UNREGISTERED = 5,
@@ -114,9 +115,9 @@ class AVCParser : public H2645Parser
     uint pictureHeightCropped(void) const override;
 
     double frameRate(void) const;
-    void getFrameRate(FrameRate &result) const override;
+    MythAVRational getFrameRate() const override;
 
-    inline void set_AU_pending(void)
+    void set_AU_pending(void)
         {
             if (!m_auPending)
             {
@@ -131,10 +132,10 @@ class AVCParser : public H2645Parser
     void processRBSP(bool rbsp_complete);
 
   private:
-    bool decode_Header(GetBitContext *gb);
-    void decode_SPS(GetBitContext *gb);
-    void decode_PPS(GetBitContext * gb);
-    void decode_SEI(GetBitContext * gb);
+    bool decode_Header(BitReader& br);
+    void decode_SPS(BitReader& br);
+    void decode_PPS(BitReader& br);
+    void decode_SEI(BitReader& br);
 
 
     int        m_deltaPicOrderCntBottom      {0};

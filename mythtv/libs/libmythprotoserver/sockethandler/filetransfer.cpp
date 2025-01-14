@@ -2,29 +2,30 @@
 #include <QMutexLocker>
 #include <utility>
 
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/programinfo.h"
+#include "libmythtv/io/mythmediabuffer.h"
+
 #include "filetransfer.h"
-#include "io/mythmediabuffer.h"
-#include "programinfo.h"
-#include "mythsocket.h"
-#include "mythlogging.h"
 
 FileTransfer::FileTransfer(QString &filename, MythSocket *remote,
                            MythSocketManager *parent,
                            bool usereadahead, std::chrono::milliseconds timeout) :
     SocketHandler(remote, parent, ""),
+    m_pginfo(new ProgramInfo(filename)),
     m_rbuffer(MythMediaBuffer::Create(filename, false, usereadahead, timeout))
 {
-    m_pginfo = new ProgramInfo(filename);
     m_pginfo->MarkAsInUse(true, kFileTransferInUseID);
 }
 
 FileTransfer::FileTransfer(QString &filename, MythSocket *remote,
                            MythSocketManager *parent, bool write) :
     SocketHandler(remote, parent, ""),
+    m_pginfo(new ProgramInfo(filename)),
     m_rbuffer(MythMediaBuffer::Create(filename, write)),
     m_writemode(write)
 {
-    m_pginfo = new ProgramInfo(filename);
     m_pginfo->MarkAsInUse(true, kFileTransferInUseID);
 
     if (write)
@@ -123,7 +124,7 @@ int FileTransfer::RequestBlock(int size)
         m_readsUnlockedCond.wait(&m_lock, 100 /*ms*/);
 
     m_requestBuffer.resize(std::max((size_t)std::max(size,0) + 128, m_requestBuffer.size()));
-    char *buf = &m_requestBuffer[0];
+    char *buf = (m_requestBuffer).data();
     while (tot < size && !m_rbuffer->GetStopReads() && m_readthreadlive)
     {
         int request = size - tot;
@@ -161,7 +162,7 @@ int FileTransfer::WriteBlock(int size)
     QMutexLocker locker(&m_lock);
 
     m_requestBuffer.resize(std::max((size_t)std::max(size,0) + 128, m_requestBuffer.size()));
-    char *buf = &m_requestBuffer[0];
+    char *buf = (m_requestBuffer).data();
     int attempts = 0;
 
     while (tot < size)
@@ -254,7 +255,7 @@ uint64_t FileTransfer::GetFileSize(void)
 QString FileTransfer::GetFileName(void)
 {
     if (!m_rbuffer)
-        return QString();
+        return {};
 
     return m_rbuffer->GetFilename();
 }

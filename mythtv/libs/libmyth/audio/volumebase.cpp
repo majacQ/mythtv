@@ -7,9 +7,10 @@
 #include <QMutex>
 #include <QMutexLocker>
 
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythcorecontext.h"
+
 #include "volumebase.h"
-#include "mythcorecontext.h"
-#include "mthread.h"
 
 
 namespace {
@@ -43,7 +44,7 @@ class VolumeWriteBackThread : public MThread
             break;
         case kFinished:
             wait();
-            [[clang::fallthrough]];
+            [[fallthrough]];
         case kStopped:
             m_state = kRunning;
             start();
@@ -87,7 +88,7 @@ class VolumeWriteBackThread : public MThread
   private:
     static QMutex s_mutex;
     QMutex mutable m_mutex;
-    enum { kStopped, kRunning, kFinished } m_state {kStopped};
+    enum : std::uint8_t { kStopped, kRunning, kFinished } m_state {kStopped};
     int m_volume {-1};
 };
 
@@ -121,7 +122,7 @@ uint VolumeBase::GetCurrentVolume(void) const
 
 void VolumeBase::SetCurrentVolume(int value)
 {
-    m_volume = std::max(std::min(value, 100), 0);
+    m_volume = std::clamp(value, 0, 100);
     UpdateVolume();
     
     // Throttle Db writes

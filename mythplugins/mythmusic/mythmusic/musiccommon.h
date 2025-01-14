@@ -6,13 +6,14 @@
 #include <QObject>
 
 // mythtv
-#include <audiooutput.h>
-#include <mythscreentype.h>
-#include <musicmetadata.h>
+#include <libmyth/audio/audiooutput.h>
+#include <libmythbase/mythpluginexport.h>
+#include <libmythmetadata/musicmetadata.h>
+#include <libmythui/mythscreentype.h>
 
 // mythmusic
-#include "playlist.h"
 #include "musicplayer.h"
+#include "playlist.h"
 
 class Output;
 class Decoder;
@@ -27,7 +28,7 @@ class MythUIButton;
 class MythUICheckBox;
 class MythMenu;
 
-enum MusicView
+enum MusicView : std::uint8_t
 {
     MV_PLAYLIST,
     MV_LYRICS,
@@ -39,12 +40,13 @@ enum MusicView
     MV_ALBUMINFO,
     MV_TRACKINFO,
     MV_RADIO,
-    MV_MINIPLAYER
+    MV_MINIPLAYER,
+    MV_VISUALIZERINFO
 };
 
 Q_DECLARE_METATYPE(MusicView);
 
-class MPUBLIC MusicCommon : public MythScreenType
+class MPLUGIN_PUBLIC MusicCommon : public MythScreenType
 {
     Q_OBJECT
 
@@ -119,7 +121,7 @@ class MPUBLIC MusicCommon : public MythScreenType
     void updateShuffleMode(bool updateUIList = false);
 
     void changeVolume(bool up) const;
-    static void changeSpeed(bool up);
+    void changeSpeed(bool up);
     void toggleMute(void) const;
     static void toggleUpmix(void);
     static void showVolume(void);
@@ -136,7 +138,7 @@ class MPUBLIC MusicCommon : public MythScreenType
     bool restorePosition(int trackID);
 
     MythScreenType        *m_parentScreen       {nullptr};
-    MusicView              m_currentView;
+    MusicView              m_currentView        {};
 
     // visualiser stuff
     MainVisual            *m_mainvisual         {nullptr};
@@ -206,7 +208,7 @@ class MPUBLIC MusicCommon : public MythScreenType
     MythUIVideo           *m_visualizerVideo    {nullptr};
 };
 
-class MPUBLIC MythMusicVolumeDialog : public MythScreenType
+class MPLUGIN_PUBLIC MythMusicVolumeDialog : public MythScreenType
 {
     Q_OBJECT
   public:
@@ -231,7 +233,7 @@ class MPUBLIC MythMusicVolumeDialog : public MythScreenType
     MythUIProgressBar *m_volProgress  {nullptr};
 };
 
-class MPUBLIC TrackInfoDialog : public MythScreenType
+class MPLUGIN_PUBLIC TrackInfoDialog : public MythScreenType
 {
   Q_OBJECT
   public:

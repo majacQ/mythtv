@@ -7,12 +7,13 @@
 #include <QWidget>
 
 // MythTV headers
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/programinfo.h" // for COMM_DETECT*, GetPreferredSkipTypeCombinations()
+
+#include "cardutil.h"
 #include "channelsettings.h"
 #include "channelutil.h"
-#include "programinfo.h" // for COMM_DETECT*, GetPreferredSkipTypeCombinations()
-#include "mpegtables.h"
-#include "mythdirs.h"
-#include "cardutil.h"
+#include "mpeg/mpegtables.h"
 
 
 QString ChannelDBStorage::GetWhereClause(MSqlBindings &bindings) const
@@ -26,6 +27,30 @@ QString ChannelDBStorage::GetWhereClause(MSqlBindings &bindings) const
 }
 
 QString ChannelDBStorage::GetSetClause(MSqlBindings &bindings) const
+{
+    QString fieldTag = (":SET" + m_id.getField().toUpper());
+    QString nameTag = (":SET" + GetColumnName().toUpper());
+
+    QString query(m_id.getField() + " = " + fieldTag + ", " +
+                  GetColumnName() + " = " + nameTag);
+
+    bindings.insert(fieldTag, m_id.getValue());
+    bindings.insert(nameTag, m_user->GetDBValue());
+
+    return query;
+}
+
+QString IPTVChannelDBStorage::GetWhereClause(MSqlBindings &bindings) const
+{
+    QString fieldTag = (":WHERE" + m_id.getField().toUpper());
+    QString query(m_id.getField() + " = " + fieldTag);
+
+    bindings.insert(fieldTag, m_id.getValue());
+
+    return query;
+}
+
+QString IPTVChannelDBStorage::GetSetClause(MSqlBindings &bindings) const
 {
     QString fieldTag = (":SET" + m_id.getField().toUpper());
     QString nameTag = (":SET" + GetColumnName().toUpper());
@@ -145,7 +170,7 @@ ChannelTVFormat::ChannelTVFormat(const ChannelID &id) :
     addSelection(QCoreApplication::translate("(Common)", "Default"), "Default");
 
     QStringList list = GetFormats();
-    for (const QString& format : qAsConst(list))
+    for (const QString& format : std::as_const(list))
         addSelection(format);
 }
 
@@ -300,7 +325,7 @@ class XmltvID : public MythUIComboBoxSetting
 
             idList.sort();
 
-            for (const QString& idName : qAsConst(idList))
+            for (const QString& idName : std::as_const(idList))
                 addSelection(idName, idName);
         }
     }
@@ -334,7 +359,7 @@ class ServiceID : public MythUISpinBoxSetting
     QString getValue(void) const override // StandardSetting
     {
         if (StandardSetting::getValue().toInt() == -1)
-            return QString();
+            return {};
         return StandardSetting::getValue();
     }
 };
@@ -427,6 +452,23 @@ class OnAirGuide : public MythUICheckBoxSetting
         setHelpText(QCoreApplication::translate("(ChannelSettings)",
             "If enabled, guide information for this channel will be updated "
             "using 'Over-the-Air' program listings."));
+    }
+};
+
+/*****************************************************************************
+        Channel Options - IPTV
+ *****************************************************************************/
+class ChannelURL : public MythUITextEditSetting
+{
+  public:
+    explicit ChannelURL(const ChannelID &id) :
+        MythUITextEditSetting(new IPTVChannelDBStorage(this, id, "url"))
+    {
+        setLabel(QCoreApplication::translate("(ChannelSettings)", "URL"));
+        setHelpText(QCoreApplication::translate("(ChannelSettings)",
+            "URL for streaming of this channel. Used by the IPTV "
+            "capture card and obtained with an \"M3U Import\" or "
+            "with a \"HDHomeRun Channel Import\" loading of an XML file."));
     }
 };
 
@@ -529,7 +571,9 @@ ChannelOptionsCommon::ChannelOptionsCommon(const ChannelID &id,
         addChild(m_freqId);
     }
     else
+    {
         m_freqId = nullptr;
+    }
     addChild(new Callsign(id));
 
 
@@ -585,9 +629,8 @@ ChannelOptionsCommon::ChannelOptionsCommon(const ChannelID &id,
     }
 };
 
-void ChannelOptionsCommon::onAirGuideChanged(bool fValue)
+void ChannelOptionsCommon::onAirGuideChanged([[maybe_unused]] bool fValue)
 {
-    (void)fValue;
 }
 
 void ChannelOptionsCommon::sourceChanged(const QString& sourceid)
@@ -642,6 +685,16 @@ ChannelOptionsFilters::ChannelOptionsFilters(const ChannelID& id)
 
     addChild(new VideoFilters(id));
     addChild(new OutputFilters(id));
+}
+
+ChannelOptionsIPTV::ChannelOptionsIPTV(const ChannelID& id)
+{
+    setLabel(QCoreApplication::translate("(ChannelSettings)",
+                                         "Channel Options - IPTV"));
+
+    addChild(new Name(id));
+    addChild(new Channum(id));
+    addChild(new ChannelURL(id));
 }
 
 ChannelOptionsV4L::ChannelOptionsV4L(const ChannelID& id)
@@ -756,10 +809,9 @@ void ChannelOptionsRawTS::Save(void)
         if (!ok || (m_sids[i]->getValue().toUInt() == 0U))
             continue;
 
-        pid_cache.push_back(
-            pid_cache_item_t(
+        pid_cache.emplace_back(
                 pid, m_sids[i]->getValue().toUInt() | 0x10000 |
-                (m_pcrs[i]->getValue().toUInt() ? 0x200 : 0x0)));
+                (m_pcrs[i]->getValue().toUInt() ? 0x200 : 0x0));
     }
 
     ChannelUtil::SaveCachedPids(chanid, pid_cache, true /* delete_all */);

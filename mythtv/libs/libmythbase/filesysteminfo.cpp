@@ -2,12 +2,14 @@
 #include <cstdlib>
 #include "compat.h"
 
-#ifdef linux
+#include <QtGlobal>
+
+#ifdef __linux__
 #include <sys/vfs.h>
 #include <sys/sysinfo.h>
 #endif
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #include <mach/mach.h>
 #endif
 
@@ -24,11 +26,8 @@
 #include "filesysteminfo.h"
 #include "mythcoreutil.h"
 
-// for serialization
-#define INT_TO_LIST(x)       do { list << QString::number(x); } while (false)
-#define STR_TO_LIST(x)       do { list << (x); } while (false)
-
 // for deserialization
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define NEXT_STR()        do { if (it == listend)                    \
                                {                                     \
                                    LOG(VB_GENERAL, LOG_ALERT, listerror); \
@@ -36,11 +35,6 @@
                                    return false;                     \
                                }                                     \
                                ts = *it++; } while (false)
-#define INT_FROM_LIST(x)     do { NEXT_STR(); (x) = ts.toLongLong(); } while (false)
-#define ENUM_FROM_LIST(x, y) do { NEXT_STR(); (x) = ((y)ts.toInt()); } while (false)
-#define STR_FROM_LIST(x)     do { NEXT_STR(); (x) = ts; } while (false)
-
-#define LOC QString("FileSystemInfo: ")
 
 FileSystemInfo::FileSystemInfo(const FileSystemInfo &other)
 {
@@ -102,14 +96,14 @@ void FileSystemInfo::clear(void)
 
 bool FileSystemInfo::ToStringList(QStringList &list) const
 {
-    STR_TO_LIST(m_hostname);
-    STR_TO_LIST(m_path);
-    INT_TO_LIST(m_local);
-    INT_TO_LIST(m_fsid);
-    INT_TO_LIST(m_grpid);
-    INT_TO_LIST(m_blksize);
-    INT_TO_LIST(m_total);
-    INT_TO_LIST(m_used);
+    list << m_hostname;
+    list << m_path;
+    list << QString::number(m_local);
+    list << QString::number(m_fsid);
+    list << QString::number(m_grpid);
+    list << QString::number(m_blksize);
+    list << QString::number(m_total);
+    list << QString::number(m_used);
 
     return true;
 }
@@ -123,17 +117,17 @@ bool FileSystemInfo::FromStringList(const QStringList &slist)
 bool FileSystemInfo::FromStringList(QStringList::const_iterator &it,
                              const QStringList::const_iterator& listend)
 {
-    QString listerror = LOC + "FromStringList, not enough items in list.";
+    QString listerror = "FileSystemInfo: FromStringList, not enough items in list.";
     QString ts;
 
-    STR_FROM_LIST(m_hostname);
-    STR_FROM_LIST(m_path);
-    INT_FROM_LIST(m_local);
-    INT_FROM_LIST(m_fsid);
-    INT_FROM_LIST(m_grpid);
-    INT_FROM_LIST(m_blksize);
-    INT_FROM_LIST(m_total);
-    INT_FROM_LIST(m_used);
+    NEXT_STR(); m_hostname = ts;
+    NEXT_STR(); m_path     = ts;
+    NEXT_STR(); m_local    = ts.toLongLong();
+    NEXT_STR(); m_fsid     = ts.toLongLong();
+    NEXT_STR(); m_grpid    = ts.toLongLong();
+    NEXT_STR(); m_blksize  = ts.toLongLong();
+    NEXT_STR(); m_total    = ts.toLongLong();
+    NEXT_STR(); m_used     = ts.toLongLong();
 
     m_weight = 0;
 
@@ -233,13 +227,13 @@ void FileSystemInfo::PopulateFSProp(void)
 
     if (statfs(getPath().toLocal8Bit().constData(), &statbuf) == 0)
     {
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
         char *fstypename = statbuf.f_fstypename;
         if ((!strcmp(fstypename, "nfs")) ||     // NFS|FTP
             (!strcmp(fstypename, "afpfs")) ||   // AppleShare
             (!strcmp(fstypename, "smbfs")))     // SMB
                 setLocal(false);
-#elif __linux__
+#elif defined(__linux__)
         long fstype = statbuf.f_type;
         if ((fstype == 0x6969)  ||              // NFS
             (fstype == 0x517B)  ||              // SMB

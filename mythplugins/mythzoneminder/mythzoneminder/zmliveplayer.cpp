@@ -14,21 +14,19 @@
 
 // qt
 #include <QDateTime>
-#include <QTimer>
 #include <QKeyEvent>
+#include <QTimer>
 
-// myth
-#include <mythcontext.h>
-#include <mythuihelper.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/sizetliteral.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuihelper.h>
 
 // zoneminder
 #include "zmliveplayer.h"
 #include "zmclient.h"
-
-// the maximum image size we are ever likely to get from ZM
-#define MAX_IMAGE_SIZE  (2048*1536*3)
 
 static constexpr std::chrono::milliseconds FRAME_UPDATE_TIME { 100ms };  // try to update the frame 10 times a second
 
@@ -179,7 +177,9 @@ ZMLivePlayer::~ZMLivePlayer()
         delete m_players;
     }
     else
+    {
         gCoreContext->SaveSetting("ZoneMinderLiveCameras", "");
+    }
 
     delete m_frameTimer;
 
@@ -196,7 +196,7 @@ bool ZMLivePlayer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "PAUSE")
@@ -219,13 +219,17 @@ bool ZMLivePlayer::keyPressEvent(QKeyEvent *event)
         else if (action == "1" || action == "2" || action == "3" ||
                  action == "4" || action == "5" || action == "6" ||
                  action == "7" || action == "8" || action == "9")
+        {
             changePlayerMonitor(action.toInt());
+        }
         else if (action == "MENU")
         {
             ShowMenu();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -466,14 +470,14 @@ Player::~Player()
         free(m_rgba);
 }
 
-void Player::setMonitor(Monitor *mon)
+void Player::setMonitor(const Monitor *mon)
 {
     m_monitor = *mon;
 
     if (m_rgba)
         free(m_rgba);
 
-    m_rgba = (uchar *) malloc(m_monitor.width * m_monitor.height * 4);
+    m_rgba = (uchar *) malloc(4_UZ * m_monitor.width * m_monitor.height);
 }
 
 void Player::setWidgets(MythUIImage *image, MythUIText *status, MythUIText  *camera)

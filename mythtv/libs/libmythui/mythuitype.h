@@ -22,6 +22,7 @@ class MythFontProperties;
 
 class QEvent;
 class QKeyEvent;
+class QInputMethodEvent;
 class MythGestureEvent;
 class MythMediaEvent;
 
@@ -50,9 +51,9 @@ Q_DECLARE_METATYPE(MythUICallbackMFc)
 // Templates for determining if an argument is a "Pointer to a
 // Member Function"
 template<typename Func> struct FunctionPointerTest
-{ enum {MemberFunction = false, MemberConstFunction = false}; };
+{ enum : std::uint8_t {MemberFunction = false, MemberConstFunction = false}; };
 template<class Obj, typename Ret, typename... Args> struct FunctionPointerTest<Ret (Obj::*) (Args...)>
-{ enum {MemberFunction = true, MemberConstFunction = false}; };
+{ enum : std::uint8_t {MemberFunction = true, MemberConstFunction = false}; };
 template<class Obj, typename Ret, typename... Args> struct FunctionPointerTest<Ret (Obj::*) (Args...) const>
 { enum {MemberFunction = false, MemberConstFunction = true}; };
 
@@ -95,6 +96,7 @@ class MUI_PUBLIC MythUIType : public QObject, public XMLParseBase
     MythUIType *GetChildAt(QPoint p, bool recursive=true,
                            bool focusable=true) const;
     QList<MythUIType *> *GetAllChildren(void);
+    QList<MythUIType *> GetAllDescendants(void);
 
     void DeleteChild(const QString &name);
     void DeleteChild(MythUIType *child);
@@ -163,6 +165,7 @@ class MUI_PUBLIC MythUIType : public QObject, public XMLParseBase
     // This class is not based on QWidget, so this is a new function
     // and not an override of QWidget::keyPressEvent.
     virtual bool keyPressEvent(QKeyEvent *event);
+    virtual bool inputMethodEvent(QInputMethodEvent *event);
     virtual bool gestureEvent(MythGestureEvent *event);
     virtual void mediaEvent(MythMediaEvent *event);
 

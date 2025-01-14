@@ -1,14 +1,14 @@
+// Std
+#include <cstdio>
+
 // Qt
-#include <QScopedPointer>
 #include <QWriteLocker>
 
 // Mythtv
-#include "netstream.h"
-#include "mythlogging.h"
-#include "io/mythinteractivebuffer.h"
+#include "libmythbase/mythlogging.h"
 
-// Std
-#include <cstdio>
+#include "io/mythinteractivebuffer.h"
+#include "mheg/netstream.h"
 
 #define LOC QString("InteractiveBuf: ")
 
@@ -46,7 +46,7 @@ bool MythInteractiveBuffer::OpenFile(const QString &Url, std::chrono::millisecon
         return false;
     }
 
-    QScopedPointer<NetStream> stream(new NetStream(Url, NetStream::kNeverCache));
+    std::unique_ptr<NetStream> stream(new NetStream(Url, NetStream::kNeverCache));
     if (!stream || !stream->IsOpen())
     {
         LOG(VB_GENERAL, LOG_ERR, LOC + QString("Failed to open '%1'").arg(Url));
@@ -68,7 +68,7 @@ bool MythInteractiveBuffer::OpenFile(const QString &Url, std::chrono::millisecon
     m_filename = Url;
 
     delete m_stream;
-    m_stream = stream.take();
+    m_stream = stream.release();
 
     // The initial bitrate needs to be set with consideration for low bit rate
     // streams (e.g. radio @ 64Kbps) such that fill_min bytes are received

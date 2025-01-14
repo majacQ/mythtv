@@ -1,15 +1,19 @@
-// MythTV
-#include "mythvideoprofile.h"
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythvideoout.h"
-#include "mythmainwindow.h"
-#include "mythcodeccontext.h"
-
 // Std
 #include <algorithm>
 #include <utility>
+
+// Qt
+#include <QRegularExpression>
+
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+
+#include "decoders/mythcodeccontext.h"
+#include "mythvideoout.h"
+#include "mythvideoprofile.h"
 
 void MythVideoProfileItem::Clear()
 {
@@ -41,7 +45,7 @@ QString MythVideoProfileItem::Get(const QString &Value) const
     QMap<QString,QString>::const_iterator it = m_pref.find(Value);
     if (it != m_pref.end())
         return *it;
-    return QString();
+    return {};
 }
 
 uint MythVideoProfileItem::GetPriority() const
@@ -76,7 +80,7 @@ bool MythVideoProfileItem::CheckRange(const QString& Key,
     {
         cmp.replace(QLatin1String(" "),QLatin1String(""));
         QStringList exprList = cmp.split("&");
-        for (const QString& expr : qAsConst(exprList))
+        for (const QString& expr : std::as_const(exprList))
         {
             if (expr.isEmpty())
             {
@@ -85,7 +89,7 @@ bool MythVideoProfileItem::CheckRange(const QString& Key,
             }
             if (IValue > 0)
             {
-                QRegularExpression regex("^([0-9.]*)([^0-9.]*)([0-9.]*)$");
+                static const QRegularExpression regex("^([0-9.]*)([^0-9.]*)([0-9.]*)$");
                 QRegularExpressionMatch rmatch = regex.match(expr);
 
                 int value1 = 0;
@@ -109,7 +113,9 @@ bool MythVideoProfileItem::CheckRange(const QString& Key,
                         }
                     }
                     else
+                    {
                         value1 = capture1.toInt(&isOK);
+                    }
                 }
                 if (isOK)
                 {
@@ -131,7 +137,9 @@ bool MythVideoProfileItem::CheckRange(const QString& Key,
                             }
                         }
                         else
+                        {
                             value2 = capture3.toInt(&isOK);
+                        }
                     }
                 }
                 if (isOK)
@@ -175,10 +183,17 @@ bool MythVideoProfileItem::CheckRange(const QString& Key,
                             value2 = 99999999;
                         }
                         else if (oper == "<")
+                        {
                             value2 = value2 - 1;
+                        }
                         else if (oper == "<=")
+                        {
                             ;
-                        else isOK = false;
+                        }
+                        else
+                        {
+                            isOK = false;
+                        }
                         oper = "-";
                     }
                 }
@@ -212,11 +227,7 @@ bool MythVideoProfileItem::IsMatch(QSize Size, float Framerate, const QString &C
     QString cmp = Get(QString(COND_CODECS));
     if (!cmp.isEmpty())
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList clist = cmp.split(" ", QString::SkipEmptyParts);
-#else
         QStringList clist = cmp.split(" ", Qt::SkipEmptyParts);
-#endif
         if (!clist.empty())
             match &= clist.contains(CodecName,Qt::CaseInsensitive);
     }
@@ -292,7 +303,7 @@ MythVideoProfile::MythVideoProfile()
     QString cur_profile = GetDefaultProfileName(hostname);
     uint    groupid     = GetProfileGroupID(cur_profile, hostname);
 
-    vector<MythVideoProfileItem> items = LoadDB(groupid);
+    std::vector<MythVideoProfileItem> items = LoadDB(groupid);
     for (const auto & item : items)
     {
         if (auto [valid, error] = item.IsValid(); !valid)
@@ -368,7 +379,7 @@ QString MythVideoProfile::GetUpscaler() const
 
 uint MythVideoProfile::GetMaxCPUs() const
 {
-    return qBound(1U, GetPreference(PREF_CPUS).toUInt(), VIDEO_MAX_CPUS);
+    return std::clamp(GetPreference(PREF_CPUS).toUInt(), 1U, VIDEO_MAX_CPUS);
 }
 
 bool MythVideoProfile::IsSkipLoopEnabled() const
@@ -409,11 +420,11 @@ QString MythVideoProfile::GetPreference(const QString &Key) const
     QMutexLocker locker(&m_lock);
 
     if (Key.isEmpty())
-        return QString();
+        return {};
 
     QMap<QString,QString>::const_iterator it = m_currentPreferences.find(Key);
     if (it == m_currentPreferences.end())
-        return QString();
+        return {};
 
     return *it;
 }
@@ -425,7 +436,7 @@ void MythVideoProfile::SetPreference(const QString &Key, const QString &Value)
         m_currentPreferences[Key] = Value;
 }
 
-vector<MythVideoProfileItem>::const_iterator MythVideoProfile::FindMatch
+std::vector<MythVideoProfileItem>::const_iterator MythVideoProfile::FindMatch
     (const QSize Size, float Framerate, const QString &CodecName, const QStringList& DisallowedDecoders)
 {
     for (auto it = m_allowedPreferences.cbegin(); it != m_allowedPreferences.cend(); ++it)
@@ -454,7 +465,7 @@ void MythVideoProfile::LoadBestPreferences(const QSize Size, float Framerate,
     }
     else
     {
-        int threads = qBound(1, QThread::idealThreadCount(), 4);
+        int threads = std::clamp(QThread::idealThreadCount(), 1, 4);
         LOG(VB_PLAYBACK, LOG_INFO, LOC + "No useable profile. Using defaults.");
         SetPreference(PREF_DEC,    "ffmpeg");
         SetPreference(PREF_CPUS,   QString::number(threads));
@@ -487,10 +498,10 @@ void MythVideoProfile::LoadBestPreferences(const QSize Size, float Framerate,
         emit DeinterlacersChanged(deint1x, deint2x);
 }
 
-vector<MythVideoProfileItem> MythVideoProfile::LoadDB(uint GroupId)
+std::vector<MythVideoProfileItem> MythVideoProfile::LoadDB(uint GroupId)
 {
     MythVideoProfileItem tmp;
-    vector<MythVideoProfileItem> list;
+    std::vector<MythVideoProfileItem> list;
 
     MSqlQuery query(MSqlQuery::InitCon());
     query.prepare(
@@ -542,7 +553,7 @@ vector<MythVideoProfileItem> MythVideoProfile::LoadDB(uint GroupId)
     return list;
 }
 
-bool MythVideoProfile::DeleteDB(uint GroupId, const vector<MythVideoProfileItem> &Items)
+bool MythVideoProfile::DeleteDB(uint GroupId, const std::vector<MythVideoProfileItem> &Items)
 {
     MSqlQuery query(MSqlQuery::InitCon());
     query.prepare(
@@ -568,7 +579,7 @@ bool MythVideoProfile::DeleteDB(uint GroupId, const vector<MythVideoProfileItem>
     return ok;
 }
 
-bool MythVideoProfile::SaveDB(uint GroupId, vector<MythVideoProfileItem> &Items)
+bool MythVideoProfile::SaveDB(uint GroupId, std::vector<MythVideoProfileItem> &Items)
 {
     MSqlQuery query(MSqlQuery::InitCon());
 
@@ -625,7 +636,7 @@ bool MythVideoProfile::SaveDB(uint GroupId, vector<MythVideoProfileItem> &Items)
                 insert.bindValue(":GROUPID",   GroupId);
                 insert.bindValue(":PROFILEID", item.GetProfileID());
                 insert.bindValue(":VALUE",     lit.key());
-                insert.bindValue(":DATA", ((*lit).isNull()) ? "" : (*lit));
+                insert.bindValueNoNull(":DATA", *lit);
                 if (!insert.exec())
                 {
                     MythDB::DBError("save_profile 2", insert);
@@ -673,7 +684,7 @@ bool MythVideoProfile::SaveDB(uint GroupId, vector<MythVideoProfileItem> &Items)
                     update.bindValue(":GROUPID",   GroupId);
                     update.bindValue(":PROFILEID", item.GetProfileID());
                     update.bindValue(":VALUE",     lit.key());
-                    update.bindValue(":DATA", ((*lit).isNull()) ? "" : (*lit));
+                    update.bindValueNoNull(":DATA", *lit);
                     if (!update.exec())
                     {
                         MythDB::DBError("save_profile 5b", update);
@@ -687,7 +698,7 @@ bool MythVideoProfile::SaveDB(uint GroupId, vector<MythVideoProfileItem> &Items)
                 insert.bindValue(":GROUPID",   GroupId);
                 insert.bindValue(":PROFILEID", item.GetProfileID());
                 insert.bindValue(":VALUE",     lit.key());
-                insert.bindValue(":DATA", ((*lit).isNull()) ? "" : (*lit));
+                insert.bindValueNoNull(":DATA", *lit);
                 if (!insert.exec())
                 {
                     MythDB::DBError("save_profile 4", insert);
@@ -718,7 +729,7 @@ QStringList MythVideoProfile::GetDecoderNames()
 
 std::vector<std::pair<QString, QString> > MythVideoProfile::GetUpscalers()
 {
-    static vector<std::pair<QString,QString>> s_upscalers =
+    static std::vector<std::pair<QString,QString>> s_upscalers =
     {
         { tr("Default (Bilinear)"), UPSCALE_DEFAULT },
         { tr("Bicubic"), UPSCALE_HQ1 }
@@ -1258,7 +1269,7 @@ QStringList MythVideoProfile::GetFilteredRenderers(const QString &Decoder, const
     LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("Safe renderers for '%1': %2").arg(Decoder, safe.join(",")));
 
     QStringList filtered;
-    for (const auto& dec : qAsConst(safe))
+    for (const auto& dec : std::as_const(safe))
         if (Renderers.contains(dec))
             filtered.push_back(dec);
 
@@ -1272,7 +1283,7 @@ QString MythVideoProfile::GetBestVideoRenderer(const QStringList &Renderers)
 
     uint    toppriority = 0;
     QString toprenderer;
-    for (const auto& renderer : qAsConst(Renderers))
+    for (const auto& renderer : std::as_const(Renderers))
     {
         QMap<QString,uint>::const_iterator it = kSafeRendererPriority.constFind(renderer);
         if ((it != kSafeRendererPriority.constEnd()) && (*it >= toppriority))
@@ -1359,7 +1370,7 @@ void MythVideoProfile::InitStatics(bool Reinit /*= false*/)
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("Available GPU interops: %1")
         .arg(MythInteropGPU::TypesToString(interops)));
 
-    for (const QString& decoder : qAsConst(kSafeDecoders))
+    for (const QString& decoder : std::as_const(kSafeDecoders))
     {
         LOG(VB_GENERAL, LOG_INFO, LOC + QString("Decoder/render support: %1%2")
             .arg(decoder, -12).arg(GetVideoRenderers(decoder).join(" ")));

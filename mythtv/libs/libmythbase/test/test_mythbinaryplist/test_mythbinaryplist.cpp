@@ -26,11 +26,13 @@ static QDateTime test_datetime;
 // called at the beginning of these sets of tests
 void TestMythBinaryPList::initTestCase(void)
 {
-    QDir::setCurrent("libmythbase/test/test_mythbinaryplist");
-
     auto date = QDate(2021, 4, 21);
     auto time = QTime(13, 26, 03);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     test_datetime = QDateTime(date, time, Qt::UTC);
+#else
+    test_datetime = QDateTime(date, time, QTimeZone(QTimeZone::UTC));
+#endif
 }
 
 // called at the end of these sets of tests
@@ -51,7 +53,7 @@ void TestMythBinaryPList::cleanup(void)
 void TestMythBinaryPList::plist_read(void)
 {
     // Read the file
-    QFile file("info_mac_addl.bplist");
+    QFile file(QStringLiteral(TEST_SOURCE_DIR) + "/info_mac_addl.bplist");
     QCOMPARE(file.exists(), true);
     QCOMPARE(file.open(QIODevice::ReadOnly), true);
     QByteArray file_data = file.readAll();
@@ -103,7 +105,7 @@ void TestMythBinaryPList::plist_read(void)
 #endif
     auto list2 = variant2.value<QVariantList>();
     QCOMPARE(list2.size(), 5);
-    QVariant variant3 = list2[4];
+    const QVariant& variant3 = list2[4];
     QVERIFY(variant3.isValid());
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     QCOMPARE(variant3.type(), QVariant::String);

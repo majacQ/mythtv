@@ -1,28 +1,31 @@
+// C++
+#include <chrono> // for milliseconds
+#include <thread> // for sleep_for
+
+// Qt
 #include <QCoreApplication>
 #include <QKeyEvent>
 #include <QEvent>
 
-#include <chrono> // for milliseconds
-#include <thread> // for sleep_for
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+#include "libmythmetadata/videometadata.h"
+#include "libmythmetadata/videometadatalistmanager.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/tv_actions.h"        // for ACTION_JUMPCHAPTER, etc
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuiactions.h"     // for ACTION_HANDLEMEDIA, etc
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuistatetracker.h"
 
-#include "mythcorecontext.h"
-#include "keybindings.h"
-#include "mythlogging.h"
-#include "mythevent.h"
-#include "mythuistatetracker.h"
-#include "mythuihelper.h"
-#include "mythmainwindow.h"
-#include "tv_play.h"
-#include "recordinginfo.h"
-#include "mythversion.h"
-#include "mythuiactions.h"              // for ACTION_HANDLEMEDIA, etc
-#include "tv_actions.h"                 // for ACTION_JUMPCHAPTER, etc
-
-#include "videometadatalistmanager.h"
-#include "videometadata.h"
-#include "videoutils.h"
-
+// MythFrontend
 #include "frontend.h"
+#include "keybindings.h"
 
 #define LOC QString("Frontend API: ")
 
@@ -41,17 +44,17 @@ DTC::FrontendStatus* Frontend::GetStatus(void)
     return status;
 }
 
-bool Frontend::SendMessage(const QString &Message, uint _Timeout)
+bool Frontend::SendMessage(const QString &Message, uint TimeoutInt)
 {
     if (Message.isEmpty())
         return false;
 
     QStringList data;
-    auto Timeout = std::chrono::seconds(_Timeout);
+    auto Timeout = std::chrono::seconds(TimeoutInt);
     if (Timeout > 0s && Timeout < 1000s)
         data << QString::number(Timeout.count());
     qApp->postEvent(GetMythMainWindow(),
-                    new MythEvent(MythEvent::MythUserMessage, Message,
+                    new MythEvent(MythEvent::kMythUserMessage, Message,
                     data));
     return true;
 }
@@ -75,7 +78,7 @@ bool  Frontend::SendNotification(bool  Error,
     if (!GetNotificationCenter())
         return false;
 
-    ShowNotification(Error ? MythNotification::Error :
+    ShowNotification(Error ? MythNotification::kError :
                              MythNotification::TypeFromString(Type),
                      Message,
                      Origin.isNull() ? tr("FrontendServices") : Origin,
@@ -268,7 +271,7 @@ DTC::FrontendActionList* Frontend::GetActionList(const QString &lContext)
 
         // TODO can we keep the context data with QMap<QString, QStringList>?
         QStringList actions = contexts.value();
-        for (const QString & action : qAsConst(actions))
+        for (const QString & action : std::as_const(actions))
         {
             QStringList split = action.split(",");
             if (split.size() == 2)
@@ -312,13 +315,13 @@ void Frontend::InitialiseActions(void)
     {
         QStringList contexts = bindings->GetContexts();
         contexts.sort();
-        for (const QString & context : qAsConst(contexts))
+        for (const QString & context : std::as_const(contexts))
         {
             gActionDescriptions[context] = QStringList();
             QStringList ctx_actions = bindings->GetActions(context);
             ctx_actions.sort();
             gActionList += ctx_actions;
-            for (const QString & actions : qAsConst(ctx_actions))
+            for (const QString & actions : std::as_const(ctx_actions))
             {
                 QString desc = actions + "," +
                                bindings->GetActionDescription(context, actions);
@@ -330,7 +333,7 @@ void Frontend::InitialiseActions(void)
     gActionList.removeDuplicates();
     gActionList.sort();
 
-    for (const QString & actions : qAsConst(gActionList))
+    for (const QString & actions : std::as_const(gActionList))
         LOG(VB_GENERAL, LOG_DEBUG, LOC + QString("Action: %1").arg(actions));
 }
 
@@ -436,7 +439,9 @@ bool Frontend::SendKey(const QString &sKey)
             ret = true;
         }
     else
+    {
         msg = QString("SendKey: Unknown Key = '%1'").arg(sKey);
+    }
 
     if (ret)
     {

@@ -8,10 +8,10 @@
 // C/C++ includes
 #include <utility>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "tv_rec.h"
 #include "linuxfirewiredevice.h"
-#if USING_OSX_FIREWIRE
+#ifdef USING_OSX_FIREWIRE
 #include "darwinfirewiredevice.h"
 #endif
 #include "firewirechannel.h"

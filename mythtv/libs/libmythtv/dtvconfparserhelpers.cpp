@@ -2,7 +2,7 @@
 #include <QMutex>
 #include <QMap>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "dtvconfparserhelpers.h"
 
 bool DTVParamHelper::ParseParam(const QString &symbol, int &value,
@@ -25,7 +25,7 @@ QString DTVParamHelper::toString(const DTVParamStringVec &strings, int index)
         LOG(VB_GENERAL, LOG_ERR,
             "DTVParamHelper::toString() index out of bounds");
 
-        return QString();
+        return {};
     }
 
     return QString::fromStdString(strings[index]);

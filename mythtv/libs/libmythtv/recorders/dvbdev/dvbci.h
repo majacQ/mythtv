@@ -27,10 +27,7 @@
 #ifndef DVBCI_H
 #define DVBCI_H
 
-#if HAVE_STDINT_H
 #include <cstdint>
-#endif 
-
 #include <cstdio>
 #include <vector>
 
@@ -42,7 +39,7 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 
-#include "mythchrono.h"
+#include "libmythbase/mythchrono.h"
 
 using dvbca_vector = std::vector<uint16_t>;
 

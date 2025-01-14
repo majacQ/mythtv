@@ -1,0 +1,42 @@
+<form class="ml-3 mr-3" name="epgdownload" #epgdownload="ngForm">
+    <p-card class="m-5">
+        <ng-template pTemplate="title">
+            {{ 'settings.epgdownload.title' | translate }}
+        </ng-template>
+        <ng-template pTemplate="subtitle">
+        </ng-template>
+        <ng-template pTemplate="content">
+            <div class="grid">
+                <div class="mb-4 w-full">
+
+                    <div class="form-group field">
+                        <p-checkbox inputId="MythFillEnabled" [(ngModel)]="MythFillEnabled"
+                            name="MythFillEnabled" class="label mb-2 w-full" [binary]="true"
+                            label="{{ 'settings.epgdownload.enabled_label' | translate }}">
+                        </p-checkbox>
+                        <small class="block">
+                            {{ 'settings.epgdownload.enabled_desc' | translate }}
+                        </small>
+                    </div>
+
+                </div>
+
+            </div>
+        </ng-template>
+
+        <ng-template pTemplate="footer">
+            <div class="grid nogutter">
+                <div class="col-12">
+                    <p-message
+                        *ngIf="this.successCount > 0 && this.errorCount == 0 && !epgdownload.dirty"
+                        severity="success" text="{{ 'common.savesuccess' | translate }}"></p-message>
+                    <p-message *ngIf="this.errorCount > 0" severity="error"
+                        text="{{ 'common.networkfail' | translate }}"></p-message>
+                </div>
+                <p-button class="col pr-1" label="{{'common.save' | translate}}" icon="pi pi-save" iconPos="left"
+                    (onClick)="saveForm(); epgdownload.form.markAsPristine()"
+                    [disabled]="!epgdownload.dirty || setupService.schedulingEnabled"></p-button>
+            </div>
+        </ng-template>
+    </p-card>
+</form>

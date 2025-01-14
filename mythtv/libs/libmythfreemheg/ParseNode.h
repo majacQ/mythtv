@@ -38,7 +38,7 @@ class MHParseBase {
 class MHParseNode  
 {
   public:
-    enum NodeType { PNTagged, PNBool, PNInt, PNEnum, PNString, PNNull, PNSeq };
+    enum NodeType : std::uint8_t { PNTagged, PNBool, PNInt, PNEnum, PNString, PNNull, PNSeq };
   protected:
     explicit MHParseNode(enum NodeType nt): m_nNodeType(nt) {}
   public:
@@ -125,7 +125,7 @@ class MHPBool: public MHParseNode
 class MHPString: public MHParseNode
 {
   public:
-    explicit MHPString(MHOctetString &pSrc): MHParseNode(PNString) { m_Value.Copy(pSrc); }
+    explicit MHPString(const MHOctetString &pSrc): MHParseNode(PNString) { m_Value.Copy(pSrc); }
 
   public:
     MHOctetString m_Value;

@@ -98,7 +98,9 @@ bool PortChecker::checkPort(QString &host, int port, std::chrono::milliseconds t
             }
         }
         else
+        {
             return false;
+        }
     }
     QList<QNetworkInterface> cards = QNetworkInterface::allInterfaces();
 #ifndef _WIN32
@@ -136,7 +138,7 @@ bool PortChecker::checkPort(QString &host, int port, std::chrono::milliseconds t
                         // check that IPv6 is enabled on that interface
                         QList<QNetworkAddressEntry> addresses = card.addressEntries();
                         bool foundv6 = false;
-                        for (const auto& ae : qAsConst(addresses))
+                        for (const auto& ae : std::as_const(addresses))
                         {
                             if (ae.ip().protocol() == QAbstractSocket::IPv6Protocol)
                             {
@@ -179,7 +181,9 @@ bool PortChecker::checkPort(QString &host, int port, std::chrono::milliseconds t
             retryCount=0;
         }
         else
+        {
             retryCount++;
+        }
         // This retry count of 6 means 3 seconds of waiting for
         // connection before aborting and starting a new connection attempt.
         if (retryCount > 6)

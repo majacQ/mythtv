@@ -1,13 +1,14 @@
 #include <chrono> // for milliseconds
 #include <thread> // for sleep_for
 
-#include "tvremoteutil.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/programinfo.h"
+
 #include "cardutil.h"
 #include "inputinfo.h"
-#include "programinfo.h"
-#include "mythcorecontext.h"
 #include "remoteencoder.h"
 #include "tv_rec.h"
+#include "tvremoteutil.h"
 
 uint RemoteGetFlags(uint inputid)
 {
@@ -269,7 +270,7 @@ RemoteEncoder *RemoteRequestFreeRecorderFromList
     std::vector<InputInfo> inputs =
         RemoteRequestFreeInputInfo(excluded_input);
 
-    for (const auto & recorder : qAsConst(qualifiedRecorders))
+    for (const auto & recorder : std::as_const(qualifiedRecorders))
     {
         uint inputid = recorder.toUInt();
         auto sameinput = [inputid](const auto & input){ return input.m_inputId == inputid; };
@@ -451,7 +452,9 @@ bool RemoteGetRecordingStatus(
             dtEnd       = progInfo.GetScheduledEndTime();
         }
         else if (!list_inactive)
+        {
             continue;
+        }
 
         if (tunerList)
         {

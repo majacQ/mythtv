@@ -2,15 +2,15 @@
 #define MYTHDRMDEVICE_H
 
 // MythTV
-#include "mythlogging.h"
-#include "mythdisplay.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythdisplay.h"
 #if defined (USING_QTPRIVATEHEADERS)
-#include "mythcommandlineparser.h"
+#include "libmythbase/mythcommandlineparser.h"
 #endif
-#include "platforms/drm/mythdrmconnector.h"
-#include "platforms/drm/mythdrmencoder.h"
-#include "platforms/drm/mythdrmcrtc.h"
-#include "platforms/drm/mythdrmplane.h"
+#include "libmythui/platforms/drm/mythdrmconnector.h"
+#include "libmythui/platforms/drm/mythdrmencoder.h"
+#include "libmythui/platforms/drm/mythdrmcrtc.h"
+#include "libmythui/platforms/drm/mythdrmplane.h"
 
 // Std
 #include <memory>
@@ -19,7 +19,7 @@ using MythDRMPtr  = std::shared_ptr<class MythDRMDevice>;
 using MythAtomic  = std::tuple<uint32_t,uint32_t,uint64_t>;
 using MythAtomics = std::vector<MythAtomic>;
 
-#define DRM_QUIET "Shush"
+static constexpr const char* DRM_QUIET { "Shush" };
 
 class MUI_PUBLIC MythDRMDevice
 {
@@ -47,25 +47,19 @@ class MUI_PUBLIC MythDRMDevice
     static inline bool    s_mythDRMVideo     = qEnvironmentVariableIsSet("MYTHTV_DRM_VIDEO");
     static inline bool    s_planarRequested  = false;
     static inline bool    s_planarSetup      = false;
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    static inline QString s_mythDRMDevice    = QString(qgetenv("MYTHTV_DRM_DEVICE"));
-    static inline QString s_mythDRMConnector = QString(qgetenv("MYTHTV_DRM_CONNECTOR"));
-    static inline QString s_mythDRMVideoMode = QString(qgetenv("MYTHTV_DRM_MODE"));
-#else
     static inline QString s_mythDRMDevice    = qEnvironmentVariable("MYTHTV_DRM_DEVICE");
     static inline QString s_mythDRMConnector = qEnvironmentVariable("MYTHTV_DRM_CONNECTOR");
     static inline QString s_mythDRMVideoMode = qEnvironmentVariable("MYTHTV_DRM_MODE");
-#endif
     static MythDRMPtr FindDevice(bool NeedPlanes = true);
     static void SetupDRM      (const MythCommandLineParser& CmdLine);
     DRMPlane GetVideoPlane    () const;
     DRMPlane GetGUIPlane      () const;
-    bool     QueueAtomics     (const MythAtomics& Atomics);
+    bool     QueueAtomics     (const MythAtomics& Atomics) const;
     void     DisableVideoPlane();
     void     MainWindowReady  ();
 
   protected:
-    MythDRMDevice(const QString& Device, bool NeedPlanes);
+    MythDRMDevice(QString Device, bool NeedPlanes);
     MythDRMDevice(int Fd, uint32_t CrtcId, uint32_t ConnectorId, bool Atomic);
 
   private:
@@ -88,7 +82,7 @@ class MUI_PUBLIC MythDRMDevice
 
     bool       m_valid         { false };
     QScreen*   m_screen        { nullptr };
-    QString    m_deviceName    { };
+    QString    m_deviceName;
     bool       m_openedDevice  { true };
     int        m_fd            { -1 };
     bool       m_atomic        { false };
@@ -99,13 +93,13 @@ class MUI_PUBLIC MythDRMDevice
     DRMPlanes  m_planes;
     DRMConn    m_connector     { nullptr };
     DRMCrtc    m_crtc          { nullptr };
-    QSize      m_resolution    { };
-    QSize      m_physicalSize  { };
+    QSize      m_resolution;
+    QSize      m_physicalSize;
     double     m_refreshRate   { 0.0 };
     double     m_adjustedRefreshRate { 0.0 };
-    QString    m_serialNumber  { };
+    QString    m_serialNumber;
     LogLevel_t m_verbose       { LOG_INFO };
-    MythEDID   m_edid          { };
+    MythEDID   m_edid;
 };
 
 #endif

@@ -4,10 +4,10 @@
 #include <QObject>
 #include <QString>
 
-#include "mythcorecontext.h"
-#include "mythevent.h"
-#include "mythexp.h"
-#include "mythlogging.h"
+#include "libmyth/mythexp.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
 
 class MythContextPrivate;
 
@@ -51,16 +51,28 @@ class MPUBLIC MythContext
               bool disableAutoDiscovery = false,
               bool ignoreDB = false);
 
-    DatabaseParams GetDatabaseParams(void);
-    bool SaveDatabaseParams(const DatabaseParams &params);
+    bool SaveDatabaseParams(const DatabaseParams &params, bool force = false);
     bool saveSettingsCache(void);
 
     void SetDisableEventPopup(bool check);
+
+    enum WebOnlyStartup : std::uint8_t {
+        kWebOnlyNone = 0,
+        kWebOnlyDBSetup = 1,
+        kWebOnlyDBTimezone = 2,
+        kWebOnlyWebOnlyParm = 3,
+        kWebOnlyIPAddress = 4,
+        kWebOnlySchemaUpdate = 5
+    };
+
+    void setWebOnly(WebOnlyStartup w) {m_webOnly = w;}
+    WebOnlyStartup getWebOnly(void) {return m_webOnly;}
 
   private:
     Q_DISABLE_COPY(MythContext)
     MythContextPrivate *d {nullptr}; // NOLINT(readability-identifier-naming)
     QString             m_appBinaryVersion;
+    WebOnlyStartup      m_webOnly {kWebOnlyNone};
 };
 
 /// This global variable contains the MythContext instance for the application

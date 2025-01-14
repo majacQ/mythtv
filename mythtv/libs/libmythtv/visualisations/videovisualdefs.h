@@ -1,6 +1,7 @@
 #ifndef VIDEOVISUAL_DEFS_H
 #define VIDEOVISUAL_DEFS_H
 
+#include <algorithm>
 #include <cmath>
 
 class LogScale
@@ -9,11 +10,6 @@ class LogScale
     explicit LogScale(int maxscale = 0, int maxrange = 0)
     {
         setMax(maxscale, maxrange);
-    }
-
-   ~LogScale()
-    {
-        delete [] m_indices;
     }
 
     int scale() const { return m_s; }
@@ -27,17 +23,14 @@ class LogScale
         m_s = maxscale;
         m_r = maxrange;
 
-        delete [] m_indices;
-
         auto domain = (long double) maxscale;
         auto drange  = (long double) maxrange;
-        long double x  = 1.0;
-        long double dx = 1.0;
-        long double e4 = 1.0E-8;
+        long double x  = 1.0L;
+        long double dx = 1.0L;
+        long double e4 = 1.0E-8L;
 
-        m_indices = new int[maxrange];
-        for (int i = 0; i < maxrange; i++)
-            m_indices[i] = 0;
+        m_indices.clear();
+        m_indices.resize(maxrange, 0);
 
         // initialize log scale
         for (uint i = 0; i < 10000 && (std::abs(dx) > e4); i++)
@@ -53,10 +46,8 @@ class LogScale
         for (int i = 1; i < (int) domain; i++)
         {
             int scaled = (int) floor(0.5 + (alpha * log((double(i) + alpha) / alpha)));
-            if (scaled < 1)
-                scaled = 1;
-            if (m_indices[scaled - 1] < i)
-                m_indices[scaled - 1] = i;
+            scaled = std::max(scaled, 1);
+            m_indices[scaled - 1] = std::max(m_indices[scaled - 1], i);
         }
     }
 
@@ -67,7 +58,7 @@ class LogScale
 
 
   private:
-    int *m_indices {nullptr};
+    std::vector<int> m_indices;
     int  m_s       {0};
     int  m_r       {0};
 };
@@ -206,102 +197,4 @@ static inline void mono16_from_monopcm16(short *l,
     }
 }
 
-#ifdef FFTW3_SUPPORT
-
-#include <complex>
-extern "C" {
-#include <fftw3.h>
-#define myth_fftw_float double /* need to use different plan function to change */
-#define fftw_real myth_fftw_float
-#define myth_fftw_complex std::complex<myth_fftw_float>
-#if (myth_fftw_float == double)
-#define myth_fftw_complex_cast fftw_complex
-#elif (myth_fftw_float == float)
-#define myth_fftw_complex_cast fftwf_complex
-#endif
-}
-
-static inline void fast_short_set(short *p,
-                  short v,
-                  long c)
-{
-    while (c >= 4L) {
-    p[0] = v;
-    p[1] = v;
-    p[2] = v;
-    p[3] = v;
-    p += 4;
-    c -= 4L;
-    }
-
-    if (c > 0L) {
-    p[0] = v;
-    if (c > 1L) {
-        p[1] = v;
-        if (c > 2L) {
-        p[2] = v;
-        }
-    }
-    }
-}
-
-static inline void fast_real_set_from_short(fftw_real *d,
-                        const short *s,
-                        long c)
-{
-    while (c >= 4L) {
-    d[0] = fftw_real(s[0]);
-    d[1] = fftw_real(s[1]);
-    d[2] = fftw_real(s[2]);
-    d[3] = fftw_real(s[3]);
-    d += 4;
-    s += 4;
-    c -= 4L;
-    }
-
-    if (c > 0L) {
-    d[0] = fftw_real(s[0]);
-    if (c > 1L) {
-        d[1] = fftw_real(s[1]);
-        if (c > 2L) {
-        d[2] = fftw_real(s[2]);
-        }
-    }
-    }
-}
-
-static inline void fast_reals_set(fftw_real *p1,
-                  fftw_real *p2,
-                  fftw_real v,
-                  long c)
-{
-    while (c >= 4L) {
-    p1[0] = v;
-    p1[1] = v;
-    p1[2] = v;
-    p1[3] = v;
-    p2[0] = v;
-    p2[1] = v;
-    p2[2] = v;
-    p2[3] = v;
-    p1 += 4;
-    p2 += 4;
-    c -= 4L;
-    }
-
-    if (c > 0L) {
-    p1[0] = v;
-    p2[0] = v;
-    if (c > 1L) {
-        p1[1] = v;
-        p2[1] = v;
-        if (c > 2L) {
-        p1[2] = v;
-        p2[2] = v;
-        }
-    }
-    }
-}
-
-#endif // FFTW3_SUPPORT
 #endif // VIDEOVISUAL_DEFS_H

@@ -186,10 +186,12 @@ class MUI_PUBLIC MythUIImage : public MythUIType
 
     bool            m_showingRandomImage {false};
     QString         m_imageDirectory;
+    QStringList     m_imageList;
+    int             m_imageListIndex     {0};
 
     MythUIImagePrivate *d                {nullptr}; // NOLINT(readability-identifier-naming)
 
-    enum AnimationCycle {kCycleStart, kCycleReverse};
+    enum AnimationCycle : std::uint8_t {kCycleStart, kCycleReverse};
     AnimationCycle  m_animationCycle     {kCycleStart};
     bool            m_animationReverse   {false};
     bool            m_animatedImage      {false};

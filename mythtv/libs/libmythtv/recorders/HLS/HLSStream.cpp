@@ -1,8 +1,9 @@
 #include <unistd.h>
 
+#include <array>
 #include <utility>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 #include "HLSReader.h"
 #include "HLSStream.h"
@@ -71,9 +72,8 @@ bool HLSRecStream::DecodeData(MythSingleDownload& downloader,
                               const QByteArray& IV, const QString& keypath,
                               QByteArray& data, int64_t sequence)
 {
-    AESKeyMap::iterator Ikey;
-
-    if ((Ikey = m_aesKeys.find(keypath)) == m_aesKeys.end())
+    AESKeyMap::iterator Ikey = m_aesKeys.find(keypath);
+    if (Ikey == m_aesKeys.end())
     {
         auto* key = new AES_KEY;
         DownloadKey(downloader, keypath, key);
@@ -89,7 +89,7 @@ bool HLSRecStream::DecodeData(MythSingleDownload& downloader,
     /* Decrypt data using AES-128 */
     int aeslen = data.size() & ~0xf;
     std::array<uint8_t,AES_BLOCK_SIZE> iv {};
-    char *decrypted_data = new char[data.size()];
+    auto *decrypted_data = new uint8_t[data.size()];
     if (IV.isEmpty())
     {
         /*
@@ -110,12 +110,11 @@ bool HLSRecStream::DecodeData(MythSingleDownload& downloader,
         std::copy(IV.cbegin(), IV.cend(), iv.data());
     }
     AES_cbc_encrypt((unsigned char*)data.constData(),
-                    (unsigned char*)decrypted_data, aeslen,
+                    decrypted_data, aeslen,
                     *Ikey, iv.data(), AES_DECRYPT);
     std::copy(data.cbegin() + aeslen, data.cend(), decrypted_data + aeslen);
 
     // remove the PKCS#7 padding from the buffer
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int pad = decrypted_data[data.size()-1];
     if (pad <= 0 || pad > AES_BLOCK_SIZE)
     {
@@ -126,7 +125,7 @@ bool HLSRecStream::DecodeData(MythSingleDownload& downloader,
         return false;
     }
     aeslen = data.size() - pad;
-    data = QByteArray(decrypted_data, aeslen);
+    data = QByteArray(reinterpret_cast<char*>(decrypted_data), aeslen);
     delete[] decrypted_data;
 
     return true;
@@ -175,7 +174,11 @@ bool HLSRecStream::SetAESIV(QString line)
         // not even size, pad with front 0
         line.insert(2, QLatin1String("0"));
     }
-    int padding = std::max(0, AES_BLOCK_SIZE - (static_cast<int>(line.size()) - 2));
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+    int padding = std::max(0, AES_BLOCK_SIZE - (line.size() - 2));
+#else
+    int padding = std::max(0LL, AES_BLOCK_SIZE - (line.size() - 2));
+#endif
     QByteArray ba = QByteArray(padding, 0x0);
     ba.append(QByteArray::fromHex(QByteArray(line.toLatin1().constData() + 2)));
     m_aesIV = ba;

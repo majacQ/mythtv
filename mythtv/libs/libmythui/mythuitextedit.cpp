@@ -6,11 +6,12 @@
 #include <QChar>
 #include <QKeyEvent>
 #include <QDomDocument>
+#include <QInputMethodEvent>
 #include <Qt>
 
 // libmythbase headers
-#include "mythlogging.h"
-#include "mythdb.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
 
 // MythUI headers
 #include "mythpainter.h"
@@ -25,36 +26,16 @@
 #define LOC      QString("MythUITextEdit: ")
 
 MythUITextEdit::MythUITextEdit(MythUIType *parent, const QString &name)
-    : MythUIType(parent, name)
+    : MythUIType(parent, name),
+      m_message("")
 {
-    m_message = "";
-    m_filter = FilterNone;
-
-    m_isPassword = false;
-
-    m_blinkInterval = 0;
-    m_cursorBlinkRate = 40;
-
-    m_position = -1;
-
-    m_maxLength = 255;
-
-    m_backgroundState = nullptr;
-    m_cursorImage = nullptr;
-    m_text = nullptr;
-
-    m_keyboardPosition = VK_POSBELOWEDIT;
-
     connect(this, &MythUIType::TakingFocus, this, &MythUITextEdit::Select);
     connect(this, &MythUIType::LosingFocus, this, &MythUITextEdit::Deselect);
 
     m_canHaveFocus = true;
 
-    m_initialized = false;
-
     m_lastKeyPress.start();
-
-    m_composeKey = 0;
+    m_messageBak.clear();
 }
 
 void MythUITextEdit::Select()
@@ -99,7 +80,9 @@ void MythUITextEdit::Pulse(void)
         m_blinkInterval++;
     }
     else
+    {
         m_cursorImage->SetVisible(false);
+    }
 
     MythUIType::Pulse();
 }
@@ -227,7 +210,9 @@ void MythUITextEdit::SetText(const QString &text, bool moveCursor)
         m_text->SetText(obscured);
     }
     else
+    {
         m_text->SetText(m_message);
+    }
 
     if (moveCursor)
         MoveCursor(MoveEnd);
@@ -240,7 +225,7 @@ void MythUITextEdit::InsertText(const QString &text)
     if (!m_text)
         return;
 
-    for (auto c : qAsConst(text))
+    for (const auto& c : std::as_const(text))
         InsertCharacter(c);
 
     emit valueChanged();
@@ -275,6 +260,20 @@ bool MythUITextEdit::InsertCharacter(const QString &character)
     SetText(newmessage, false);
     MoveCursor(MoveRight);
 
+    return true;
+}
+
+// This is used for updating IME.
+bool MythUITextEdit::UpdateTmpString(const QString &str)
+{
+    if (!m_text)
+        return false;
+
+    if (str.isEmpty())
+        return false;
+    QString newmessage = m_message;
+    newmessage.append(str);
+    SetText(newmessage, false);
     return true;
 }
 
@@ -419,8 +418,54 @@ static void LoadDeadKeys(QMap<QPair<int, int>, int> &map)
     map[keyCombo(Qt::Key_Dead_Diaeresis,  Qt::Key_Y)] = Qt::Key_ydiaeresis;
 }
 
+bool MythUITextEdit::inputMethodEvent(QInputMethodEvent *event)
+{
+    // 1st test.
+    if (m_isPassword)
+        return false;
+
+    bool _bak = m_isIMEinput;
+    if (!m_isIMEinput && (event->commitString().isEmpty() || event->preeditString().isEmpty()))
+    {
+        m_isIMEinput = true;
+        m_messageBak = m_message;
+    }
+#if 0
+    printf("IME: %s->%s PREEDIT=\"%s\" COMMIT=\"%s\"\n"
+           , (_bak) ? "ON" : "OFF"
+           , (m_isIMEinput) ? "ON" : "OFF"
+           , event->preeditString().toUtf8().constData()
+           , event->commitString().toUtf8().constData());
+#endif
+    if (!event->commitString().isEmpty() && m_isIMEinput)
+    {
+        m_message = m_messageBak;
+        m_messageBak.clear();
+        InsertText(event->commitString());
+        m_isIMEinput = false;
+        return true; // commited
+    }
+    if (m_isIMEinput && !event->preeditString().isEmpty())
+    {
+        m_message = m_messageBak;
+        UpdateTmpString(event->preeditString());
+        return true; // preedited
+    }
+    if (m_isIMEinput && _bak)
+    { // Abort?
+        m_isIMEinput = false;
+        QString newmessage= m_messageBak;
+        m_messageBak.clear();
+        SetText(newmessage, true);
+        return true;
+    }
+    return true; // Not commited
+}
+
 bool MythUITextEdit::keyPressEvent(QKeyEvent *event)
 {
+    if (m_isIMEinput)    // Prefer IME then keyPress.
+         return true;
     m_lastKeyPress.restart();
 
     QStringList actions;
@@ -477,7 +522,7 @@ bool MythUITextEdit::keyPressEvent(QKeyEvent *event)
     for (int i = 0; i < actions.size() && !handled; i++)
     {
 
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "LEFT")
@@ -530,7 +575,9 @@ bool MythUITextEdit::keyPressEvent(QKeyEvent *event)
                 popupStack->AddScreen(kb);
             }
             else
+            {
                 delete kb;
+            }
         }
         else if (action == "CUT")
         {
@@ -545,7 +592,9 @@ bool MythUITextEdit::keyPressEvent(QKeyEvent *event)
             PasteTextFromClipboard();
         }
         else
+        {
             handled = false;
+        }
     }
 
     return handled;

@@ -11,14 +11,14 @@
 #include <QCoreApplication>
 
 // myth
-#include <mythcontext.h>
-#include <mythdirs.h>
-#include <mythuihelper.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuiimage.h>
-#include <mythuibuttonlist.h>
-#include <mythmainwindow.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
 #include "mythburn.h"
@@ -134,7 +134,7 @@ void DVDThemeSelector::getThemeList(void)
         filters << "*";
         QFileInfoList list = d.entryInfoList(filters, QDir::Dirs, QDir::Name);
 
-        for (const auto & fi : qAsConst(list))
+        for (const auto & fi : std::as_const(list))
         {
             if (QFile::exists(m_themeDir + fi.fileName() + "/preview.png"))
             {
@@ -145,8 +145,10 @@ void DVDThemeSelector::getThemeList(void)
         }
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR,
             "MythArchive:  Theme directory does not exist!");
+    }
 }
 
 void DVDThemeSelector::themeChanged(MythUIButtonListItem *item)
@@ -198,7 +200,9 @@ void DVDThemeSelector::themeChanged(MythUIButtonListItem *item)
                                 desc.toUtf8().constData()));
     }
     else
+    {
         m_themedescText->SetText(tr("No theme description file found!"));
+    }
 }
 
 QString DVDThemeSelector::loadFile(const QString &filename)

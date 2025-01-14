@@ -1,4 +1,5 @@
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include "vt.h"
 #include "lang.h"
@@ -109,14 +110,16 @@ conv2latin(unsigned char *p, int n, int lang)
 
     while (n--)
     {
-       int c = 0;
-       if (lang_char[c = *p])
+       int c = *p;
+       if (lang_char[c])
        {
            if (! gfx || (c & 0xa0) != 0x20)
                *p = lang_chars[lang + 1][lang_char[c]];
        }
        else if ((c & 0xe8) == 0)
+       {
            gfx = c & 0x10;
+       }
        p++;
     }
 }
@@ -134,11 +137,14 @@ add_enhance(struct enhance *eh, int dcode, std::array<unsigned int,13>& data)
 {
     if (dcode == eh->next_des)
     {
-       memcpy(eh->trip + dcode * 13, data.cbegin(), data.size() * sizeof(unsigned int));
+       memcpy(eh->trip + (static_cast<ptrdiff_t>(dcode) * 13),
+              data.cbegin(), data.size() * sizeof(unsigned int));
        eh->next_des++;
     }
     else
+    {
        eh->next_des = -1;
+    }
 }
 
 void
@@ -149,7 +155,7 @@ do_enhancements(struct enhance *eh, struct vt_page *vtp)
     if (eh->next_des < 1)
        return;
 
-    for (unsigned int *p = eh->trip, *e = p + eh->next_des * 13; p < e; p++)
+    for (unsigned int *p = eh->trip, *e = p + (static_cast<ptrdiff_t>(eh->next_des) * 13); p < e; p++)
     {
        if (*p % 2048 != 2047)
        {
@@ -192,7 +198,8 @@ do_enhancements(struct enhance *eh, struct vt_page *vtp)
            else
            {
                // row functions
-               if ((adr -= 40) == 0)
+               adr -= 40;
+               if (adr == 0)
                    adr = 24;
 
                switch (mode)

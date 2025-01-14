@@ -4,6 +4,8 @@
 #include "Bluray/mythbddecoder.h"
 #include "Bluray/mythbdplayer.h"
 
+#include "libmythbase/mythdate.h"
+
 // Std
 #include <unistd.h>
 
@@ -240,18 +242,18 @@ QString MythBDPlayer::GetTitleName(int Title) const
     if (Title >= 0 && Title < GetNumTitles())
     {
         // BD doesn't provide title names, so show title number and duration
-        QString timestr = MythFormatTime(GetTitleDuration(Title), "HH:mm:ss");
+        QString timestr = MythDate::formatTime(GetTitleDuration(Title), "HH:mm:ss");
         QString name = QString("%1 (%2)").arg(Title+1).arg(timestr);
         return name;
     }
-    return QString();
+    return {};
 }
 
 QString MythBDPlayer::GetAngleName(int Angle) const
 {
     if (Angle >= 1 && Angle <= GetNumAngles())
         return tr("Angle %1").arg(Angle);
-    return QString();
+    return {};
 }
 
 bool MythBDPlayer::SwitchTitle(int Title)

@@ -1,18 +1,20 @@
 #ifndef MYTHUIANIMATION_H
 #define MYTHUIANIMATION_H
 
-#include "mythchrono.h"
-#include "mythdate.h"
-#include "xmlparsebase.h"
 #include <QDateTime>
 #include <QVariantAnimation>
+
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythdate.h"
+#include "libmythui/xmlparsebase.h"
 
 class MythUIType;
 
 class UIEffects
 {
   public:
-    enum Centre { TopLeft, Top, TopRight,
+    enum Centre : std::uint8_t
+                { TopLeft, Top, TopRight,
                   Left, Middle, Right,
                   BottomLeft, Bottom, BottomRight };
 
@@ -20,16 +22,16 @@ class UIEffects
 
     QPointF GetCentre(const QRect rect, int xoff, int yoff) const
     {
-        float x = static_cast<float>(xoff) + static_cast<float>(rect.left());
-        float y = static_cast<float>(yoff) + static_cast<float>(rect.top());
+        qreal x = static_cast<qreal>(xoff) + rect.left();
+        qreal y = static_cast<qreal>(yoff) + rect.top();
         if (Middle == m_centre || Top == m_centre || Bottom == m_centre)
-            x += static_cast<float>(rect.width()) / 2.0F;
+            x += rect.width() / 2.0;
         if (Middle == m_centre || Left == m_centre || Right == m_centre)
-            y += static_cast<float>(rect.height()) / 2.0F;
+            y += rect.height() / 2.0;
         if (Right == m_centre || TopRight == m_centre || BottomRight == m_centre)
-            x += static_cast<float>(rect.width());
+            x += rect.width();
         if (Bottom == m_centre || BottomLeft == m_centre || BottomRight == m_centre)
-            y += static_cast<float>(rect.height());
+            y += rect.height();
         return {x, y};
     }
 
@@ -45,8 +47,8 @@ class UIEffects
 class MythUIAnimation : public QVariantAnimation, XMLParseBase
 {
   public:
-    enum Type    { Alpha, Position, Zoom, HorizontalZoom, VerticalZoom, Angle };
-    enum Trigger { AboutToHide, AboutToShow };
+    enum Type    : std::uint8_t { Alpha, Position, Zoom, HorizontalZoom, VerticalZoom, Angle };
+    enum Trigger : std::uint8_t { AboutToHide, AboutToShow };
 
     explicit MythUIAnimation(MythUIType* parent = nullptr,
                     Trigger trigger = AboutToShow, Type type = Alpha)

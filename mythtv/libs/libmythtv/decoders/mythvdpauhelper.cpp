@@ -1,8 +1,8 @@
 // MythTV
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "mythvideocolourspace.h"
 #include "mythvdpauhelper.h"
-#include "platforms/mythxdisplay.h" // always last
+#include "libmythui/platforms/mythxdisplay.h" // always last
 
 // Std
 #include <cmath>
@@ -13,6 +13,7 @@
 VdpStatus status; \
 bool ok = true;
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define CHECK_ST \
 ok &= (status == VDP_STATUS_OK); \
 if (!ok) \
@@ -24,6 +25,7 @@ if (!ok) \
 
 #define GET_PROC(FUNC_ID, PROC) \
 status = m_vdpGetProcAddress(m_device, FUNC_ID, reinterpret_cast<void **>(&(PROC))); CHECK_ST
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 VDPAUCodec::VDPAUCodec(MythCodecContext::CodecProfile Profile, QSize Size, uint32_t Macroblocks, uint32_t Level)
   : m_maxSize(Size),
@@ -70,7 +72,7 @@ bool MythVDPAUHelper::HaveVDPAU(bool Reinit /*=false*/)
     {
         LOG(VB_GENERAL, LOG_INFO, LOC + "Supported/available VDPAU decoders:");
         const VDPAUProfiles& profiles = MythVDPAUHelper::GetProfiles();
-        for (auto profile : qAsConst(profiles))
+        for (const auto& profile : std::as_const(profiles))
             LOG(VB_GENERAL, LOG_INFO, LOC +
                 MythCodecContext::GetProfileDescription(profile.first, profile.second.m_maxSize));
     }
@@ -166,11 +168,7 @@ const VDPAUProfiles& MythVDPAUHelper::GetProfiles(void)
         return MythCodecContext::NoProfile;
     };
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static VDPAUProfiles s_profiles;
 
@@ -192,8 +190,8 @@ const VDPAUProfiles& MythVDPAUHelper::GetProfiles(void)
         if (helper.ProfileCheck(profile, level, macros, width, height))
         {
             MythCodecContext::CodecProfile prof = VDPAUToMythProfile(profile);
-            s_profiles.push_back(VDPAUProfile(prof,
-                VDPAUCodec(prof, QSize(static_cast<int>(width), static_cast<int>(height)), macros, level)));
+            s_profiles.emplace_back(prof,
+                VDPAUCodec(prof, QSize(static_cast<int>(width), static_cast<int>(height)), macros, level));
         }
     }
 
@@ -204,8 +202,8 @@ const VDPAUProfiles& MythVDPAUHelper::GetProfiles(void)
             if (helper.ProfileCheck(profile, level, macros, width, height))
             {
                 MythCodecContext::CodecProfile prof = VDPAUToMythProfile(profile);
-                s_profiles.push_back(VDPAUProfile(prof,
-                    VDPAUCodec(prof, QSize(static_cast<int>(width), static_cast<int>(height)), macros, level)));
+                s_profiles.emplace_back(prof,
+                    VDPAUCodec(prof, QSize(static_cast<int>(width), static_cast<int>(height)), macros, level));
             }
         }
     }
@@ -220,7 +218,7 @@ void MythVDPAUHelper::GetDecoderList(QStringList &Decoders)
         return;
 
     Decoders.append("VDPAU:");
-    for (auto profile : qAsConst(profiles))
+    for (const auto& profile : std::as_const(profiles))
         if (profile.first != MythCodecContext::MJPEG)
             Decoders.append(MythCodecContext::GetProfileDescription(profile.first, profile.second.m_maxSize));
 }
@@ -237,9 +235,9 @@ static void vdpau_preemption_callback(VdpDevice /*unused*/, void* Opaque)
 */
 MythVDPAUHelper::MythVDPAUHelper(AVVDPAUDeviceContext* Context)
   : m_device(Context->device),
-    m_vdpGetProcAddress(Context->get_proc_address)
+    m_vdpGetProcAddress(Context->get_proc_address),
+    m_valid(InitProcs())
 {
-    m_valid = InitProcs();
     if (m_valid)
     {
         INIT_ST
@@ -256,17 +254,19 @@ static const char* DummyGetError(VdpStatus /*status*/)
 }
 
 MythVDPAUHelper::MythVDPAUHelper(void)
-  : m_createdDevice(true)
+  : m_display(MythXDisplay::OpenMythXDisplay(false)),
+    m_createdDevice(true)
 {
-    m_display = MythXDisplay::OpenMythXDisplay(false);
     if (!m_display)
         return;
 
     INIT_ST
     m_vdpGetErrorString = &DummyGetError;
-    XLOCK(m_display, status = vdp_device_create_x11(m_display->GetDisplay(),
-                                                    m_display->GetScreen(),
-                                                    &m_device, &m_vdpGetProcAddress));
+    m_display->Lock();
+    status = vdp_device_create_x11(m_display->GetDisplay(),
+                                   m_display->GetScreen(),
+                                   &m_device, &m_vdpGetProcAddress);
+    m_display->Unlock();
     CHECK_ST
     if (!ok)
     {
@@ -351,8 +351,8 @@ bool MythVDPAUHelper::CheckH264Decode(AVCodecContext *Context)
         return false;
 
     int mbs = static_cast<int>(ceil(static_cast<double>(Context->width) / 16.0));
-    if (!(mbs == 49  || mbs == 54  || mbs == 59 || mbs == 64 ||
-          mbs == 113 || mbs == 118 ||mbs == 123 || mbs == 128))
+    if (mbs != 49  && mbs != 54  && mbs != 59 && mbs != 64 &&
+        mbs != 113 && mbs != 118 &&mbs != 123 && mbs != 128)
     {
         return true;
     }

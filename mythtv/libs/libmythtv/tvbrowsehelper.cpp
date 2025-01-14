@@ -2,15 +2,16 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "mythcorecontext.h"
-#include "tvbrowsehelper.h"
-#include "playercontext.h"
-#include "remoteencoder.h"
-#include "recordinginfo.h"
-#include "channelutil.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "cardutil.h"
+#include "channelutil.h"
+#include "playercontext.h"
+#include "recordinginfo.h"
+#include "remoteencoder.h"
 #include "tv_play.h"
+#include "tvbrowsehelper.h"
 
 #define LOC QString("BrowseHelper: ")
 
@@ -53,8 +54,6 @@ void TVBrowseHelper::BrowseInit(std::chrono::seconds BrowseMaxForward, bool Brow
         m_dbChannumToChanids.insert(chan.m_chanNum,chan.m_chanId);
     }
 
-    m_dbAllVisibleChannels = ChannelUtil::GetChannels(0, true, "channum, callsign");
-    ChannelUtil::SortChannels(m_dbAllVisibleChannels, DBChannelOrdering, false);
     start();
 }
 
@@ -341,7 +340,7 @@ void TVBrowseHelper::GetNextProgramDB(BrowseDirection direction, InfoMap& Infoma
 
     if (chandir != -1)
     {
-        chanid = ChannelUtil::GetNextChannel(m_dbAllVisibleChannels,
+        chanid = ChannelUtil::GetNextChannel(m_dbAllChannels,
                                             chanid,
                                              0 /* mplexid_restriction */,
                                              0 /* chanid restriction */,
@@ -355,7 +354,8 @@ void TVBrowseHelper::GetNextProgramDB(BrowseDirection direction, InfoMap& Infoma
     Infomap["channum"] = m_dbChanidToChannum[chanid];
 
     QDateTime nowtime = MythDate::current();
-    QDateTime latesttime = nowtime.addSecs(6*60*60);
+    static constexpr int64_t kSixHours {6LL * 60 * 60};
+    QDateTime latesttime = nowtime.addSecs(kSixHours);
     QDateTime browsetime = MythDate::fromString(Infomap["dbstarttime"]);
 
     MSqlBindings bindings;

@@ -38,7 +38,7 @@ class Buffer : QObject
     Q_OBJECT
 
   public:
-    enum constants {MAX_QUEUE = 500};
+    static constexpr uint16_t kMaxQueue { 500 };
 
     explicit Buffer(MythExternControl * parent);
     ~Buffer(void) override = default;
@@ -77,8 +77,7 @@ class Commands : public QObject
 
   public:
     explicit Commands(MythExternControl * parent)
-        : m_parent(parent)
-        , m_apiVersion(-1) {}
+        : m_parent(parent) {}
     ~Commands(void) override = default;
     void Start(void) {
         m_thread = std::thread(&Commands::Run, this);
@@ -88,10 +87,11 @@ class Commands : public QObject
             m_thread.join();
     }
 
-    bool SendStatus(const QString & command, const QString & status);
-    bool SendStatus(const QString & command, const QString & serial,
-                    const QString & status);
-    bool ProcessCommand(const QString & cmd);
+    bool SendStatus(const QString & command,
+                    const QString & status,
+                    const QString & serial,
+                    const QString & response = "");
+    bool ProcessCommand(const QString & query);
 
   protected:
     void Run(void);
@@ -103,7 +103,7 @@ class Commands : public QObject
     void HasTuner(const QString & serial) const;
     void HasPictureAttributes(const QString & serial) const;
     void SetBlockSize(const QString & serial, int blksz);
-    void TuneChannel(const QString & serial, const QString & channum);
+    void TuneChannel(const QString & serial, const QVariantMap & args);
     void TuneStatus(const QString & serial);
     void LoadChannels(const QString & serial);
     void FirstChannel(const QString & serial);
@@ -113,8 +113,12 @@ class Commands : public QObject
   private:
     std::thread m_thread;
 
-    MythExternControl* m_parent;
-    int m_apiVersion;
+    size_t       m_repCmdCnt  { 0 };
+    QString      m_prevStatus;
+    QString      m_prevMsgBuf;
+
+    MythExternControl* m_parent { nullptr };
+    int m_apiVersion { -1 };
 };
 
 class MythExternControl : public QObject
@@ -147,7 +151,7 @@ class MythExternControl : public QObject
     void HasTuner(const QString & serial);
     void HasPictureAttributes(const QString & serial);
     void SetBlockSize(const QString & serial, int blksz);
-    void TuneChannel(const QString & serial, const QString & channum);
+    void TuneChannel(const QString & serial, const QVariantMap & args);
     void TuneStatus(const QString & serial);
     void LoadChannels(const QString & serial);
     void FirstChannel(const QString & serial);
@@ -157,8 +161,11 @@ class MythExternControl : public QObject
 
   public slots:
     void SetDescription(const QString & desc) { m_desc = desc; }
-    void SendMessage(const QString & cmd, const QString & serial,
-                     const QString & msg);
+    void SendMessage(const QString & command,
+                     const QString & serial,
+                     const QString & message,
+                     const QString & status = "");
+
     void ErrorMessage(const QString & msg);
     void Opened(void);
     void Done(void);

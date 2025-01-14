@@ -4,10 +4,11 @@
 #include <QDir>
 
 // MythTV
-#include "mythconfig.h"
-#include "mythlogging.h"
-#include "mythdb.h"
-#include "mythdirs.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythmainwindow.h"
 #include "mythinputdevicehandler.h"
 
@@ -111,9 +112,8 @@ void MythInputDeviceHandler::Start(void)
 #endif
 }
 
-void MythInputDeviceHandler::Stop(bool Finishing /* = true */)
+void MythInputDeviceHandler::Stop([[maybe_unused]] bool Finishing /* = true */)
 {
-    Q_UNUSED(Finishing) // depending on #ifdefs
     LOG(VB_GENERAL, LOG_INFO, LOC + "Stopping");
 
 #ifdef USING_LIBCEC
@@ -176,12 +176,10 @@ void MythInputDeviceHandler::Event(QEvent *Event) const
 #endif
 }
 
-void MythInputDeviceHandler::Action(const QString &Action)
+void MythInputDeviceHandler::Action([[maybe_unused]] const QString &Action)
 {
 #ifdef USING_LIBCEC
     m_cecAdapter.Action(Action);
-#else
-    (void) Action;
 #endif
 }
 
@@ -207,10 +205,8 @@ void MythInputDeviceHandler::MainWindowReady(void)
 #endif
 }
 
-void MythInputDeviceHandler::customEvent(QEvent* Event)
+void MythInputDeviceHandler::customEvent([[maybe_unused]] QEvent* Event)
 {
-    Q_UNUSED(Event) // depending on #ifdefs
-
     if (m_ignoreKeys)
         return;
 

@@ -1,13 +1,15 @@
 #ifndef MINIPLAYER_H_
 #define MINIPLAYER_H_
 
-#include <mythscreentype.h>
+// MythTV
+#include <libmythbase/mythpluginexport.h>
+#include <libmythui/mythscreentype.h>
 
 #include "musiccommon.h"
 
 class QTimer;
 
-class MPUBLIC MiniPlayer : public MusicCommon
+class MPLUGIN_PUBLIC MiniPlayer : public MusicCommon
 {
   Q_OBJECT
 

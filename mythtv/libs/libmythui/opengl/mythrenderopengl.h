@@ -2,6 +2,7 @@
 #define MYTHRENDER_OPENGL_H_
 
 // C++
+#include <array>
 #include <vector>
 
 // Qt
@@ -24,23 +25,19 @@
 #include <QtOpenGL/QOpenGLDebugLogger>
 #endif
 #include <QHash>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QMatrix4x4>
 #include <QStack>
 
 // MythTV
-#include "mythuiexp.h"
-#include "mythlogging.h"
-#include "mythrender_base.h"
-#include "mythrenderopengldefs.h"
-#include "mythuianimation.h"
-#include "mythegl.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythuiexp.h"
+#include "libmythui/mythrender_base.h"
+#include "libmythui/mythuianimation.h"
+#include "libmythui/opengl/mythegl.h"
+#include "libmythui/opengl/mythrenderopengldefs.h"
 
-enum GLFeatures
+enum GLFeatures : std::uint16_t
 {
     kGLFeatNone        = 0x0000,
     kGLBufferMap       = 0x0001,
@@ -54,7 +51,7 @@ enum GLFeatures
     kGLGeometryShaders = 0x0100
 };
 
-#define TEX_OFFSET 8
+static constexpr size_t TEX_OFFSET { 8 };
 
 class MUI_PUBLIC MythGLTexture
 {
@@ -84,7 +81,7 @@ class MUI_PUBLIC MythGLTexture
     Q_DISABLE_COPY(MythGLTexture)
 };
 
-enum DefaultShaders
+enum DefaultShaders : std::uint8_t
 {
     kShaderSimple  = 0,
     kShaderDefault,
@@ -129,7 +126,7 @@ class MUI_PUBLIC MythRenderOpenGL : public QOpenGLContext, public QOpenGLFunctio
     QFunctionPointer GetProcAddress(const QString &Proc) const;
     uint64_t GetSwapCount();
 
-    static const GLuint kVertexSize;
+    static constexpr GLuint kVertexSize { 16 * sizeof(GLfloat) };
     QOpenGLBuffer* CreateVBO(int Size, bool Release = true);
 
     MythGLTexture* CreateTextureFromQImage(QImage *Image);
@@ -168,7 +165,8 @@ class MUI_PUBLIC MythRenderOpenGL : public QOpenGLContext, public QOpenGLFunctio
                         QRect Area, int CornerRadius,
                         const QBrush &FillBrush, const QPen &LinePen, int Alpha);
     void  ClearRect(QOpenGLFramebufferObject *Target, QRect Area, int Color, int Alpha);
-
+    void  DrawProcedural(QRect Area, int Alpha, QOpenGLFramebufferObject* Target,
+                         QOpenGLShaderProgram* Program, float TimeVal);
     std::tuple<int,int,int> GetGPUMemory();
 
   public slots:
@@ -218,11 +216,7 @@ class MUI_PUBLIC MythRenderOpenGL : public QOpenGLContext, public QOpenGLFunctio
     QList<uint64_t>              m_vboExpiry;
 
     // Locking
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex     m_lock { QMutex::Recursive };
-#else
     QRecursiveMutex  m_lock;
-#endif
     int        m_lockLevel { 0 };
 
     // profile

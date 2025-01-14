@@ -23,61 +23,24 @@
 #ifndef H2645PARSER_H
 #define H2645PARSER_H
 
-// OMG this is a hack.  Buried several layers down in FFmpeg includes
-// is an include of unistd.h that using GCC will foricibly redefine
-// NULL back to the wrong value.  (Maybe just on ARM?)  Include
-// unistd.h up front so that the subsequent inclusions will be
-// skipped, and then define NULL to the right value.
-#include <unistd.h>
-#undef NULL
-#define NULL nullptr
+#include <cstdint>
 
 #include <QString>
-#include <cstdint>
-#include "mythconfig.h"
-#include "compat.h" // for uint on Darwin, MinGW
-#include "recorders/recorderbase.h" // for ScanType
 
-#if 1
-#include "mythlogging.h"
-#endif
+#include "libmythbase/compat.h" // for uint on Darwin, MinGW
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
 
-#ifndef INT_BIT
-#define INT_BIT (CHAR_BIT * sizeof(int))
-#endif
+#include "libmythtv/mythavrational.h"
+#include "libmythtv/scantype.h"
 
-// copied from libavutil/internal.h
-extern "C" {
-// Grr. NULL keeps getting redefined back to 0
-#undef NULL
-#define NULL nullptr
-#include "libavutil/common.h" // for AV_GCC_VERSION_AT_LEAST()
-}
-#ifndef av_alias
-#if HAVE_ATTRIBUTE_MAY_ALIAS && (!defined(__ICC) || __ICC > 1110) && AV_GCC_VERSION_AT_LEAST(3,3)
-#   define av_alias __attribute__((may_alias))
-#else
-#   define av_alias
-#endif
-#endif
-
-extern "C" {
-// Grr. NULL keeps getting redefined back to 0
-#undef NULL
-#define NULL nullptr
-#include "libavcodec/get_bits.h"
-}
-
-class FrameRate;
-enum class SCAN_t : uint8_t;
+class BitReader;
 
 class H2645Parser {
   public:
-    enum {
-        MAX_SLICE_HEADER_SIZE = 256
-    };
+    static constexpr uint16_t kMaxSliceHeaderSize { 256 };
 
-    enum field_type {
+    enum field_type : std::uint8_t {
         FRAME = 'F',
         FIELD_TOP = 'T',
         FIELD_BOTTOM = 'B'
@@ -107,7 +70,7 @@ class H2645Parser {
     /** \brief Computes aspect ratio from picture size and sample aspect ratio
      */
     uint aspectRatio(void) const;
-    virtual void getFrameRate(FrameRate &result) const = 0;
+    virtual MythAVRational getFrameRate() const = 0;
     virtual field_type getFieldType(void) const = 0;
 
     uint64_t frameAUstreamOffset(void) const {return m_frameStartOffset;}
@@ -118,11 +81,11 @@ class H2645Parser {
     uint32_t GetUnitsInTick(void) const { return m_unitsInTick; }
     SCAN_t GetScanType(void) const { return m_scanType; }
 
-    enum NAL_unit_type {
+    enum NAL_unit_type : std::int8_t {
         UNKNOWN = -1
     };
 
-    enum SLICE_type {
+    enum SLICE_type : std::uint8_t {
         SLICE_P = 0,
         SLICE_B = 1,
         SLICE_I = 2,
@@ -137,13 +100,13 @@ class H2645Parser {
     };
 
   protected:
-    enum constants {EXTENDED_SAR = 255};
+    static constexpr uint8_t kExtendedSar { 255 };
 
     void resetRBSP(void);
     bool fillRBSP(const uint8_t *byteP, uint32_t byte_count,
                   bool found_start_code);
 
-    void vui_parameters(GetBitContext * gb, bool hevc);
+    void vui_parameters(BitReader& br, bool hevc);
 
     uint64_t   m_framecnt                    {0};
     uint64_t   m_keyframecnt                 {0};

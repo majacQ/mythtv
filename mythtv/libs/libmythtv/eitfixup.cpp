@@ -2,14 +2,16 @@
 #include <algorithm>
 #include <array>
 
-// MythTV headers
-#include "eitfixup.h"
-#include "programinfo.h" // for CategoryType
-#include "channelutil.h" // for GetDefaultAuthority()
+// Qt Headers
+#include <QRegularExpression>
 
-#include "programinfo.h" // for subtitle types and audio and video properties
-#include "dishdescriptors.h" // for dish_theme_type_to_string
-#include "mythlogging.h"
+// MythTV headers
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h" // for CategoryType, subtitle types and audio and video properties
+
+#include "channelutil.h" // for GetDefaultAuthority()
+#include "eitfixup.h"
+#include "mpeg/dishdescriptors.h" // for dish_theme_type_to_string
 
 /*------------------------------------------------------------------------
  * Event Fix Up Scripts - Turned on by entry in dtv_privatetype table
@@ -17,10 +19,7 @@
 
 static const QRegularExpression kStereo { R"(\b\(?[sS]tereo\)?\b)" };
 static const QRegularExpression kUKSpaceColonStart { R"(^[ |:]*)" };
-
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
+static const QRegularExpression kDotAtEnd { "\\.$" };
 
 static const QMap<QChar,quint16> r2v = {
     {'I' ,   1}, {'V' ,   5}, {'X' ,   10}, {'L' , 50},
@@ -40,11 +39,7 @@ int EITFixUp::parseRoman (QString roman)
         int v2 = r2v[roman.at(i+1)];
         result += (v1 >= v2) ? v1 : -v1;
     }
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    return result + r2v[roman.at(roman.size() - 1)];
-#else
     return result + r2v[roman.back()];
-#endif
 }
 
 
@@ -325,17 +320,12 @@ void EITFixUp::FixBellExpressVu(DBEventEIT &event)
         {
             static const QRegularExpression bellActors { R"(\set\s|,)" };
             QString tmp = event.m_description.left(position-3);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList actors =
-                tmp.split(bellActors, QString::SkipEmptyParts);
-#else
             QStringList actors =
                 tmp.split(bellActors, Qt::SkipEmptyParts);
-#endif
 
             /* Possible TODO: if EIT inlcude the priority and/or character
              * names for the actors, include them in AddPerson call. */
-            for (const auto & actor : qAsConst(actors))
+            for (const auto & actor : std::as_const(actors))
                 event.AddPerson(DBPerson::kActor, actor);
         }
         // Remove the year and actors from the description
@@ -623,18 +613,15 @@ void EITFixUp::SetUKSubtitle(DBEventEIT &event)
             strEnd = "!";
         }
         else
+        {
             strEnd.clear();
+        }
     }
 
     if (!strListEnd.empty())
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList strListSpace = strListEnd[0].split(
-            " ", QString::SkipEmptyParts);
-#else
         QStringList strListSpace = strListEnd[0].split(
             " ", Qt::SkipEmptyParts);
-#endif
         if (fColon && ((uint)strListSpace.size() > kMaxToTitle))
              return;
         if ((uint)strListSpace.size() > kDotToTitle)
@@ -905,11 +892,10 @@ void EITFixUp::FixUK(DBEventEIT &event)
         {
             QString strPart=event.m_title.remove(ukDoubleDotEnd)+" ";
             strFull = strPart + event.m_description.remove(ukDoubleDotStart);
-            int position1 = -1;
             static const QRegularExpression ukCEPQ { R"([:\!\.\?]\s)" };
             static const QRegularExpression ukSpaceStart { "^ " };
-            if (isMovie &&
-                ((position1 = strFull.indexOf(ukCEPQ,strPart.length())) != -1))
+            int position1 = strFull.indexOf(ukCEPQ,strPart.length());
+            if (isMovie && (position1 != -1))
             {
                  if (strFull[position1] == '!' || strFull[position1] == '?'
                   || (position1>2 && strFull[position1] == '.' && strFull[position1-2] == '.'))
@@ -918,15 +904,19 @@ void EITFixUp::FixUK(DBEventEIT &event)
                  event.m_description = strFull.mid(position1 + 1);
                  event.m_description.remove(ukSpaceStart);
             }
-            else if ((position1 = strFull.indexOf(ukCEPQ)) != -1)
+            else
             {
-                 if (strFull[position1] == '!' || strFull[position1] == '?'
-                  || (position1>2 && strFull[position1] == '.' && strFull[position1-2] == '.'))
-                     position1++;
-                 event.m_title = strFull.left(position1);
-                 event.m_description = strFull.mid(position1 + 1);
-                 event.m_description.remove(ukSpaceStart);
-                 SetUKSubtitle(event);
+                position1 = strFull.indexOf(ukCEPQ);
+                if (position1 != -1)
+                {
+                     if (strFull[position1] == '!' || strFull[position1] == '?'
+                      || (position1>2 && strFull[position1] == '.' && strFull[position1-2] == '.'))
+                         position1++;
+                     event.m_title = strFull.left(position1);
+                     event.m_description = strFull.mid(position1 + 1);
+                     event.m_description.remove(ukSpaceStart);
+                     SetUKSubtitle(event);
+                }
             }
         }
         else if (event.m_description.indexOf(uk24ep) != -1)
@@ -946,8 +936,8 @@ void EITFixUp::FixUK(DBEventEIT &event)
             static const QRegularExpression ukYearColon { R"(^[\d]{4}:)" };
             if (!isMovie && (event.m_title.indexOf(ukYearColon) < 0))
             {
-                int position1 = -1;
-                if (((position1 = event.m_title.indexOf(":")) != -1) &&
+                int position1 = event.m_title.indexOf(":");
+                if ((position1 != -1) &&
                     (event.m_description.indexOf(":") < 0 ))
                 {
                     static const QRegularExpression ukCompleteDots { R"(^\.\.+$)" };
@@ -965,7 +955,9 @@ void EITFixUp::FixUK(DBEventEIT &event)
                     }
                 }
                 else
+                {
                     SetUKSubtitle(event);
+                }
             }
         }
     }
@@ -973,25 +965,31 @@ void EITFixUp::FixUK(DBEventEIT &event)
     if (!isMovie && event.m_subtitle.isEmpty() &&
         !event.m_title.startsWith("The X-Files"))
     {
-        int position1 = -1;
-        if ((position1=event.m_description.indexOf(ukTime)) != -1)
+        int position1 = event.m_description.indexOf(ukTime);
+        if (position1 != -1)
         {
             static const QRegularExpression ukColonPeriod { R"([:\.])" };
             int position2 = event.m_description.indexOf(ukColonPeriod);
             if ((position2>=0) && (position2 < (position1-2)))
                 SetUKSubtitle(event);
         }
-        else if ((position1=event.m_title.indexOf("-")) != -1)
+        else
         {
-            if ((uint)position1 < kSubtitleMaxLen)
+            position1 = event.m_title.indexOf("-");
+            if (position1 != -1)
             {
-                event.m_subtitle = event.m_title.mid(position1 + 1);
-                event.m_subtitle.remove(kUKSpaceColonStart);
-                event.m_title = event.m_title.left(position1);
+                if ((uint)position1 < kSubtitleMaxLen)
+                {
+                    event.m_subtitle = event.m_title.mid(position1 + 1);
+                    event.m_subtitle.remove(kUKSpaceColonStart);
+                    event.m_title = event.m_title.left(position1);
+                }
+            }
+            else
+            {
+                SetUKSubtitle(event);
             }
         }
-        else
-            SetUKSubtitle(event);
     }
 
     // Work out the year (if any)
@@ -1157,16 +1155,11 @@ void EITFixUp::FixComHem(DBEventEIT &event, bool process_subtitle)
         // Actors
         if (!match.capturedView(5).isEmpty())
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            const QStringList actors =
-                match.captured(5).split(comHemPersSeparator, QString::SkipEmptyParts);
-#else
             const QStringList actors =
                 match.captured(5).split(comHemPersSeparator, Qt::SkipEmptyParts);
-#endif
             /* Possible TODO: if EIT inlcude the priority and/or character
              * names for the actors, include them in AddPerson call. */
-            for (const auto & actor : qAsConst(actors))
+            for (const auto & actor : std::as_const(actors))
                 event.AddPerson(DBPerson::kActor, actor);
         }
 
@@ -1191,9 +1184,15 @@ void EITFixUp::FixComHem(DBEventEIT &event, bool process_subtitle)
         static const QRegularExpression comHemDirector { "[Rr]egi" };
         static const QRegularExpression comHemActor    { "[Ss]kådespelare|[Ii] rollerna" };
         static const QRegularExpression comHemHost     { "[Pp]rogramledare" };
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         auto dmatch = comHemDirector.match(pmatch.capturedView(1));
         auto amatch = comHemActor.match(pmatch.capturedView(1));
         auto hmatch = comHemHost.match(pmatch.capturedView(1));
+#else
+        auto dmatch = comHemDirector.matchView(pmatch.capturedView(1));
+        auto amatch = comHemActor.matchView(pmatch.capturedView(1));
+        auto hmatch = comHemHost.matchView(pmatch.capturedView(1));
+#endif
         if (dmatch.hasMatch())
             role = DBPerson::kDirector;
         else if (amatch.hasMatch())
@@ -1206,16 +1205,11 @@ void EITFixUp::FixComHem(DBEventEIT &event, bool process_subtitle)
             continue;
         }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList actors =
-            pmatch.captured(2).split(comHemPersSeparator, QString::SkipEmptyParts);
-#else
         const QStringList actors =
             pmatch.captured(2).split(comHemPersSeparator, Qt::SkipEmptyParts);
-#endif
         /* Possible TODO: if EIT inlcude the priority and/or character
          * names for the actors, include them in AddPerson call. */
-        for (const auto & actor : qAsConst(actors))
+        for (const auto & actor : std::as_const(actors))
             event.AddPerson(role, actor);
 
         // Remove it
@@ -1266,7 +1260,11 @@ void EITFixUp::FixComHem(DBEventEIT &event, bool process_subtitle)
     }
 
     // Rerun with day, month and possibly year specified
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     match2 = comHemRerun2.match(match.capturedView(1));
+#else
+    match2 = comHemRerun2.matchView(match.capturedView(1));
+#endif
     if (match2.hasMatch())
     {
         int day   = match2.capturedView(1).toInt();
@@ -1445,7 +1443,7 @@ void EITFixUp::FixAUFreeview(DBEventEIT &event)
         QStringList actors = match.captured(4).split("/");
         /* Possible TODO: if EIT inlcude the priority and/or character
          * names for the actors, include them in AddPerson call. */
-        for (const QString& actor : qAsConst(actors))
+        for (const QString& actor : std::as_const(actors))
             event.AddPerson(DBPerson::kActor, actor);
         event.m_description = match.captured(1);
         return;
@@ -1458,7 +1456,7 @@ void EITFixUp::FixAUFreeview(DBEventEIT &event)
         QStringList actors = match.captured(3).split("/");
         /* Possible TODO: if EIT inlcude the priority and/or character
          * names for the actors, include them in AddPerson call. */
-        for (const QString& actor : qAsConst(actors))
+        for (const QString& actor : std::as_const(actors))
             event.AddPerson(DBPerson::kActor, actor);
         event.m_description = match.captured(1);
     }
@@ -1503,7 +1501,11 @@ void EITFixUp::FixMCA(DBEventEIT &event)
     if (match.hasMatch())
     {
         uint matchLen = match.capturedLength(1);
-        uint evDescLen = std::max(static_cast<int>(event.m_description.length()), 1);
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        uint evDescLen = std::max(event.m_description.length(), 1);
+#else
+        uint evDescLen = std::max(event.m_description.length(), 1LL);
+#endif
 
         if ((matchLen < lSUBTITLE_MAX_LEN) &&
             ((matchLen * 100 / evDescLen) < SUBTITLE_PCT))
@@ -1587,16 +1589,11 @@ void EITFixUp::FixMCA(DBEventEIT &event)
         if (match.hasMatch())
         {
             static const QRegularExpression mcaActorsSeparator { "(,\\s+)" };
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            const QStringList actors = match.captured(2).split(
-                mcaActorsSeparator, QString::SkipEmptyParts);
-#else
             const QStringList actors = match.captured(2).split(
                 mcaActorsSeparator, Qt::SkipEmptyParts);
-#endif
             /* Possible TODO: if EIT inlcude the priority and/or character
              * names for the actors, include them in AddPerson call. */
-            for (const auto & actor : qAsConst(actors))
+            for (const auto & actor : std::as_const(actors))
                 event.AddPerson(DBPerson::kActor, actor.trimmed());
             event.m_description = match.captured(1).trimmed();
         }
@@ -1722,7 +1719,11 @@ void EITFixUp::FixRTL(DBEventEIT &event)
         if (match.hasMatch())
         {
             uint matchLen = match.capturedLength(1);
-            uint evDescLen = std::max(static_cast<int>(event.m_description.length()), 1);
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+            uint evDescLen = std::max(event.m_description.length(), 1);
+#else
+            uint evDescLen = std::max(event.m_description.length(), 1LL);
+#endif
 
             if ((matchLen < lSUBTITLE_MAX_LEN) &&
                 (matchLen * 100 / evDescLen < SUBTITLE_PCT))
@@ -1746,75 +1747,85 @@ static const QMap<QString,DBPerson::Role> deCrewTitle {
  */
 void EITFixUp::FixPRO7(DBEventEIT &event)
 {
-    static const QRegularExpression pro7Subtitle { R"(,{0,1}([^,]*?),([^,]+?)\s{0,1}(\d{4})$)" };
-    auto match = pro7Subtitle.match(event.m_subtitle);
+    // strip repeat info and set previouslyshown flag
+    static const QRegularExpression pro7Repeat
+        { R"((?<=\s|^)\(WH vom \w+, \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr\)$)" };
+    auto match = pro7Repeat.match(event.m_subtitle);
     if (match.hasMatch())
     {
-        if (event.m_airdate == 0)
-        {
-            event.m_airdate = match.captured(3).toUInt();
-        }
+        event.m_previouslyshown = true;
         event.m_subtitle.remove(match.capturedStart(0),
                                 match.capturedLength(0));
+        event.m_subtitle = event.m_subtitle.trimmed();
     }
 
-    /* handle cast, the very last in description */
-    static const QRegularExpression pro7Cast { "\n\nDarsteller:\n(.*)$",
-        QRegularExpression::DotMatchesEverythingOption };
-    match = pro7Cast.match(event.m_description);
+    // strip "Mit Gebärdensprache (Online-Stream)"
+    static const QRegularExpression pro7signLanguage
+        { R"((?<=\s|^)Mit Gebärdensprache \(Online\-Stream\)$)" };
+    match = pro7signLanguage.match(event.m_subtitle);
     if (match.hasMatch())
     {
-        QStringList cast = match.captured(1).split("\n");
-        for (const auto& line : qAsConst(cast))
-        {
-            static const QRegularExpression pro7CastOne { R"(^([^\(]*?)\((.*)\)$)" };
-            auto match2 = pro7CastOne.match(line);
-            if (match2.hasMatch())
-            {
-                /* Possible TODO: if EIT inlcude the priority and/or character
-                 * names for the actors, include them in AddPerson call. */
-                event.AddPerson (DBPerson::kActor, match2.captured(1).simplified());
-            }
-        }
-        event.m_description.remove(match.capturedStart(0),
-                                   match.capturedLength(0));
+        event.m_subtitle.remove(match.capturedStart(0),
+                                match.capturedLength(0));
+        event.m_subtitle = event.m_subtitle.trimmed();
     }
 
-    /* handle crew, the new very last in description
-     * format: "Role: Name" or "Role: Name1, Name2"
-     */
-    static const QRegularExpression pro7Crew { "\n\n(Regie:.*)$",
-        QRegularExpression::DotMatchesEverythingOption };
-    match = pro7Crew.match(event.m_description);
+    // move age ratings into metadata
+    static const QRegularExpression pro7ratingAllAges
+        { R"((?<=\s|^)Altersfreigabe: Ohne Altersbeschränkung$)" };
+    match = pro7ratingAllAges.match(event.m_subtitle);
     if (match.hasMatch())
     {
-        QStringList crew = match.captured(1).split("\n");
-        for (const auto& line : qAsConst(crew))
-        {
-            static const QRegularExpression pro7CrewOne { R"(^(.*?):\s+(.*)$)" };
-            auto match2 = pro7CrewOne.match(line);
-            if (match2.hasMatch())
-            {
-                DBPerson::Role role = DBPerson::kUnknown;
-                if (deCrewTitle.contains(match2.captured(1)))
-                    role = deCrewTitle[match2.captured(1)];
-                QStringList names = match2.captured(2).simplified().split(R"(\s*,\s*)");
-                for (const auto & name : qAsConst(names))
-                {
-                    /* Possible TODO: if EIT inlcude the priority
-                     * and/or character names for the actors, include
-                     * them in AddPerson call. */
-                    event.AddPerson (role, name);
-                }
-            }
-        }
-        event.m_description.remove(match.capturedStart(0),
-                                   match.capturedLength(0));
+        EventRating prograting;
+        prograting.m_system="DE";
+        prograting.m_rating = "0";
+        event.m_ratings.push_back(prograting);
+
+        event.m_subtitle.remove(match.capturedStart(0),
+                                match.capturedLength(0));
+        event.m_subtitle = event.m_subtitle.trimmed();
+    }
+    static const QRegularExpression pro7rating
+        { R"((?<=\s|^)Altersfreigabe: ab (\d+)$)" };
+    match = pro7rating.match(event.m_subtitle);
+    if (match.hasMatch())
+    {
+        EventRating prograting;
+        prograting.m_system="DE";
+        prograting.m_rating = match.captured(1);
+        event.m_ratings.push_back(prograting);
+
+        event.m_subtitle.remove(match.capturedStart(0),
+                                match.capturedLength(0));
+        event.m_subtitle = event.m_subtitle.trimmed();
     }
 
-    /* FIXME unless its Jamie Oliver, then there is neither Crew nor Cast only
-     * \n\nKoch: Jamie Oliver
-     */
+    // move category and (original) airdate into metadata, add country and airdate to description
+    static const QRegularExpression pro7CategoryOriginalairdate
+        { R"((?<=\s|^)(Late Night Show|Live Shopping|Real Crime|Real Life Doku|Romantic Comedy|Scripted Reality|\S+), ([A-Z]+(?:\/[A-Z]+)*) (\d{4})$)" };
+    match = pro7CategoryOriginalairdate.match(event.m_subtitle);
+    if (match.hasMatch())
+    {
+        event.m_category = match.captured(1);
+
+        event.m_description.append(" (").append(match.captured(2)).append(" ").append(match.captured(3)).append(")");
+
+        uint y = match.captured(3).toUInt();
+        event.m_originalairdate = QDate(y, 1, 1);
+        if (event.m_airdate == 0)
+        {
+            event.m_airdate = y;
+        }
+
+        event.m_subtitle.remove(match.capturedStart(0),
+                                match.capturedLength(0));
+        event.m_subtitle = event.m_subtitle.trimmed();
+    }
+
+    // remove subtitle if equal to title
+    if (event.m_title == event.m_subtitle) {
+        event.m_subtitle = "";
+    }
 }
 
 /**
@@ -1934,16 +1945,11 @@ void EITFixUp::FixPremiere(DBEventEIT &event)
     if (match.hasMatch())
     {
         event.AddPerson(DBPerson::kDirector, match.captured(1));
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList actors = match.captured(2).split(
-            ", ", QString::SkipEmptyParts);
-#else
         const QStringList actors = match.captured(2).split(
             ", ", Qt::SkipEmptyParts);
-#endif
         /* Possible TODO: if EIT inlcude the priority and/or character
          * names for the actors, include them in AddPerson call. */
-        for (const auto & actor : qAsConst(actors))
+        for (const auto & actor : std::as_const(actors))
             event.AddPerson(DBPerson::kActor, actor);
         event.m_description.remove(match.capturedStart(0),
                                    match.capturedLength(0));
@@ -2089,8 +2095,8 @@ void EITFixUp::FixNL(DBEventEIT &event)
 
     // This is trying to catch the case where the subtitle is in the main title
     // but avoid cases where it isn't a subtitle e.g cd:uk
-    int position = 0;
-    if (((position = event.m_title.indexOf(":")) != -1) &&
+    int position = event.m_title.indexOf(":");
+    if ((position != -1) &&
         (event.m_title[position + 1].toUpper() == event.m_title[position + 1]) &&
         (event.m_subtitle.isEmpty()))
     {
@@ -2108,16 +2114,11 @@ void EITFixUp::FixNL(DBEventEIT &event)
         QString tmpActorsString = match.captured(0);
         tmpActorsString = tmpActorsString.right(tmpActorsString.length() - 6);
         tmpActorsString = tmpActorsString.left(tmpActorsString.length() - 5);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList actors =
-            tmpActorsString.split(nlPersSeparator, QString::SkipEmptyParts);
-#else
         const QStringList actors =
             tmpActorsString.split(nlPersSeparator, Qt::SkipEmptyParts);
-#endif
         /* Possible TODO: if EIT inlcude the priority and/or character
          * names for the actors, include them in AddPerson call. */
-        for (const auto & actor : qAsConst(actors))
+        for (const auto & actor : std::as_const(actors))
             event.AddPerson(DBPerson::kActor, actor);
         fullinfo.remove(match.capturedStart(), match.capturedLength());
     }
@@ -2130,14 +2131,9 @@ void EITFixUp::FixNL(DBEventEIT &event)
         QString tmpPresString = match.captured(0);
         tmpPresString = tmpPresString.right(tmpPresString.length() - 14);
         tmpPresString = tmpPresString.left(tmpPresString.length() -1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList presenters =
-            tmpPresString.split(nlPersSeparator, QString::SkipEmptyParts);
-#else
         const QStringList presenters =
             tmpPresString.split(nlPersSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & presenter : qAsConst(presenters))
+        for (const auto & presenter : std::as_const(presenters))
             event.AddPerson(DBPerson::kPresenter, presenter);
         fullinfo.remove(match.capturedStart(), match.capturedLength());
     }
@@ -2453,15 +2449,11 @@ void EITFixUp::FixDK(DBEventEIT &event)
     if (match.hasMatch())
     {
         QString tmpDirectorsString = match.captured(1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        directors = tmpDirectorsString.split(dkPersonsSeparator, QString::SkipEmptyParts);
-#else
         directors = tmpDirectorsString.split(dkPersonsSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & director : qAsConst(directors))
+        for (const auto & director : std::as_const(directors))
         {
             tmpDirectorsString = director.split(":").last().trimmed().
-                remove(QRegularExpression("\\.$"));
+                remove(kDotAtEnd);
             if (tmpDirectorsString != "")
                 event.AddPerson(DBPerson::kDirector, tmpDirectorsString);
         }
@@ -2473,17 +2465,11 @@ void EITFixUp::FixDK(DBEventEIT &event)
     if (match.hasMatch())
     {
         QString tmpActorsString = match.captured(1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList actors =
-            tmpActorsString.split(dkPersonsSeparator, QString::SkipEmptyParts);
-#else
         const QStringList actors =
             tmpActorsString.split(dkPersonsSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & actor : qAsConst(actors))
+        for (const auto & actor : std::as_const(actors))
         {
-            tmpActorsString = actor.split(":").last().trimmed().
-                    remove(QRegularExpression("\\.$"));
+            tmpActorsString = actor.split(":").last().trimmed().remove(kDotAtEnd);
             if (!tmpActorsString.isEmpty() && !directors.contains(tmpActorsString))
                 event.AddPerson(DBPerson::kActor, tmpActorsString);
         }
@@ -2616,17 +2602,11 @@ void EITFixUp::FixGreekEIT(DBEventEIT &event)
     if (match.hasMatch())
     {
         QString tmpActorsString = match.captured(1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList actors =
-            tmpActorsString.split(grPeopleSeparator, QString::SkipEmptyParts);
-#else
         const QStringList actors =
             tmpActorsString.split(grPeopleSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & actor : qAsConst(actors))
+        for (const auto & actor : std::as_const(actors))
         {
-            tmpActorsString = actor.split(":").last().trimmed().
-                    remove(QRegularExpression("\\.$"));
+            tmpActorsString = actor.split(":").last().trimmed().remove(kDotAtEnd);
             if (tmpActorsString != "")
                 event.AddPerson(DBPerson::kActor, tmpActorsString);
         }
@@ -2639,17 +2619,12 @@ void EITFixUp::FixGreekEIT(DBEventEIT &event)
     if (match.hasMatch())
     {
         QString tmpDirectorsString = match.captured(1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList directors =
-            tmpDirectorsString.split(grPeopleSeparator, QString::SkipEmptyParts);
-#else
         const QStringList directors =
             tmpDirectorsString.split(grPeopleSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & director : qAsConst(directors))
+        for (const auto & director : std::as_const(directors))
         {
             tmpDirectorsString = director.split(":").last().trimmed().
-                    remove(QRegularExpression("\\.$"));
+                remove(kDotAtEnd);
             if (tmpDirectorsString != "")
             {
                 event.AddPerson(DBPerson::kDirector, tmpDirectorsString);
@@ -2665,17 +2640,12 @@ void EITFixUp::FixGreekEIT(DBEventEIT &event)
     if (match.hasMatch())
     {
         QString tmpPresentersString = match.captured(1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        const QStringList presenters =
-            tmpPresentersString.split(grPeopleSeparator, QString::SkipEmptyParts);
-#else
         const QStringList presenters =
             tmpPresentersString.split(grPeopleSeparator, Qt::SkipEmptyParts);
-#endif
-        for (const auto & presenter : qAsConst(presenters))
+        for (const auto & presenter : std::as_const(presenters))
         {
             tmpPresentersString = presenter.split(":").last().trimmed().
-                    remove(QRegularExpression("\\.$"));
+                remove(kDotAtEnd);
             if (tmpPresentersString != "")
             {
                 event.AddPerson(DBPerson::kPresenter, tmpPresentersString);

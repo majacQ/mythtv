@@ -5,14 +5,16 @@
 #include <QCoreApplication>
 
 // MythTV headers
-#include "standardsettings.h"
+#include "libmythui/standardsettings.h"
+
+#include "mythexp.h"
 
 class MPUBLIC DatabaseSettings : public GroupSetting
 {
     Q_OBJECT
 
   public:
-    explicit DatabaseSettings(const QString &DBhostOverride = QString());
+    explicit DatabaseSettings(QString DBhostOverride = QString());
     ~DatabaseSettings() override;
 
     void Load(void) override; // StandardSetting

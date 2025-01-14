@@ -475,7 +475,7 @@ void ThreadedFileWriter::DiskLoop(void)
 
         //////////////////////////////////////////
 
-        const void *data = &(buf->data[0]);
+        const void *data = (buf->data).data();
         uint sz = buf->data.size();
 
         bool write_ok = true;
@@ -593,7 +593,7 @@ void ThreadedFileWriter::TrimEmptyBuffers(void)
     {
         if (((*it)->lastUsed < cur_m_60) ||
             ((*it)->data.capacity() > 3 * (*it)->data.size() &&
-             (*it)->data.capacity() > 64 * 1024))
+             (*it)->data.capacity() > 64 * 1024LL))
         {
             delete *it;
             it = m_emptyBuffers.erase(it);

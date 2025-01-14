@@ -5,17 +5,14 @@
 #ifdef USING_DBUS
 #include "platforms/mythpowerdbus.h"
 #endif
-#if defined(Q_OS_MAC)
+
+#ifdef Q_OS_DARWIN
 #include "platforms/mythpowerosx.h"
 #endif
 
 #define LOC QString("Power: ")
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-QMutex MythPower::s_lock(QMutex::Recursive);
-#else
 QRecursiveMutex MythPower::s_lock;
-#endif
 
 /*! \class MythPower
  *
@@ -86,10 +83,10 @@ MythPower* MythPower::AcquireRelease(void *Reference, bool Acquire, std::chrono:
         }
         else
         {
-#if defined(Q_OS_MAC)
+#ifdef Q_OS_DARWIN
             // NB OSX may have DBUS but it won't help here
             s_instance = new MythPowerOSX();
-#elif USING_DBUS
+#elif defined(USING_DBUS)
             if (MythPowerDBus::IsAvailable())
                 s_instance = new MythPowerDBus();
 #endif
@@ -332,7 +329,7 @@ void MythPower::DidWakeUp(void)
     m_scheduledFeature = FeatureNone;
     m_isSpontaneous = false;
     m_featureTimer.stop();
-    static const qint64 kSecsInDay = 60 * 60 * 24;
+    static constexpr qint64 kSecsInDay { 24LL * 60 * 60 };
     QDateTime now = QDateTime::currentDateTime();
     qint64 secs  = m_sleepTime.secsTo(now);
     qint64 days  = secs / kSecsInDay;

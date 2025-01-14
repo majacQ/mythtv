@@ -12,8 +12,8 @@
 #include <QMap>
 #include <QMetaType>
 
+#include "libmythbase/mythchrono.h"
 #include "mythmetaexp.h"
-#include "mythchrono.h"
 
 // Define this to log/count creation/deletion of ImageItem heap objects.
 // These are created liberally when processing images and are liable to leak.
@@ -24,14 +24,14 @@
 #endif
 
 // Id of the (virtual) Gallery root node
-#define GALLERY_DB_ID 0
+static constexpr int GALLERY_DB_ID { 0 };
 // Id of the Storage Group (Photographs) node
-#define PHOTO_DB_ID 1
+static constexpr int PHOTO_DB_ID { 1 };
 
 
 //! Type of image node
 // We need to use other names to avoid getting coflicts with the videolist.h file
-enum ImageNodeType {
+enum ImageNodeType : std::uint8_t {
     kUnknown   = 0, //!< Unprocessable file type
     kDevice    = 1, //!< Storage Group and local mounted media
     kCloneDir  = 2, //!< A device sub dir comprised from multiple SG dirs
@@ -42,7 +42,7 @@ enum ImageNodeType {
 
 
 //! Image ordering
-enum ImageSortOrder {
+enum ImageSortOrder : std::uint8_t {
     kSortByNameAsc     = 1, //!< Name A-Z
     kSortByNameDesc    = 2, //!< Name Z-A
     kSortByModTimeAsc  = 3, //!< File modified time Earliest -> Latest
@@ -141,7 +141,7 @@ public:
     {
         QStringList local;
         QStringList remote;
-        for (int id : qAsConst(ids))
+        for (int id : std::as_const(ids))
         {
             if (ImageItem::IsLocalId(id))
                 local << QString::number(id);

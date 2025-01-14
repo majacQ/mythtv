@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -20,22 +20,10 @@
 #include <QStringList>
 
 // MythTV headers
+#include "libmythbase/mythchrono.h"
+
 #include "upnpexp.h"
-#include "mythchrono.h"
 
-/////////////////////////////////////////////////////////////////////////////
-//
-/////////////////////////////////////////////////////////////////////////////
-
-template <class T> inline const T& Min( const T &x, const T &y ) 
-{
-    return( ( x < y ) ? x : y );
-}
- 
-template <class T> inline const T& Max( const T &x, const T &y ) 
-{
-    return( ( x > y ) ? x : y );
-}
 //////////////////////////////////////////////////////////////////////////////
 // Typedefs
 //////////////////////////////////////////////////////////////////////////////

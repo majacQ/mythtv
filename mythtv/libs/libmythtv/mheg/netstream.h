@@ -13,9 +13,7 @@
 #include <QThread>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 #include <QSslError>
 #include <QWaitCondition>
 #include <QQueue>
@@ -35,7 +33,7 @@ class NetStream : public QObject
     Q_OBJECT
 
 public:
-    enum EMode { kNeverCache, kPreferCache, kAlwaysCache };
+    enum EMode : std::uint8_t { kNeverCache, kPreferCache, kAlwaysCache };
     explicit NetStream(const QUrl &url, EMode mode = kPreferCache,
                        QByteArray cert = QByteArray());
     ~NetStream() override;
@@ -98,7 +96,8 @@ private:
 
     mutable QMutex    m_mutex; // Protects r/w access to the following data
     QNetworkRequest   m_request;
-    enum { kClosed, kPending, kStarted, kReady, kFinished } m_state {kClosed};
+    enum : std::uint8_t
+         { kClosed, kPending, kStarted, kReady, kFinished } m_state {kClosed};
     NetStreamRequest* m_pending       {nullptr};
     QNetworkReply*    m_reply         {nullptr};
     int               m_nRedirections {0};
@@ -124,14 +123,10 @@ public:
     static NAMThread & manager(); // Singleton
     ~NAMThread() override;
 
-    static inline void PostEvent(QEvent *e) { manager().Post(e); }
+    static void PostEvent(QEvent *e) { manager().Post(e); }
     void Post(QEvent *event);
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static inline QMutex* GetMutex() { return &manager().m_mutexNAM; }
-#else
-    static inline QRecursiveMutex* GetMutex() { return &manager().m_mutexNAM; }
-#endif
+    static QRecursiveMutex* GetMutex() { return &manager().m_mutexNAM; }
 
     static bool isAvailable(); // is network usable
     static QDateTime GetLastModified(const QUrl &url);
@@ -154,11 +149,7 @@ private:
 
     volatile bool          m_bQuit    {false};
     QSemaphore             m_running;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex         m_mutexNAM {QMutex::Recursive}; // Provides recursive access to m_nam
-#else
     mutable QRecursiveMutex m_mutexNAM; // Provides recursive access to m_nam
-#endif
     QNetworkAccessManager *m_nam      {nullptr};
     mutable QMutex         m_mutex; // Protects r/w access to the following data
     QQueue< QEvent * >     m_workQ;

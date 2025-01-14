@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -20,16 +20,12 @@
 #include <QDateTime>
 #include <Qt>
 
-#include "mythconfig.h"
-#if !( CONFIG_DARWIN || CONFIG_CYGWIN || defined(__FreeBSD__) || defined(_WIN32))
-#define USE_SETSOCKOPT
-#include <sys/sendfile.h>
-#endif
 #include <cerrno>
 #include <cstdlib>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h> // for gethostname
 // FOR DEBUGGING
 #include <iostream>
 
@@ -39,20 +35,19 @@
 
 #include "upnp.h"
 
-#include "compat.h"
-#include "mythlogging.h"
-#include "mythversion.h"
-#include "mythdate.h"
-#include "mythcorecontext.h"
-#include "mythtimer.h"
-#include "mythcoreutil.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/mythversion.h"
+#include "libmythbase/unziputil.h"
 
 #include "serializers/xmlSerializer.h"
 #include "serializers/soapSerializer.h"
 #include "serializers/jsonSerializer.h"
 #include "serializers/xmlplistSerializer.h"
-
-#include <unistd.h> // for gethostname
 
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0
@@ -150,11 +145,6 @@ static QString StaticPage =
       "<BODY><H1>%2.</H1></BODY>"
     "</HTML>";
 
-#ifdef USE_SETSOCKOPT
-//static const int g_on          = 1;
-//static const int g_off         = 0;
-#endif
-
 const char *HTTPRequest::s_szServerHeaders = "Accept-Ranges: bytes\r\n";
 
 /////////////////////////////////////////////////////////////////////////////
@@ -166,7 +156,7 @@ QString HTTPRequest::GetLastHeader( const QString &sType ) const
     QStringList values = m_mapHeaders.values( sType );
     if (!values.isEmpty())
         return values.last();
-    return QString();
+    return {};
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -285,7 +275,7 @@ QString HTTPRequest::BuildResponseHeader( long long nSize )
     }
 
     auto values = m_mapHeaders.values("origin");
-    for (const auto & value : values)
+    for (const auto & value : std::as_const(values))
         AddCORSHeaders(value);
 
     if (qEnvironmentVariableIsSet("HTTPREQUEST_DEBUG"))
@@ -332,7 +322,7 @@ qint64 HTTPRequest::SendResponse( void )
                 break;
             {
                 QFile file(m_sFileName);
-                if (file.exists() && file.size() < (2 * 1024 * 1024) && // For security/stability, limit size of files read into buffer to 2MiB
+                if (file.exists() && file.size() < (2LL * 1024 * 1024) && // For security/stability, limit size of files read into buffer to 2MiB
                     file.open(QIODevice::ReadOnly | QIODevice::Text))
                     m_response.buffer() = file.readAll();
 
@@ -342,7 +332,7 @@ qint64 HTTPRequest::SendResponse( void )
                 // Let SendResponseFile try or send a 404
                 m_eResponseType = ResponseTypeFile;
             }
-            [[clang::fallthrough]];
+            [[fallthrough]];
         case ResponseTypeFile: // Binary files
             LOG(VB_HTTP, LOG_INFO,
                 QString("HTTPRequest::SendResponse( File ) :%1 -> %2:")
@@ -358,23 +348,6 @@ qint64 HTTPRequest::SendResponse( void )
         QString("HTTPRequest::SendResponse(xml/html) (%1) :%2 -> %3: %4")
              .arg(m_sFileName, GetResponseStatus(), GetPeerAddress(),
                   QString::number(m_eResponseType)));
-
-    // ----------------------------------------------------------------------
-    // Make it so the header is sent with the data
-    // ----------------------------------------------------------------------
-
-#ifdef USE_SETSOCKOPT
-//     // Never send out partially complete segments
-//     if (setsockopt(getSocketHandle(), SOL_TCP, TCP_CORK,
-//                    &g_on, sizeof( g_on )) < 0)
-//     {
-//         LOG(VB_HTTP, LOG_INFO,
-//             QString("HTTPRequest::SendResponse(xml/html) "
-//                     "setsockopt error setting TCP_CORK on ") + ENO);
-//     }
-#endif
-
-
 
     // ----------------------------------------------------------------------
     // Check for ETag match...
@@ -470,20 +443,6 @@ qint64 HTTPRequest::SendResponse( void )
             nBytes += bytesWritten;
     }
 
-    // ----------------------------------------------------------------------
-    // Turn off the option so any small remaining packets will be sent
-    // ----------------------------------------------------------------------
-
-#ifdef USE_SETSOCKOPT
-//     if (setsockopt(getSocketHandle(), SOL_TCP, TCP_CORK,
-//                    &g_off, sizeof( g_off )) < 0)
-//     {
-//         LOG(VB_HTTP, LOG_INFO,
-//             QString("HTTPRequest::SendResponse(xml/html) "
-//                     "setsockopt error setting TCP_CORK off ") + ENO);
-//     }
-#endif
-
     return( nBytes );
 }
 
@@ -502,22 +461,6 @@ qint64 HTTPRequest::SendResponseFile( const QString& sFileName )
 
     m_eResponseType     = ResponseTypeOther;
     m_sResponseTypeText = "text/plain";
-
-    // ----------------------------------------------------------------------
-    // Make it so the header is sent with the data
-    // ----------------------------------------------------------------------
-
-#ifdef USE_SETSOCKOPT
-//     // Never send out partially complete segments
-//     if (setsockopt(getSocketHandle(), SOL_TCP, TCP_CORK,
-//                    &g_on, sizeof( g_on )) < 0)
-//     {
-//         LOG(VB_HTTP, LOG_INFO,
-//             QString("HTTPRequest::SendResponseFile(%1) "
-//                     "setsockopt error setting TCP_CORK on " ).arg(sFileName) +
-//             ENO);
-//     }
-#endif
 
     QFile tmpFile( sFileName );
     if (tmpFile.exists( ) && tmpFile.open( QIODevice::ReadOnly ))
@@ -640,21 +583,6 @@ qint64 HTTPRequest::SendResponseFile( const QString& sFileName )
         }
     }
 
-    // ----------------------------------------------------------------------
-    // Turn off the option so any small remaining packets will be sent
-    // ----------------------------------------------------------------------
-
-#ifdef USE_SETSOCKOPT
-//     if (setsockopt(getSocketHandle(), SOL_TCP, TCP_CORK,
-//                    &g_off, sizeof( g_off )) < 0)
-//     {
-//         LOG(VB_HTTP, LOG_INFO,
-//             QString("HTTPRequest::SendResponseFile(%1) "
-//                     "setsockopt error setting TCP_CORK off ").arg(sFileName) +
-//             ENO);
-//     }
-#endif
-
     // -=>TODO: Only returns header length...
     //          should we change to return total bytes?
 
@@ -665,7 +593,7 @@ qint64 HTTPRequest::SendResponseFile( const QString& sFileName )
 //
 /////////////////////////////////////////////////////////////////////////////
 
-#define SENDFILE_BUFFER_SIZE 65536
+static constexpr size_t SENDFILE_BUFFER_SIZE { 65536 };
 
 qint64 HTTPRequest::SendData( QIODevice *pDevice, qint64 llStart, qint64 llBytes )
 {
@@ -694,8 +622,8 @@ qint64 HTTPRequest::SendData( QIODevice *pDevice, qint64 llStart, qint64 llBytes
     while ((sent < llBytes) && !pDevice->atEnd())
     {
         llBytesToRead  = std::min( (qint64)SENDFILE_BUFFER_SIZE, llBytesRemaining );
-
-        if (( llBytesRead = pDevice->read( aBuffer.data(), llBytesToRead )) != -1 )
+        llBytesRead = pDevice->read( aBuffer.data(), llBytesToRead );
+        if ( llBytesRead != -1 )
         {
             if ( WriteBlock( aBuffer.data(), llBytesRead ) == -1)
                 return -1;
@@ -758,7 +686,9 @@ void HTTPRequest::FormatErrorResponse( bool  bServerError,
     }
 
     if (m_bSOAPRequest)
+    {
         stream << "</s:Fault>" << SOAP_ENVELOPE_END;
+    }
 
     stream.flush();
 }
@@ -800,15 +730,17 @@ void HTTPRequest::FormatActionResponse(const NameValues &args)
                << m_sNameSpace << "\">\r\n";
     }
     else
+    {
         stream << "<" << m_sMethod << "Response>\r\n";
+    }
 
-    for (const auto & arg : qAsConst(args))
+    for (const auto & arg : std::as_const(args))
     {
         stream << "<" << arg.m_sName;
 
         if (arg.m_pAttributes)
         {
-            for (const auto & attr : qAsConst(*arg.m_pAttributes))
+            for (const auto & attr : std::as_const(*arg.m_pAttributes))
             {
                 stream << " " << attr.m_sName << "='"
                        << Encode( attr.m_sValue ) << "'";
@@ -831,7 +763,9 @@ void HTTPRequest::FormatActionResponse(const NameValues &args)
                    << SOAP_ENVELOPE_END;
     }
     else
+    {
         stream << "</" << m_sMethod << "Response>\r\n";
+    }
 
     stream.flush();
 }
@@ -863,7 +797,11 @@ void HTTPRequest::FormatFileResponse( const QString &sFileName )
     if (!m_sFileName.isEmpty() && file.exists())
     {
         QDateTime ims = QDateTime::fromString(GetRequestHeader("if-modified-since", ""), Qt::RFC2822Date);
-        ims.setTimeSpec(Qt::OffsetFromUTC);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+        ims.setTimeSpec(Qt::UTC);
+#else
+        ims.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
         if (ims.isValid() && ims <= file.lastModified()) // Strong validator
         {
             m_eResponseType = ResponseTypeHeader;
@@ -933,7 +871,7 @@ QString HTTPRequest::GetResponseProtocol()
 //     else if (m_nMajor == 2)
 //         QString("HTTP/2.0");
 
-    return QString("HTTP/1.1");
+    return {"HTTP/1.1"};
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1121,7 +1059,9 @@ QString HTTPRequest::TestMimeType( const QString &sFileName )
             file.close();
         }
         else
+        {
             LOG(VB_GENERAL, LOG_ERR, sLOC + "Could not read file");
+        }
     }
 
     LOG(VB_HTTP, LOG_INFO, sLOC + "type is " + sMIME);
@@ -1145,13 +1085,8 @@ long HTTPRequest::GetParameters( QString sParams, QStringMap &mapParams  )
 
     if (!sParams.isEmpty())
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList params = sParams.split('&', QString::SkipEmptyParts);
-#else
         QStringList params = sParams.split('&', Qt::SkipEmptyParts);
-#endif
-
-        for (const auto & param : qAsConst(params))
+        for (const auto & param : std::as_const(params))
         {
             QString sName  = param.section( '=', 0, 0 );
             QString sValue = param.section( '=', 1 );
@@ -1235,7 +1170,9 @@ bool HTTPRequest::ParseKeepAlive()
         bKeepAlive = false;
     }
     else if (sValueList.contains("keep-alive"))
+    {
         bKeepAlive = true;
+    }
 
    return bKeepAlive;
 }
@@ -1322,7 +1259,9 @@ bool HTTPRequest::ParseRequest()
                 sLine = ReadLine( 2s );
             }
             else
+            {
                 bDone = true;
+            }
         }
 
         // Dump request header
@@ -1458,11 +1397,7 @@ void HTTPRequest::ProcessRequestLine( const QString &sLine )
 {
     m_sRawRequest = sLine;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList tokens = sLine.split(m_procReqLineExp, QString::SkipEmptyParts);
-#else
     QStringList tokens = sLine.split(m_procReqLineExp, Qt::SkipEmptyParts);
-#endif
     int         nCount = tokens.count();
 
     // ----------------------------------------------------------------------
@@ -1553,12 +1488,7 @@ bool HTTPRequest::ParseRange( QString sRange,
     // Split multiple ranges
     // ----------------------------------------------------------------------
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList ranges = sRange.split(',', QString::SkipEmptyParts);
-#else
     QStringList ranges = sRange.split(',', Qt::SkipEmptyParts);
-#endif
-
     if (ranges.count() == 0)
         return false;
 
@@ -1634,15 +1564,10 @@ void HTTPRequest::ExtractMethodFromURL()
     // Strip out leading http://192.168.1.1:6544/ -> /
     // Should fix #8678
     // FIXME what about https?
-    QRegularExpression re {"^http[s]?://.*?/"};
+    static const QRegularExpression re {"^http[s]?://.*?/"};
     m_sBaseUrl.replace(re, "/");
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList sList = m_sBaseUrl.split('/', QString::SkipEmptyParts);
-#else
     QStringList sList = m_sBaseUrl.split('/', Qt::SkipEmptyParts);
-#endif
-
     m_sMethod = "";
 
     if (!sList.isEmpty())
@@ -1672,7 +1597,8 @@ bool HTTPRequest::ProcessSOAPPayload( const QString &sSOAPAction )
         QString("HTTPRequest::ProcessSOAPPayload : %1 : ").arg(sSOAPAction));
     QDomDocument doc ( "request" );
 
-    QString sErrMsg;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+   QString sErrMsg;
     int     nErrLine = 0;
     int     nErrCol  = 0;
 
@@ -1683,6 +1609,18 @@ bool HTTPRequest::ProcessSOAPPayload( const QString &sSOAPAction )
                 .arg(nErrLine) .arg(nErrCol) .arg(sErrMsg));
         return( false );
     }
+#else
+    auto parseResult =doc.setContent( m_sPayload,
+                                      QDomDocument::ParseOption::UseNamespaceProcessing );
+    if (parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+            QString( "Error parsing request at line: %1 column: %2 : %3" )
+                .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                .arg(parseResult.errorMessage));
+        return( false );
+    }
+#endif
 
     // --------------------------------------------------------------
     // XML Document Loaded... now parse it
@@ -1858,7 +1796,7 @@ QString HTTPRequest::GetETagHash(const QByteArray &data)
 
 bool HTTPRequest::IsUrlProtected( const QString &sBaseUrl )
 {
-    QString sProtected = UPnp::GetConfiguration()->GetValue( "HTTP/Protected/Urls", "/setup;/Config" );
+    QString sProtected = XmlConfiguration().GetValue("HTTP/Protected/Urls", "/setup;/Config");
 
     QStringList oList = sProtected.split( ';' );
 
@@ -2334,11 +2272,9 @@ void HTTPRequest::AddCORSHeaders( const QString &sOrigin )
 
     QStringList allowedOriginsList =
         gCoreContext->GetSetting("AllowedOriginsList", QString(
-            "https://chromecast.mythtv.org,"
-            "http://chromecast.mythtvcast.com"
-            )).split(",");
+            "https://chromecast.mythtv.org")).split(",");
 
-    for (const auto & origin : qAsConst(allowedOriginsList))
+    for (const auto & origin : std::as_const(allowedOriginsList))
     {
          if (origin.isEmpty())
             continue;
@@ -2358,7 +2294,7 @@ void HTTPRequest::AddCORSHeaders( const QString &sOrigin )
 
     if (VERBOSE_LEVEL_CHECK(VB_HTTP, LOG_DEBUG))
     {
-        for (const auto & origin : qAsConst(allowedOrigins))
+        for (const auto & origin : std::as_const(allowedOrigins))
             LOG(VB_HTTP, LOG_DEBUG, QString("Will allow Origin: %1").arg(origin));
     }
 

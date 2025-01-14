@@ -1,11 +1,12 @@
-// MythTV headers
-#include "dtvmultiplex.h"
-
-#include "mpeg/dvbdescriptors.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "cardutil.h"
 #include <utility>
+
+// MythTV headers
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
+#include "dtvmultiplex.h"
+#include "mpeg/dvbdescriptors.h"
+#include "cardutil.h"
 
 #define LOC      QString("DTVMux: ")
 
@@ -33,11 +34,11 @@ bool DTVMultiplex::operator==(const DTVMultiplex &m) const
 
 QString DTVMultiplex::toString() const
 {
-    QString ret = QString("%1 %2 %3 ")
+    QString ret = QString("%1 %2 %3 %4")
         .arg(QString::number(m_frequency), m_modulation.toString(),
-             m_inversion.toString());
+             m_inversion.toString(), QString::number(m_symbolRate));
 
-    ret += QString("%1 %2 %3 %4 %5 %6 %7")
+    ret += QString(" %1 %2 %3 %4 %5 %6 %7")
         .arg(m_hpCodeRate.toString(),    m_lpCodeRate.toString(),
              m_bandwidth.toString(),     m_transMode.toString(),
              m_guardInterval.toString(), m_hierarchy.toString(),
@@ -178,16 +179,83 @@ bool DTVMultiplex::ParseDVB_T(
         ok = true;
     }
 
-    ok &= m_modSys.Parse("DVB-T");
-    ok &= m_bandwidth.Parse(_bandwidth);
-    ok &= m_hpCodeRate.Parse(_coderate_hp);
-    ok &= m_lpCodeRate.Parse(_coderate_lp);
-    ok &= m_modulation.Parse(_modulation);
-    ok &= m_transMode.Parse(_trans_mode);
-    ok &= m_hierarchy.Parse(_hierarchy);
-    ok &= m_guardInterval.Parse(_guard_interval);
+    m_frequency = _frequency.toUInt(&ok);
+    if (!ok)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid frequency parameter " + _frequency);
+    }
+
     if (ok)
-        m_frequency = _frequency.toInt(&ok);
+    {
+        ok &= m_modSys.Parse("DVB-T");
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid modulation system parameter " + "DVB-T");
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_bandwidth.Parse(_bandwidth);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid modulation system parameter " + _bandwidth);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_hpCodeRate.Parse(_coderate_hp);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid coderate_hp parameter " + _coderate_hp);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_lpCodeRate.Parse(_coderate_lp);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid coderate_lp parameter " + _coderate_lp);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_modulation.Parse(_modulation);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid modulation parameter " + _modulation);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_transMode.Parse(_trans_mode);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid transmission mode parameter " + _trans_mode);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_hierarchy.Parse(_hierarchy);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid hierarchy parameter " + _hierarchy);
+        }
+    }
+
+    if (ok)
+    {
+        ok &= m_guardInterval.Parse(_guard_interval);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid guard interval parameter " + _guard_interval);
+        }
+    }
 
     return ok;
 }
@@ -207,7 +275,7 @@ bool DTVMultiplex::ParseDVB_S_and_C(
         ok = true;
     }
 
-    m_symbolRate = _symbol_rate.toInt();
+    m_symbolRate = _symbol_rate.toUInt();
     if (!m_symbolRate)
     {
         LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid symbol rate " +
@@ -216,14 +284,44 @@ bool DTVMultiplex::ParseDVB_S_and_C(
         return false;
     }
 
-    ok &= m_fec.Parse(_fec_inner);
-    ok &= m_modulation.Parse(_modulation);
-
-    if (!_polarity.isEmpty())
-        m_polarity.Parse(_polarity.toLower());
+    if (ok)
+    {
+        ok &= m_fec.Parse(_fec_inner);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid fec parameter " + _fec_inner);
+        }
+    }
 
     if (ok)
-        m_frequency = _frequency.toInt(&ok);
+    {
+        ok &= m_modulation.Parse(_modulation.toLower());
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid modulation parameter " + _modulation);
+        }
+    }
+
+    if (ok)
+    {
+        if (!_polarity.isEmpty())
+        {
+            ok = m_polarity.Parse(_polarity.toLower());
+            if (!ok)
+            {
+                LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid polarity parameter " + _polarity);
+            }
+        }
+    }
+
+    if (ok)
+    {
+        m_frequency = _frequency.toUInt(&ok);
+        if (!ok)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Invalid frequency parameter " + _frequency);
+        }
+    }
 
     return ok;
 }
@@ -274,6 +372,16 @@ bool DTVMultiplex::ParseDVB_S2(
     const QString &_modulation,  const QString &_polarity,
     const QString &_mod_sys,     const QString &_rolloff)
 {
+    LOG(VB_GENERAL, LOG_DEBUG, LOC + "ParseDVB_S2" +
+        " frequency:"   + _frequency +
+        " inversion:"   + _inversion +
+        " symbol_rate:" + _symbol_rate +
+        " fec_inner:"   + _fec_inner +
+        " modulation:"  + _modulation +
+        " polarity:"    + _polarity +
+        " mod_sys:"     + _mod_sys +
+        " rolloff:"     + _rolloff);
+
     bool ok = ParseDVB_S_and_C(_frequency, _inversion, _symbol_rate,
                                _fec_inner, _modulation, _polarity);
 
@@ -317,22 +425,6 @@ bool DTVMultiplex::ParseDVB_T2(
     m_modSys = DTVModulationSystem::kModulationSystem_UNDEFINED;
     m_modSys.Parse(_mod_sys);
 
-    // Accept 0 for DVB-T
-    if (_mod_sys == "0")
-    {
-        m_modSys = DTVModulationSystem::kModulationSystem_DVBT;
-        LOG(VB_GENERAL, LOG_WARNING, LOC + "Deprecated DVB-T modulation system " +
-                QString("parameter '%1', using %2.").arg(_mod_sys, m_modSys.toString()));
-    }
-
-    // Accept 1 for DVB-T2
-    if (_mod_sys == "1")
-    {
-        m_modSys = DTVModulationSystem::kModulationSystem_DVBT2;
-        LOG(VB_GENERAL, LOG_WARNING, LOC + "Deprecated DVB-T2 modulation system " +
-                QString("parameter '%1', using %2.").arg(_mod_sys, m_modSys.toString()));
-    }
-
     // We have a DVB-T2 tuner, change undefined modulation system to DVB-T2
     if (DTVModulationSystem::kModulationSystem_UNDEFINED == m_modSys)
     {
@@ -362,12 +454,14 @@ bool DTVMultiplex::ParseTuningParams(
     const QString& _modulation,   const QString& _bandwidth,
     const QString& _mod_sys,      const QString& _rolloff)
 {
-    if (DTVTunerType::kTunerTypeDVBT == type)
+    if ((DTVTunerType::kTunerTypeDVBT  == type) ||
+        (DTVTunerType::kTunerTypeDVBT2 == type))
     {
-        return ParseDVB_T(
+        return ParseDVB_T2(
             _frequency,       _inversion,       _bandwidth,
             _hp_code_rate,    _lp_code_rate,    _ofdm_modulation,
-            _trans_mode,      _guard_interval,  _hierarchy);
+            _trans_mode,      _guard_interval,  _hierarchy,
+            _mod_sys);
     }
 
     if (DTVTunerType::kTunerTypeDVBC  == type)
@@ -393,14 +487,6 @@ bool DTVMultiplex::ParseTuningParams(
             _mod_sys,         _rolloff);
     }
 
-    if (DTVTunerType::kTunerTypeDVBT2 == type)
-    {
-        return ParseDVB_T2(
-            _frequency,       _inversion,       _bandwidth,
-            _hp_code_rate,    _lp_code_rate,    _ofdm_modulation,
-            _trans_mode,      _guard_interval,  _hierarchy,
-            _mod_sys);
-    }
 
     if (DTVTunerType::kTunerTypeATSC == type)
     {
@@ -606,7 +692,9 @@ bool ScanDTVTransport::FillFromDB(DTVTunerType type, uint mplexid)
             false, false, false, false,
             false, false, false, 0,
             query.value(17).toString(), /* default_authority */
-            query.value(18).toUInt());  /* service_type */
+            query.value(18).toUInt(),   /* service_type */
+            0,                          /* logical_channel */
+            0);                         /* simulcast_channel */
 
         m_channels.push_back(chan);
     }

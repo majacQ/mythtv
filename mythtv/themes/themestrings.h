@@ -5,6 +5,7 @@ void strings_null() {
     ThemeUI::tr(" Retro Originally by Gerhard Aldorf MythUI version based on MythCenter by Jeroen Brosens Conversion of Retro to MythUI by Chris Candreva A generally blue theme. Icon style is realistic based on clasic, 'Retro' styles. ");
     ThemeUI::tr("# to Keep:");
     ThemeUI::tr("% - |year%% - |length%");
+    ThemeUI::tr("%(|REMAININGTIME|)%%(|BEHINDTIME|)%");
     ThemeUI::tr("%(|USERRATING)%");
     ThemeUI::tr("%00x00%");
     ThemeUI::tr("%00x00| %%SUBTITLE%");
@@ -52,6 +53,7 @@ void strings_null() {
     ThemeUI::tr("%DESCRIPTION% %\n(|EXTRA|)%");
     ThemeUI::tr("%DESCRIPTION% (%ERRATA%)");
     ThemeUI::tr("%DESCRIPTION% (%LENMINS%) %YEARSTARS% %PROGRAMID%");
+    ThemeUI::tr("%DESCRIPTION%% |VALUE%%UNITS%% (|REMAININGTIME| remaining)%% (|BEHINDTIME| behind)%");
     ThemeUI::tr("%DESCRIPTION%\n%ERRATA%");
     ThemeUI::tr("%DESCRIPTION|\n%%ERRATA%");
     ThemeUI::tr("%DIRECTOR%");
@@ -94,6 +96,8 @@ void strings_null() {
     ThemeUI::tr("%SHORTTIMEDATE%");
     ThemeUI::tr("%SOURCENAME|\n%%CHANID| %");
     ThemeUI::tr("%STARTDATE%  (%STARTTIME% - %ENDTIME%)  %LENMINS%");
+    ThemeUI::tr("%STARTDATE% %STARTTIME%%-|ENDTIME| %%00X00| %\n%\"|SUBTITLE|\" %%(|ORIGINALAIRDATE|)%");
+    ThemeUI::tr("%STARTDATE% %STARTTIME%-%ENDTIME% : %LENMINS%");
     ThemeUI::tr("%STARTDATE|, %%STARTTIME%% - |ENDTIME%");
     ThemeUI::tr("%STARTDATE|, %%STARTTIME%% - |ENDTIME|: %%LENMINS%");
     ThemeUI::tr("%STARTDATE|, %%STARTTIME%%- |ENDTIME%");
@@ -206,6 +210,7 @@ void strings_null() {
     ThemeUI::tr("%playlistplayedtime% of %playlisttotaltime%");
     ThemeUI::tr("%progpriority% / %finalpriority%");
     ThemeUI::tr("%rating |USERRATING%");
+    ThemeUI::tr("%recordedpercent%");
     ThemeUI::tr("%rectypechar% - %titlesubtitle%");
     ThemeUI::tr("%rectypestatus% on card number %card%");
     ThemeUI::tr("%rectypestatus%% on card number |card%");
@@ -214,9 +219,9 @@ void strings_null() {
     ThemeUI::tr("%shortstarttimedate% | %titlesubtitle%");
     ThemeUI::tr("%shortstarttimedate% | %titlesubtitle% | %channel%");
     ThemeUI::tr("%startdate%% - |00x00%\n%title%");
-    ThemeUI::tr("%startdate%%| startyear%, %starttime%");
     ThemeUI::tr("%startdate%%| year%");
     ThemeUI::tr("%startdate%%| year%, %starttime% - %endtime% (%lenmins%)");
+    ThemeUI::tr("%startdate%, %starttime%");
     ThemeUI::tr("%startdate|, %%starttime%");
     ThemeUI::tr("%startdate|, %%starttime%% - |endtime%");
     ThemeUI::tr("%station% - %channel%");
@@ -238,6 +243,7 @@ void strings_null() {
     ThemeUI::tr("%userrating%");
     ThemeUI::tr("%userrating|/10%");
     ThemeUI::tr("%volume% %(|mute|)%");
+    ThemeUI::tr("%watchedpercent%");
     ThemeUI::tr("%year%% by |director%%, |length%%, rating: |userrating%");
     ThemeUI::tr("%year|, %%timedate%");
     ThemeUI::tr("%|(STARS|) %%DESCRIPTION%");
@@ -254,6 +260,10 @@ void strings_null() {
     ThemeUI::tr("%|\"SUBTITLE|\"%\n%YEARSTARS%%DESCRIPTION%");
     ThemeUI::tr("%|\"subtitle|\" %%stars| %%description%");
     ThemeUI::tr("%|\"subtitle|\"%% |stars| %%description%");
+    ThemeUI::tr("%|recordedpercent|%%");
+    ThemeUI::tr("%|recordedpercent|%% recorded");
+    ThemeUI::tr("%|watchedpercent|%%");
+    ThemeUI::tr("%|watchedpercent|%% watched");
     ThemeUI::tr("(%1)");
     ThemeUI::tr("(%1) +");
     ThemeUI::tr("(%STARTTIME% - %ENDTIME%)  %LENMINS%");
@@ -439,8 +449,10 @@ void strings_null() {
     ThemeUI::tr("AudioCodec: TRUEHD");
     ThemeUI::tr("AudioCodec: VORBIS");
     ThemeUI::tr("AudioCodec: WMAPRO");
+    ThemeUI::tr("Auto Extend:");
     ThemeUI::tr("Auto expire:");
     ThemeUI::tr("Automatically Commercial Flag Recordings");
+    ThemeUI::tr("Automatically Extend:");
     ThemeUI::tr("Automatically Look Up Metadata");
     ThemeUI::tr("Automatically Transcode Recordings");
     ThemeUI::tr("Available Buffer");
@@ -704,12 +716,12 @@ void strings_null() {
     ThemeUI::tr("Create a Custom Recording Rule");
     ThemeUI::tr("Create advanced recording rules");
     ThemeUI::tr("Create and manage your music playlists");
-    ThemeUI::tr("Creating thumbnail %1");
     ThemeUI::tr("Current Profile:");
     ThemeUI::tr("Current Recording(s)");
     ThemeUI::tr("Current Recording(s):");
     ThemeUI::tr("Current Recordings");
     ThemeUI::tr("Current Rule Phrase:");
+    ThemeUI::tr("Current View:");
     ThemeUI::tr("Current phrase to search for:");
     ThemeUI::tr("Current:");
     ThemeUI::tr("Currently Playing:");
@@ -936,6 +948,7 @@ void strings_null() {
     ThemeUI::tr("Find your");
     ThemeUI::tr("Finish");
     ThemeUI::tr("Firewall");
+    ThemeUI::tr("First Conflict:");
     ThemeUI::tr("First Letter:");
     ThemeUI::tr("Flag");
     ThemeUI::tr("For %ASPECT% displays.% By |AUTHORNAME%% <|AUTHOREMAIL|>%.");
@@ -1093,6 +1106,7 @@ void strings_null() {
     ThemeUI::tr("Level");
     ThemeUI::tr("Limit Handling:");
     ThemeUI::tr("List Options");
+    ThemeUI::tr("List Overview");
     ThemeUI::tr("List item:");
     ThemeUI::tr("Listen to");
     ThemeUI::tr("Listen to Internet");
@@ -1427,6 +1441,7 @@ void strings_null() {
     ThemeUI::tr("Post Processing Options");
     ThemeUI::tr("Post Processing Options Editor");
     ThemeUI::tr("Post processing");
+    ThemeUI::tr("Post-Processing Options");
     ThemeUI::tr("Power Search");
     ThemeUI::tr("Powersearch");
     ThemeUI::tr("PreRecorded");
@@ -1468,6 +1483,7 @@ void strings_null() {
     ThemeUI::tr("Program Searches");
     ThemeUI::tr("Program Title");
     ThemeUI::tr("Programid");
+    ThemeUI::tr("Programme Finder");
     ThemeUI::tr("Programme Searches");
     ThemeUI::tr("Programs");
     ThemeUI::tr("Protocol Version Mismatch");
@@ -1548,6 +1564,7 @@ void strings_null() {
     ThemeUI::tr("Resolution: %1");
     ThemeUI::tr("Resolution: %RESOLUTION%");
     ThemeUI::tr("Resolution: %resolution% - %aspect| \n%%DESCRIPTION%");
+    ThemeUI::tr("Restore Data");
     ThemeUI::tr("Result");
     ThemeUI::tr("Result:");
     ThemeUI::tr("Results found!");
@@ -1562,6 +1579,7 @@ void strings_null() {
     ThemeUI::tr("Rotor Movement");
     ThemeUI::tr("Rule Clause:");
     ThemeUI::tr("Rule Name:");
+    ThemeUI::tr("Rule Overview");
     ThemeUI::tr("Rule SQL:");
     ThemeUI::tr("Rule Type:");
     ThemeUI::tr("Rule active:");
@@ -1623,6 +1641,7 @@ void strings_null() {
     ThemeUI::tr("Schedule info");
     ThemeUI::tr("Schedule programs");
     ThemeUI::tr("Scheduled Recordings");
+    ThemeUI::tr("Schedules Overview");
     ThemeUI::tr("Screen");
     ThemeUI::tr("Screen Setup Wizards");
     ThemeUI::tr("Screen setup");
@@ -1890,7 +1909,6 @@ void strings_null() {
     ThemeUI::tr("Surround 5.1");
     ThemeUI::tr("Surround 7.0");
     ThemeUI::tr("Surround 7.1");
-    ThemeUI::tr("Syncing image %1");
     ThemeUI::tr("System");
     ThemeUI::tr("System Event Command Editor");
     ThemeUI::tr("System Event Handlers");
@@ -1989,6 +2007,7 @@ void strings_null() {
     ThemeUI::tr("Tweets");
     ThemeUI::tr("Twitter");
     ThemeUI::tr("Twitter Timeline");
+    ThemeUI::tr("Type");
     ThemeUI::tr("Type Priority : %storagegroup%");
     ThemeUI::tr("Type Priority:");
     ThemeUI::tr("Type of transition between two images:");

@@ -3,13 +3,14 @@
 #include <QDateTime>
 
 // MythTV
-#include "mythlogging.h"
-#include "mthreadpool.h"
-#include "mythdb.h"
-#include "remotefile.h"
-#include "mythdownloadmanager.h"
-#include "mythdate.h"
-#include "mythdirs.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remotefile.h"
+
 #include "mythuithemecache.h"
 
 // Std
@@ -24,7 +25,7 @@
 MythUIThemeCache::MythUIThemeCache()
   : m_imageThreadPool(new MThreadPool("MythUIHelper"))
 {
-    m_maxCacheSize.fetchAndStoreRelease(GetMythDB()->GetNumSetting("UIImageCacheSize", 30) * 1024 * 1024);
+    m_maxCacheSize.fetchAndStoreRelease(GetMythDB()->GetNumSetting("UIImageCacheSize", 30) * 1024LL * 1024);
     LOG(VB_GUI, LOG_INFO, LOC + QString("MythUI Image Cache size set to %1 bytes")
         .arg(m_maxCacheSize.fetchAndAddRelease(0)));
 }
@@ -93,7 +94,7 @@ void MythUIThemeCache::ClearOldImageCache()
 
     QMap<QDateTime, QString> dirtimes;
 
-    for (const auto & fi : qAsConst(list))
+    for (const auto & fi : std::as_const(list))
     {
         if (fi.isDir() && !fi.isSymLink())
         {
@@ -116,7 +117,7 @@ void MythUIThemeCache::ClearOldImageCache()
         dirtimes.erase(dirtimes.begin());
     }
 
-    for (const auto & dirtime : qAsConst(dirtimes))
+    for (const auto & dirtime : std::as_const(dirtimes))
         LOG(VB_GUI | VB_FILE, LOG_INFO, LOC + QString("Keeping cache dir: %1").arg(dirtime));
 }
 
@@ -135,7 +136,7 @@ void MythUIThemeCache::RemoveCacheDir(const QString& Dir)
 
     dir.setFilter(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
     QFileInfoList list = dir.entryInfoList();
-    for (const auto & fi : qAsConst(list))
+    for (const auto & fi : std::as_const(list))
     {
         if (fi.isFile() && !fi.isSymLink())
         {
@@ -188,7 +189,7 @@ void MythUIThemeCache::PruneCacheDir(const QString& dirname)
     int kept = 0;
     int deleted = 0;
     int errors = 0;
-    for (const QFileInfo & fi : qAsConst(entries))
+    for (const QFileInfo & fi : std::as_const(entries))
     {
         struct stat buf {};
         QString fullname = fi.filePath();
@@ -364,7 +365,7 @@ MythImage* MythUIThemeCache::LoadCacheImage(QString File, const QString& Label,
                     else
                     {
                         LOG(VB_GUI | VB_FILE, LOG_WARNING, LOC +
-                            QString("LoadCacheImage: Could not load :%1")
+                            QString("LoadCacheImage: Could not load: %1")
                             .arg(cachefilepath));
 
                         ret->SetIsInCache(false);
@@ -425,13 +426,7 @@ MythImage *MythUIThemeCache::CacheImage(const QString& URL, MythImage* Image, bo
     // delete the oldest cached images until we fall below threshold.
     QMutexLocker locker(&m_cacheLock);
 
-    while ((m_cacheSize.fetchAndAddOrdered(0) +
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-       Image->byteCount()
-#else
-       Image->sizeInBytes()
-#endif
-        ) >=
+    while ((m_cacheSize.fetchAndAddOrdered(0) + Image->sizeInBytes()) >=
            m_maxCacheSize.fetchAndAddOrdered(0) && !m_imageCache.empty())
     {
         QMap<QString, MythImage *>::iterator it = m_imageCache.begin();
@@ -458,13 +453,7 @@ MythImage *MythUIThemeCache::CacheImage(const QString& URL, MythImage* Image, bo
         if (count > 0)
         {
             LOG(VB_GUI | VB_FILE, LOG_INFO, LOC + QString("Cache too big (%1), removing :%2:")
-                .arg(m_cacheSize.fetchAndAddOrdered(0) +
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-             Image->byteCount()
-#else
-             Image->sizeInBytes()
-#endif
-             )
+                .arg(m_cacheSize.fetchAndAddOrdered(0) + Image->sizeInBytes())
                 .arg(oldestKey));
 
             m_imageCache[oldestKey]->SetIsInCache(false);
@@ -489,12 +478,7 @@ MythImage *MythUIThemeCache::CacheImage(const QString& URL, MythImage* Image, bo
         Image->SetIsInCache(true);
         LOG(VB_GUI | VB_FILE, LOG_INFO, LOC +
             QString("NOT IN RAM CACHE, Adding, and adding to size :%1: :%2:").arg(URL)
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        .arg(Image->byteCount())
-#else
-        .arg(Image->sizeInBytes())
-#endif
-        );
+        .arg(Image->sizeInBytes()));
     }
 
     LOG(VB_GUI | VB_FILE, LOG_INFO, LOC + QString("MythUIHelper::CacheImage : Cache Count = :%1: size :%2:")
@@ -543,7 +527,7 @@ void MythUIThemeCache::RemoveFromCacheByFile(const QString& File)
     QDir dir(GetThemeCacheDir());
     QFileInfoList list = dir.entryInfoList();
 
-    for (const auto & fileInfo : list)
+    for (const auto & fileInfo : std::as_const(list))
     {
         if (fileInfo.fileName().contains(partialKey))
         {
@@ -574,25 +558,13 @@ bool MythUIThemeCache::IsImageInCache(const QString& URL)
 void MythUIThemeCache::IncludeInCacheSize(MythImage* Image)
 {
     if (Image)
-    {
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        m_cacheSize.fetchAndAddOrdered(Image->byteCount());
-#else
         m_cacheSize.fetchAndAddOrdered(Image->sizeInBytes());
-#endif
-    }
 }
 
 void MythUIThemeCache::ExcludeFromCacheSize(MythImage* Image)
 {
     if (Image)
-    {
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        m_cacheSize.fetchAndAddOrdered(-Image->byteCount());
-#else
         m_cacheSize.fetchAndAddOrdered(-Image->sizeInBytes());
-#endif
-    }
 }
 
 MThreadPool* MythUIThemeCache::GetImageThreadPool()

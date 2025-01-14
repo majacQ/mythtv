@@ -788,7 +788,7 @@
         </imagetype>
 
         <textarea name="level_label" from="basetextarea">
-            <area>960,670,210,30</area>
+            <area>920,670,250,30</area>
             <value>Parental Level</value>
             <align>right,vcenter</align>
         </textarea>
@@ -1016,6 +1016,7 @@
 
         <buttonlist name="child_select" from="baseselector">
             <position>430,270</position>
+            <searchposition>220,310</searchposition>
         </buttonlist>
 
         <checkbox name="browse_check" from="basecheckbox">
@@ -1419,7 +1420,7 @@
         </checkbox>
 
         <textarea name="altcheck_text" from="basetextarea">
-            <area>500,450,300,30</area>
+            <area>400,450,400,30</area>
             <value>Enable Alternate Player:</value>
         </textarea>
 

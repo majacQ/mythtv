@@ -5,13 +5,13 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "libmythbase/mythlogging.h"
+
 #include "dsmccbiop.h"
 #include "dsmccreceiver.h"
 #include "dsmcccache.h"
 #include "dsmccobjcarousel.h"
 #include "dsmcc.h"
-
-#include "mythlogging.h"
 
 BiopNameComp::~BiopNameComp()
 {
@@ -93,7 +93,9 @@ int BiopBinding::Process(const unsigned char *data)
         memcpy(m_objInfo, data + off, m_objInfoLen);
     }
     else
+    {
         m_objInfo = nullptr;
+    }
 
     off += m_objInfoLen;
 

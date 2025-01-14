@@ -12,23 +12,23 @@
 #include <QDomElement>
 
 // myth
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythfontproperties.h"
 #include "mythuihelper.h"
 #include "x11colors.h"
-#include "mythlogging.h"
 #include "mythimage.h"
 #include "mythuitype.h"
 #include "mythuiimage.h"
 #include "mythmainwindow.h"
-#include "mythdb.h"
 
 #define LOC QString("MythUIGuideGrid: ")
 
 MythUIGuideGrid::MythUIGuideGrid(MythUIType *parent, const QString &name)
-    : MythUIType(parent, name)
+    : MythUIType(parent, name),
+      m_font(new MythFontProperties())
 {
-    m_font = new MythFontProperties();
-
     QMap<QString, QString> catColors;
     parseDefaultCategoryColors(catColors);
     SetCategoryColors(catColors);
@@ -36,7 +36,9 @@ MythUIGuideGrid::MythUIGuideGrid(MythUIType *parent, const QString &name)
 
 void MythUIGuideGrid::Finalize(void)
 {
-    m_rowCount = m_channelCount;
+    // Grid will probably never have more than 10,000 channels.  This
+    // number is to prevent a compiler warning, so change as needed.
+    m_rowCount = std::clamp(m_channelCount, 1, 10000);
 
     m_allData = new QList<UIGTCon *>[m_rowCount];
 
@@ -288,7 +290,7 @@ void MythUIGuideGrid::DrawSelf(MythPainter *p, int xoffset, int yoffset,
     p->SetClipRect(clipRect);
     for (int i = 0; i < m_rowCount; i++)
     {
-        for (auto *data : qAsConst(m_allData[i]))
+        for (auto *data : std::as_const(m_allData[i]))
         {
             if (data->m_recStat == 0)
                 drawBackground(p, xoffset, yoffset, data, alphaMod);
@@ -306,7 +308,7 @@ void MythUIGuideGrid::DrawSelf(MythPainter *p, int xoffset, int yoffset,
 
     for (int i = 0; i < m_rowCount; i++)
     {
-        for (auto *data : qAsConst(m_allData[i]))
+        for (auto *data : std::as_const(m_allData[i]))
         {
             drawRecDecoration(p, xoffset, yoffset, data, alphaMod);
         }
@@ -560,7 +562,9 @@ void MythUIGuideGrid::drawBackground(MythPainter *p, int xoffset, int yoffset, U
             }
         }
         else
+        {
             area.adjust(breakin, breakin, -breakin, -breakin);
+        }
     }
     else
     {
@@ -586,7 +590,9 @@ void MythUIGuideGrid::drawBackground(MythPainter *p, int xoffset, int yoffset, U
             }
         }
         else
+        {
             area.adjust(breakin, breakin, -breakin, -breakin);
+        }
     }
 
     if (area.width() <= 1)
@@ -676,12 +682,12 @@ QPoint MythUIGuideGrid::GetRowAndColumn(QPoint position)
     return {-1,-1};
 }
 
-void MythUIGuideGrid::SetProgramInfo(int row, int col, const QRect area,
+void MythUIGuideGrid::SetProgramInfo(int row,
+                                     [[maybe_unused]] int col, const QRect area,
                                      const QString &title, const QString &genre,
                                      int arrow, int recType, int recStat,
                                      bool selected)
 {
-    (void)col;
     auto *data = new UIGTCon(area, title, genre, arrow, recType, recStat);
     m_allData[row].append(data);
 
@@ -702,7 +708,7 @@ bool MythUIGuideGrid::parseDefaultCategoryColors(QMap<QString, QString> &catColo
     QFile f;
     QStringList searchpath = GetMythUI()->GetThemeSearchPath();
 
-    for (const auto & path : qAsConst(searchpath))
+    for (const auto & path : std::as_const(searchpath))
     {
         f.setFileName(path + "categories.xml");
 
@@ -720,6 +726,7 @@ bool MythUIGuideGrid::parseDefaultCategoryColors(QMap<QString, QString> &catColo
 #endif
 
     QDomDocument doc;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
@@ -733,6 +740,18 @@ bool MythUIGuideGrid::parseDefaultCategoryColors(QMap<QString, QString> &catColo
         f.close();
         return false;
     }
+#else
+    auto parseResult = doc.setContent(&f);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("Parsing colors: %1 at line: %2 column: %3")
+            .arg(f.fileName()).arg(parseResult.errorLine).arg(parseResult.errorColumn) +
+            QString("\n\t\t\t%1").arg(parseResult.errorMessage));
+        f.close();
+        return false;
+    }
+#endif
 
     f.close();
 

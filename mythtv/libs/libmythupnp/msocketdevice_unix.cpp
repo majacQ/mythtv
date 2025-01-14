@@ -42,7 +42,7 @@
 ****************************************************************************/
 
 #include "qplatformdefs.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 #ifdef Q_OS_ANDROID
 #include <sys/socket.h>
@@ -86,8 +86,6 @@ static inline int qt_socket_socket(int domain, int type, int protocol)
 #endif
 
 #include "msocketdevice.h"
-
-#include "qwindowdefs.h"
 
 #include <cerrno>
 #include <sys/types.h>
@@ -254,7 +252,7 @@ bool MSocketDevice::blocking() const
 
     int s = fcntl(m_fd, F_GETFL, 0);
 
-    return !(s >= 0 && ((s & O_NDELAY) != 0));
+    return s < 0 || ((s & O_NDELAY) == 0);
 }
 
 

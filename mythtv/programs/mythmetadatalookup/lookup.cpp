@@ -1,22 +1,24 @@
-
-#include "lookup.h"
-
+// C++
 #include <vector>
 
+// Qt
 #include <QList>
 
-#include "programinfo.h"
-#include "recordingrule.h"
-#include "mythlogging.h"
-#include "jobqueue.h"
-#include "remoteutil.h"
-#include "mythcorecontext.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/jobqueue.h"
+#include "libmythtv/metadataimagehelper.h"
+#include "libmythtv/recordingrule.h"
 
-#include "metadataimagehelper.h"
+// MythMetadataLookup
+#include "lookup.h"
 
 LookerUpper::LookerUpper()
+  : m_metadataFactory(new MetadataFactory(this))
 {
-    m_metadataFactory = new MetadataFactory(this);
 }
 
 LookerUpper::~LookerUpper()
@@ -81,7 +83,9 @@ void LookerUpper::HandleAllRecordings(bool updaterules)
             m_metadataFactory->Lookup(pginfo, true, false, false);
         }
         else
+        {
             delete pginfo;
+        }
     }
 }
 
@@ -89,7 +93,7 @@ void LookerUpper::HandleAllRecordingRules()
 {
     m_updaterules = true;
 
-    vector<ProgramInfo *> recordingList;
+    std::vector<ProgramInfo *> recordingList;
 
     RemoteGetAllScheduledRecordings(recordingList);
 
@@ -106,7 +110,9 @@ void LookerUpper::HandleAllRecordingRules()
             m_metadataFactory->Lookup(pginfo, true, false, true);
         }
         else
+        {
             delete pginfo;
+        }
     }
 }
 
@@ -118,7 +124,7 @@ void LookerUpper::HandleAllArtwork(bool aggressive)
         m_updaterules = true;
 
     // First, handle all recording rules w/ inetrefs
-    vector<ProgramInfo *> recordingList;
+    std::vector<ProgramInfo *> recordingList;
 
     RemoteGetAllScheduledRecordings(recordingList);
     int maxartnum = 3;

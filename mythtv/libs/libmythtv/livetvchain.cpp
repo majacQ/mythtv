@@ -1,9 +1,12 @@
+#include <algorithm>
+
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/programinfo.h"
+
 #include "livetvchain.h"
-#include "mythcontext.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "programinfo.h"
-#include "mythsocket.h"
 #include "cardutil.h"
 
 #define LOC QString("LiveTVChain(%1): ").arg(m_id)
@@ -246,8 +249,7 @@ void LiveTVChain::ReloadAll(const QStringList &data)
     }
 
     m_curPos = ProgramIsAt(m_curChanId, m_curStartTs);
-    if (m_curPos < 0)
-        m_curPos = 0;
+    m_curPos = std::max(m_curPos, 0);
 
     if (m_switchId >= 0)
         m_switchId = ProgramIsAt(m_switchEntry.chanid,m_switchEntry.starttime);
@@ -397,8 +399,7 @@ void LiveTVChain::SetProgram(const ProgramInfo &pginfo)
     m_curStartTs = pginfo.GetRecordingStartTime();
 
     m_curPos = ProgramIsAt(pginfo);
-    if (m_curPos < 0)
-        m_curPos = 0;
+    m_curPos = std::max(m_curPos, 0);
     m_switchId = -1;
 }
 
@@ -569,7 +570,9 @@ void LiveTVChain::SwitchTo(int num)
         GetEntryAt(num, m_switchEntry);
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC + "SwitchTo() not switching to current");
+    }
 
     if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
     {
@@ -752,7 +755,7 @@ QStringList LiveTVChain::entriesToStringList() const
     QMutexLocker lock(&m_lock);
     QStringList ret;
     ret << QString::number(m_maxPos);
-    for (const auto & entry : qAsConst(m_chain))
+    for (const auto & entry : std::as_const(m_chain))
     {
         ret << QString::number(entry.chanid);
         ret << entry.starttime.toString(Qt::ISODate);

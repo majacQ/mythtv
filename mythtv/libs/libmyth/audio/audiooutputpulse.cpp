@@ -24,11 +24,10 @@
 
 // C++ headers
 #include <algorithm>
-using std::min;
 
 #define LOC     QString("PulseAudio: ")
 
-#define PULSE_MAX_CHANNELS 8
+static constexpr int8_t PULSE_MAX_CHANNELS { 8 };
 
 AudioOutputPulseAudio::AudioOutputPulseAudio(const AudioSettings &settings) :
     AudioOutputBase(settings)
@@ -92,7 +91,9 @@ AudioOutputSettings* AudioOutputPulseAudio::GetOutputSettings(bool /*digital*/)
         pa_threaded_mainloop_wait(m_mainloop);
     }
     else
+    {
         VBERROR("Failed to determine default sink samplerate");
+    }
 
     pa_threaded_mainloop_unlock(m_mainloop);
 
@@ -243,7 +244,7 @@ void AudioOutputPulseAudio::WriteAudio(uchar *aubuf, int size)
             size_t writable = pa_stream_writable_size(m_pstream);
             if (writable > 0)
             {
-                size_t write = min(to_write, writable);
+                size_t write = std::min(to_write, writable);
                 write_status = pa_stream_write(m_pstream, buf_ptr, write,
                                                nullptr, 0, PA_SEEK_RELATIVE);
 
@@ -275,8 +276,10 @@ void AudioOutputPulseAudio::WriteAudio(uchar *aubuf, int size)
         }
     }
     else
+    {
         VBERROR(fn_log_tag + QString("stream state not good: %1")
                              .arg(sstate,0,16));
+    }
 }
 
 int AudioOutputPulseAudio::GetBufferedOnSoundcard(void) const
@@ -334,8 +337,7 @@ void AudioOutputPulseAudio::SetVolumeChannel(int channel, int volume)
 
 // FIXME: This code did nothing at all so has been commented out for now
 //        until it's decided whether it was ever required
-//     volume = min(100, volume);
-//     volume = max(0, volume);
+//     volume = std::clamp(volume, 0, 100);
 
     if (gCoreContext->GetSetting("MixerControl", "PCM").toLower() == "pcm")
     {
@@ -480,11 +482,7 @@ QString AudioOutputPulseAudio::ChooseHost(void)
 
     if (pulse_host.isEmpty() && host != "default")
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        QString env_pulse_host = qgetenv("PULSE_SERVER");
-#else
         QString env_pulse_host = qEnvironmentVariable("PULSE_SERVER");
-#endif
         if (!env_pulse_host.isEmpty())
             pulse_host = env_pulse_host;
     }
@@ -525,7 +523,9 @@ bool AudioOutputPulseAudio::ConnectPlaybackStream(void)
                        (float)volume * (float)PA_VOLUME_NORM / 100.0F);
     }
     else
+    {
         pa_cvolume_reset(&m_volumeControl, m_channels);
+    }
 
     m_fragmentSize = (m_sampleRate * 25 * m_outputBytesPerFrame) / 1000;
 

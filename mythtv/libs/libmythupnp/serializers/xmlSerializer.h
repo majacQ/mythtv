@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -73,7 +73,7 @@ class UPNP_PUBLIC XmlSerializer : public Serializer
 
         bool     PropertiesAsAttributes {true};
 
-                 XmlSerializer( QIODevice *pDevice, const QString &sRequestName );
+                 XmlSerializer( QIODevice *pDevice, QString sRequestName );
         virtual ~XmlSerializer();
 
         QString GetContentType() override; // Serializer

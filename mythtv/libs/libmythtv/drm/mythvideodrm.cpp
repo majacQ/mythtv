@@ -3,12 +3,12 @@
 #include <qpa/qplatformnativeinterface.h>
 
 // MythTV
-#include "mythlogging.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
 #include "mythframe.h"
 #include "mythvideocolourspace.h"
-#include "platforms/mythdisplaydrm.h"
-#include "platforms/drm/mythdrmframebuffer.h"
+#include "libmythui/platforms/mythdisplaydrm.h"
+#include "libmythui/platforms/drm/mythdrmframebuffer.h"
 #include "drm/mythvideodrmutils.h"
 #include "drm/mythvideodrm.h"
 
@@ -23,7 +23,7 @@ MythVideoDRM::MythVideoDRM(MythVideoColourSpace* ColourSpace)
     if (m_colourSpace)
         m_colourSpace->IncrRef();
 
-    if (auto drmdisplay = HasMythMainWindow() ? dynamic_cast<MythDisplayDRM*>(GetMythMainWindow()->GetDisplay()) : nullptr; drmdisplay)
+    if (auto *drmdisplay = HasMythMainWindow() ? dynamic_cast<MythDisplayDRM*>(GetMythMainWindow()->GetDisplay()) : nullptr; drmdisplay)
     {
         if (m_device = drmdisplay->GetDevice(); m_device && m_device->Atomic() && m_device->Authenticated())
         {
@@ -74,17 +74,12 @@ MythVideoDRM::~MythVideoDRM()
     //m_device->DisableVideoPlane();
 }
 
-bool MythVideoDRM::IsValid()
-{
-    return m_valid;
-}
-
 void MythVideoDRM::ColourSpaceUpdated(bool /*PrimariesChanged*/)
 {
     if (!(m_colourSpace && m_device && m_videoPlane.get()))
         return;
 
-    MythAtomics queue;
+    MythAtomics queue; // NOLINT(cppcoreguidelines-init-variables)
     if (auto range = MythDRMProperty::GetProperty("COLOR_RANGE", m_videoPlane->m_properties); range.get())
     {
         auto rangev = MythVideoDRMUtils::FFmpegColorRangeToDRM(range, m_colourSpace->GetRange());

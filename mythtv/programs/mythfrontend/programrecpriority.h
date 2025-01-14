@@ -1,12 +1,14 @@
 #ifndef PROGRAMRECPROIRITY_H_
 #define PROGRAMRECPROIRITY_H_
 
+// C++
 #include <vector>
 
-#include "recordinginfo.h"
-#include "mythscreentype.h"
+// MythTV headers
+#include "libmythtv/recordinginfo.h"
+#include "libmythui/mythscreentype.h"
 
-// mythfrontend
+// MythFrontend
 #include "schedulecommon.h"
 
 class QDateTime;
@@ -55,6 +57,8 @@ class ProgramRecPriorityInfo : public RecordingInfo
     QDateTime     m_last_record;
     int           m_avg_delay   {0};
     QString       m_profile;
+    QString       m_recordingGroup;
+    QString       m_storageGroup;
 };
 
 class ProgramRecPriority : public ScheduleCommon
@@ -68,7 +72,7 @@ class ProgramRecPriority : public ScheduleCommon
     bool keyPressEvent(QKeyEvent *event) override; // MythScreenType
     void customEvent(QEvent *event) override; // ScheduleCommon
 
-    enum SortType
+    enum SortType : std::uint8_t
     {
         byTitle,
         byRecPriority,

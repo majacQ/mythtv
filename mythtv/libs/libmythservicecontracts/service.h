@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -64,6 +64,7 @@ class SERVICE_PUBLIC Service : public QObject
 
     public:
 
+        bool HAS_PARAM(const QString& p) const { return m_parsedParams.contains(p); }
         QList<QString> m_parsedParams; // lowercased
 };
 
@@ -80,6 +81,7 @@ inline Service::Service(QObject *parent) : QObject(parent)
 //
 //////////////////////////////////////////////////////////////////////////////
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define SCRIPT_CATCH_EXCEPTION( default, code ) \
             try                      \
             {                        \
@@ -107,6 +109,7 @@ inline Service::Service(QObject *parent) : QObject(parent)
 // first parameter.
 //////////////////////////////////////////////////////////////////////////////
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define Q_SCRIPT_DECLARE_QMETAOBJECT_MYTHTV(T, _Arg1) \
 template<> inline QScriptValue qscriptQMetaObjectConstructor<T>(QScriptContext *ctx, QScriptEngine *eng, T *) /* NOLINT(bugprone-macro-parentheses) */ \
 { \

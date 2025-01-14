@@ -8,7 +8,7 @@ from MythTV.static import MythSchema
 from MythTV.altdict import OrdDict, DictData
 from MythTV.logging import MythLog
 from MythTV.msearch import MSearch
-from MythTV.utility import datetime, dt, _donothing, QuickProperty, py23_repr
+from MythTV.utility import datetime, dt, _donothing, QuickProperty
 from MythTV.exceptions import MythError, MythDBError, MythTZError
 from MythTV.connections import DBConnection, LoggedCursor, XMLConnection
 
@@ -208,19 +208,19 @@ class DBData( DictData, MythSchema ):
         DictData.update(self, self._process(data))
 
     def copy(self):
-        return self.fromRaw(self.values(), self._db)
+        return self.fromRaw(list(self.values()), self._db)
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized %s at %s>" % \
+            return "<Uninitialized %s at %s>" % \
                         (self.__class__.__name__, hex(id(self)))
-        return u"<%s %s at %s>" % \
+        return "<%s %s at %s>" % \
                 (self.__class__.__name__, \
                  ','.join(["'%s'" % str(v) for v in self._wheredat]), \
                  hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __getstate__(self):
         data = {'data':DictData.__getstate__(self)}
@@ -290,7 +290,7 @@ class DBDataWrite( DBData ):
     def _sanitize(self, data, fill=True):
         """Remove fields from dictionary that are not in database table."""
         data = data.copy()
-        for key in data.keys():
+        for key in list(data.keys()):
             if key not in self._field_order:
                 del data[key]
         for key in self._defaults:
@@ -463,7 +463,7 @@ class DBDataRef( list ):
             self._changed = True
             self.__hash__()
         def __str__(self): return str(self.items())
-        def __repr__(self): return py23_repr(str(self))
+        def __repr__(self): return str(self)
         def __hash__(self):
             if self._changed:
                 self._hash = hash(sum(map(hash,self.values())))
@@ -550,9 +550,9 @@ class DBDataRef( list ):
         if data is None:
             with self._db as cursor:
                 cursor.execute("""SELECT %s FROM %s WHERE %s""" % \
-                            (','.join(self._datfields),
+                            (','.join(['`%s`' %x for x in self._datfields]),
                              self._table,
-                             ' AND '.join(['%s=?' % f for f in self._ref])),
+                             ' AND '.join(['`%s`=?' % f for f in self._ref])),
                          self._refdat)
                 for row in cursor:
                     list.append(self, self.SubData(zip(self._datfields, row)))
@@ -603,13 +603,13 @@ class DBDataRef( list ):
         with self._db as cursor:
             # remove old entries
             for v in (self._origdata&diff):
-                data = list(self._refdat)+v.values()
+                data = list(self._refdat)+list(v.values())
                 wf = []
                 for i,v in enumerate(data):
                     if v is None:
-                        wf.append('%s IS ?' % fields[i])
+                        wf.append('`%s` IS ?' % fields[i])
                     else:
-                        wf.append('%s=?' % fields[i])
+                        wf.append('`%s`=?' % fields[i])
                 cursor.execute("""DELETE FROM %s WHERE %s""" % \
                                    (self._table, ' AND '.join(wf)), data)
 
@@ -617,11 +617,11 @@ class DBDataRef( list ):
             data = []
             for v in (self&diff):
                 # add new entries
-                data.append(list(self._refdat)+v.values())
+                data.append(list(self._refdat)+list(v.values()))
             if len(data) > 0:
                 cursor.executemany("""INSERT INTO %s (%s) VALUES(%s)""" % \
                                     (self._table,
-                                     ','.join(fields),
+                                     ','.join(['`%s`' %x for x in fields]),
                                      ','.join(['?' for a in fields])), data)
         self._origdata = self.deepcopy()
 
@@ -705,18 +705,18 @@ class DBDataCRef( DBDataRef ):
         if self._populated and (not force):
             return
         datfields = self._datfields
-        reffield = '%s.%s' % (self._table[1],self._cref[-1])
+        reffield = '`%s`.`%s`' % (self._table[1],self._cref[-1])
 
         if data is None:
             with self._db as cursor:
                 cursor.execute("""SELECT %s FROM %s JOIN %s ON %s WHERE %s""" % \
-                          (','.join(datfields+[reffield]),
+                          (','.join(['`%s`' %x for x in datfields]+[reffield]),
                              self._table[0],
                              self._table[1],
-                             '%s.%s=%s.%s' % \
+                             '`%s`.`%s`=`%s`.`%s`' % \
                                     (self._table[0], self._cref[0],
                                      self._table[1], self._cref[-1]),
-                             ' AND '.join(['%s=?' % f for f in self._ref])),
+                             ' AND '.join(['`%s`=?' % f for f in self._ref])),
                         self._refdat)
 
                 for row in cursor:
@@ -748,7 +748,7 @@ class DBDataCRef( DBDataRef ):
                 fields = self._crdatfields
                 cursor.execute("""SELECT %s FROM %s WHERE %s""" % \
                             (self._cref[-1], self._table[1],
-                             ' AND '.join(['%s=?' % f for f in fields])),
+                             ' AND '.join(['`%s`=?' % f for f in fields])),
                         data)
                 res = cursor.fetchone()
                 if res is not None:
@@ -758,7 +758,7 @@ class DBDataCRef( DBDataRef ):
                 else:
                     cursor.execute("""INSERT INTO %s (%s) VALUES(%s)""" % \
                             (self._table[1],
-                             ','.join(self._crdatfields),
+                             ','.join(['`%s`' %x for x in self._crdatfields]),
                              ','.join(['?' for a in data])),
                         data)
                     d._cref = cursor.lastrowid
@@ -768,7 +768,7 @@ class DBDataCRef( DBDataRef ):
                 fields = self._rdatfields+self._cref[:1]+self._ref
                 cursor.execute("""INSERT INTO %s (%s) VALUES(%s)""" % \
                         (self._table[0],
-                         ','.join(fields),
+                         ','.join(['`%s`' %x for x in fields]),
                          ','.join(['?' for a in data])),
                     data)
 
@@ -780,14 +780,14 @@ class DBDataCRef( DBDataRef ):
                 fields = self._rdatfields+self._cref[:1]+self._ref
                 cursor.execute("""DELETE FROM %s WHERE %s""" % \
                         (self._table[0],
-                         ' AND '.join(['%s=?' % f for f in fields])),
+                         ' AND '.join(['`%s`=?' % f for f in fields])),
                     data)
             # remove unused cross-references
             for cr in crefs:
-                cursor.execute("""SELECT COUNT(1) FROM %s WHERE %s=?""" % \
+                cursor.execute("""SELECT COUNT(1) FROM %s WHERE `%s`=?""" % \
                         (self._table[0], self._cref[0]), [cr])
                 if cursor.fetchone()[0] == 0:
-                    cursor.execute("""DELETE FROM %s WHERE %s=?""" % \
+                    cursor.execute("""DELETE FROM %s WHERE `%s`=?""" % \
                             (self._table[1], self._cref[-1]), [cr])
                 cursor.nextset()
 
@@ -981,8 +981,7 @@ class DatabaseConfig( object ):
             if len(name):
                 self.profile = name[0]
 
-            for child in config.xpath('/Configuration/Database')[0]\
-                                                            .getchildren():
+            for child in list(config.xpath('/Configuration/Database')[0]):
                 if child.tag in self._conf_trans:
                     setattr(self, self._conf_trans[child.tag], child.text)
 
@@ -1009,8 +1008,8 @@ class DatabaseConfig( object ):
             trans = {'DBHostName':'hostname', 'DBUserName':'username',
                      'DBPassword':'password', 'DBName':'database',
                      'DBPort':'port'}
-            for child in config.xpath('/Configuration/UPnP/MythFrontend/'+\
-                                            'DefaultBackend')[0].getchildren():
+            for child in list(config.xpath('/Configuration/UPnP/MythFrontend/'+\
+                                            'DefaultBackend')[0]):
                 if child.tag in trans:
                     setattr(self, trans[child.tag], child.text)
         except:
@@ -1071,7 +1070,7 @@ class DatabaseConfig( object ):
             else:
                 raise MythError("Cannot find home directory to write to")
 
-        fp.write(etree.tostring(doc, pretty_print=True))
+        fp.write(etree.tostring(doc, encoding='unicode', pretty_print=True))
         fp.close()
 
 class DBCache( MythSchema ):
@@ -1116,13 +1115,14 @@ class DBCache( MythSchema ):
         """Provides a dictionary-like list of table fieldnames"""
         class _FieldData( OrdDict ):
             def __str__(self): return str(list(self))
-            def __repr__(self): return py23_repr(str(self))
+            def __repr__(self): return str(self)
             def __iter__(self): return self.iterkeys()
             def __init__(self, result):
+                # remove comments in 'type' like "datetime /* mariadb-5.3 */"
                 data = [(row[0],
                          OrdDict(zip( \
-                                ('type','null','key','default','extra'),
-                                row[1:])) \
+                            ('type','null','key','default','extra'),
+                            (row[1].split('/*', 1)[0].rstrip(), ) + row[2:])) \
                          )for row in result]
                 OrdDict.__init__(self, data)
             def __getitem__(self,key):
@@ -1135,7 +1135,7 @@ class DBCache( MythSchema ):
                         raise KeyError(str(key))
         _localvars = ['_field_order','_db','_log']
         def __str__(self): return str(list(self))
-        def __repr__(self): return py23_repr(str(self))
+        def __repr__(self): return str(self)
         def __iter__(self): return self.iterkeys()
         def __init__(self, db, log):
             OrdDict.__init__(self)
@@ -1160,7 +1160,7 @@ class DBCache( MythSchema ):
         class _HostSettings( OrdDict ):
             _localvars = ['_field_order','_log','_db','_host','_insert','_where']
             def __str__(self): return str(list(self))
-            def __repr__(self): return py23_repr(str(self))
+            def __repr__(self): return str(self)
             def __iter__(self): return self.iterkeys()
             def __init__(self, db, log, host):
                 OrdDict.__init__(self)
@@ -1230,11 +1230,11 @@ class DBCache( MythSchema ):
                                       WHERE %s""" % self._where)
                     for k,v in cursor:
                         OrdDict.__setitem__(self, k, v)
-                return self.iteritems()
+                return iter(self.items())
 
         _localvars = ['_field_order','_log','_db']
         def __str__(self): return str(list(self))
-        def __repr__(self): return py23_repr(str(self))
+        def __repr__(self): return str(self)
         def __iter__(self): return self.iterkeys()
         def __init__(self, db, log):
             OrdDict.__init__(self)
@@ -1428,11 +1428,11 @@ class StorageGroup( DBData ):
     Represents a single storage group entry
     """
     def __str__(self):
-        return u"<StorageGroup 'myth://%s@%s%s' at %s" % \
+        return "<StorageGroup 'myth://%s@%s%s' at %s" % \
                     (self.groupname, self.hostname,
                         self.dirname, hex(id(self)))
 
-    def __repr__(self): return py23_repr(str(self))
+    def __repr__(self): return str(self)
 
     def _evalwheredat(self, wheredat=None):
         DBData._evalwheredat(self, wheredat)

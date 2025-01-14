@@ -1,7 +1,7 @@
 // MythTV
-#include "mythlogging.h"
-#include "mythmainwindow.h"
-#include "mythscreentype.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreentype.h"
 #include "mythmediaoverlay.h"
 
 // Std
@@ -44,7 +44,7 @@ void MythMediaOverlay::SetPlayer(MythPlayerUI *Player)
 
 void MythMediaOverlay::TearDown()
 {
-    for (MythScreenType * screen : qAsConst(m_children))
+    for (MythScreenType * screen : std::as_const(m_children))
         delete screen;
     m_children.clear();
 }
@@ -62,7 +62,7 @@ int MythMediaOverlay::GetFontStretch() const
 bool MythMediaOverlay::Init(QRect Rect, float FontAspect)
 {
     int newstretch = static_cast<int>(lroundf(FontAspect * 100));
-    if (!((Rect == m_rect) && (newstretch == m_fontStretch)))
+    if (!(Rect == m_rect) || (newstretch != m_fontStretch))
     {
         TearDown();
         m_rect = Rect;

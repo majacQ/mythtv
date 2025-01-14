@@ -39,17 +39,17 @@ void TestCommandLineParser::test_getOpt_data (void)
     QTest::addColumn<QString>("expectedOpt");
     QTest::addColumn<QString>("expectedVal");
 
-    QTest::newRow("end")      << static_cast<int>(99) << MythCommandLineParser::Result::kEnd << "" << "";
-    QTest::newRow("empty")    << static_cast<int>(1)  << MythCommandLineParser::Result::kEmpty << "" << "";
-    QTest::newRow("first")    << static_cast<int>(0)  << MythCommandLineParser::Result::kOptOnly << "-h" << "";
-    QTest::newRow("combo")    << static_cast<int>(2)  << MythCommandLineParser::Result::kCombOptVal << "-zed" << "100";
-    QTest::newRow("badcombo") << static_cast<int>(3)  << MythCommandLineParser::Result::kInvalid << "-bad=100=101" << "";
-    QTest::newRow("passthru") << static_cast<int>(4)  << MythCommandLineParser::Result::kPassthrough << "" << "";
-    QTest::newRow("argument") << static_cast<int>(5)  << MythCommandLineParser::Result::kArg << "" << "foo";
-    QTest::newRow("arg val1") << static_cast<int>(6)  << MythCommandLineParser::Result::kOptVal << "-x" << "xray";
-    QTest::newRow("arg val2") << static_cast<int>(8)  << MythCommandLineParser::Result::kOptVal << "-y" << "-";
-    QTest::newRow("arg noval")<< static_cast<int>(10) << MythCommandLineParser::Result::kOptOnly << "-z" << "";
-    QTest::newRow("arg noval")<< static_cast<int>(11) << MythCommandLineParser::Result::kOptOnly << "-a" << "";
+    QTest::newRow("end")      << 99 << MythCommandLineParser::Result::kEnd << "" << "";
+    QTest::newRow("empty")    <<  1 << MythCommandLineParser::Result::kEmpty << "" << "";
+    QTest::newRow("first")    <<  0 << MythCommandLineParser::Result::kOptOnly << "-h" << "";
+    QTest::newRow("combo")    <<  2 << MythCommandLineParser::Result::kCombOptVal << "-zed" << "100";
+    QTest::newRow("badcombo") <<  3 << MythCommandLineParser::Result::kInvalid << "-bad=100=101" << "";
+    QTest::newRow("passthru") <<  4 << MythCommandLineParser::Result::kPassthrough << "" << "";
+    QTest::newRow("argument") <<  5 << MythCommandLineParser::Result::kArg << "" << "foo";
+    QTest::newRow("arg val1") <<  6 << MythCommandLineParser::Result::kOptVal << "-x" << "xray";
+    QTest::newRow("arg val2") <<  8 << MythCommandLineParser::Result::kOptVal << "-y" << "-";
+    QTest::newRow("arg noval")<< 10 << MythCommandLineParser::Result::kOptOnly << "-z" << "";
+    QTest::newRow("arg noval")<< 11 << MythCommandLineParser::Result::kOptOnly << "-a" << "";
 }
 
 // \brief Parse individual arguments.  Reset the parser each time.
@@ -190,6 +190,81 @@ void TestCommandLineParser::test_override_file (void)
     QCOMPARE(overrides["plugh"], QString("xyzzy"));
     QVERIFY(overrides.contains("plover"));
     QCOMPARE(overrides["plover"], QString("plugh"));
+}
+
+void TestCommandLineParser::test_parse_cmdline_data(void)
+{
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<QStringList>("expectedOutput");
+
+    QTest::newRow("simple")
+        << R"(This is a test string)"
+        << QStringList({"This", "is", "a", "test", "string"});
+    QTest::newRow("simplequotes")
+        << R"(cmd "whatever" "goes" here)"
+        << QStringList({R"(cmd)",
+                        R"("whatever")",
+                        R"("goes")",
+                        R"(here)"});
+    QTest::newRow("multiword")
+        << R"(cmd "whatever" "multi-word argument" arg3)"
+        << QStringList({R"(cmd)",
+                        R"("whatever")",
+                        R"("multi-word argument")",
+                        R"(arg3)"});
+    QTest::newRow("mixedargs")
+        << R"(cmd --arg1="whatever" --arg2="multi-word argument" --arg3)"
+        << QStringList({R"(cmd)",
+                        R"(--arg1="whatever")",
+                        R"(--arg2="multi-word argument")",
+                        R"(--arg3)"});
+    QTest::newRow("mixedquotes")
+        << R"(cmd --arg1 first-value --arg2 "second 'value'")"
+        << QStringList({R"(cmd)",
+                        R"(--arg1)",
+                        R"(first-value)",
+                        R"(--arg2)",
+                        R"("second 'value'")"});
+    QTest::newRow("mixeduneven")
+        << R"(cmd --arg1 first-value --arg2 "second 'value")"
+        << QStringList({R"(cmd)",
+                        R"(--arg1)",
+                        R"(first-value)",
+                        R"(--arg2)",
+                        R"("second 'value")"});
+    QTest::newRow("1escapedquote")
+        << R"(cmd -d --arg1 first-value --arg2 \"second)"
+        << QStringList({R"(cmd)",
+                        R"(-d)",
+                        R"(--arg1)",
+                        R"(first-value)",
+                        R"(--arg2)",
+                        R"(\"second)"});
+    QTest::newRow("nestedquotes")
+        << R"(cmd --arg1 first-value --arg2 "second \"value\"")"
+        << QStringList({R"(cmd)",
+                        R"(--arg1)",
+                        R"(first-value)",
+                        R"(--arg2)",
+                        R"("second \"value\"")"});
+    QTest::newRow("unfinishedquote")
+        << R"(cmd --arg1 first-value --arg2 "second \"value\")"
+        << QStringList({R"(cmd)",
+                        R"(--arg1)",
+                        R"(first-value)",
+                        R"(--arg2)",
+                        R"("second \"value\")"});
+}
+
+void TestCommandLineParser::test_parse_cmdline(void)
+{
+    QFETCH(QString, input);
+    QFETCH(QStringList, expectedOutput);
+
+    QStringList output = MythCommandLineParser::MythSplitCommandString(input);
+//  std::cerr << "Expected: " << qPrintable(expectedOutput.join("|")) << std::endl;
+//  std::cerr << "Actual:   " << qPrintable(output.join("|")) << std::endl;
+    QCOMPARE(output, expectedOutput);
 }
 
 QTEST_APPLESS_MAIN(TestCommandLineParser)

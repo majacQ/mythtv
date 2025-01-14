@@ -33,15 +33,16 @@
 #include <QUrl>
 #include <utility>
 
-#include "mythcorecontext.h"
-#include "mythdate.h"
-#include "mythdirs.h"
-#include "mythtimer.h"
-#include "mthreadpool.h"
-#include "mythsystemlegacy.h"
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "storagegroup.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/storagegroup.h"
+
 #include "httplivestream.h"
 
 #define LOC QString("HLS(%1): ").arg(m_sourceFile)
@@ -340,7 +341,7 @@ bool HTTPLiveStream::AddSegment(void)
 QString HTTPLiveStream::GetHTMLPageName(void) const
 {
     if (m_streamid == -1)
-        return QString();
+        return {};
 
     QString outFile = m_outDir + "/" + m_outBase + ".html";
     return outFile;
@@ -384,7 +385,7 @@ bool HTTPLiveStream::WriteHTML(void)
 QString HTTPLiveStream::GetMetaPlaylistName(void) const
 {
     if (m_streamid == -1)
-        return QString();
+        return {};
 
     QString outFile = m_outDir + "/" + m_outBase + ".m3u8";
     return outFile;
@@ -431,10 +432,10 @@ bool HTTPLiveStream::WriteMetaPlaylist(void)
 QString HTTPLiveStream::GetPlaylistName(bool audioOnly) const
 {
     if (m_streamid == -1)
-        return QString();
+        return {};
 
     if (audioOnly && m_audioOutFile.isEmpty())
-        return QString();
+        return {};
 
     QString base = audioOnly ? m_audioOutFile : m_outFile;
     QString outFile = m_outDir + "/" + base + ".m3u8";
@@ -666,17 +667,17 @@ bool HTTPLiveStream::UpdatePercentComplete(int percent)
 QString HTTPLiveStream::StatusToString(HTTPLiveStreamStatus status)
 {
     switch (status) {
-        case kHLSStatusUndefined : return QString("Undefined");
-        case kHLSStatusQueued    : return QString("Queued");
-        case kHLSStatusStarting  : return QString("Starting");
-        case kHLSStatusRunning   : return QString("Running");
-        case kHLSStatusCompleted : return QString("Completed");
-        case kHLSStatusErrored   : return QString("Errored");
-        case kHLSStatusStopping  : return QString("Stopping");
-        case kHLSStatusStopped   : return QString("Stopped");
+        case kHLSStatusUndefined : return {"Undefined"};
+        case kHLSStatusQueued    : return {"Queued"};
+        case kHLSStatusStarting  : return {"Starting"};
+        case kHLSStatusRunning   : return {"Running"};
+        case kHLSStatusCompleted : return {"Completed"};
+        case kHLSStatusErrored   : return {"Errored"};
+        case kHLSStatusStopping  : return {"Stopping"};
+        case kHLSStatusStopped   : return {"Stopped"};
     };
 
-    return QString("Unknown status value");
+    return {"Unknown status value"};
 }
 
 bool HTTPLiveStream::LoadFromDB(void)
@@ -764,9 +765,13 @@ void HTTPLiveStream::SetOutputVars(void)
             m_httpPrefix.append("/");
     }
     else if (m_httpPrefix.contains("/StorageGroup/Streaming/"))
+    {
         m_httpPrefixRel = "/StorageGroup/Streaming/";
+    }
     else
+    {
         m_httpPrefixRel = "";
+    }
 }
 
 HTTPLiveStreamStatus HTTPLiveStream::GetDBStatus(void) const
@@ -811,223 +816,6 @@ bool HTTPLiveStream::CheckStop(void)
     }
 
     return query.value(0).toInt() == (int)kHLSStatusStopping;
-}
-
-DTC::LiveStreamInfo *HTTPLiveStream::StartStream(void)
-{
-    if (GetDBStatus() != kHLSStatusQueued)
-        return GetLiveStreamInfo();
-
-    auto *streamThread = new HTTPLiveStreamThread(GetStreamID());
-    MThreadPool::globalInstance()->startReserved(streamThread,
-                                                 "HTTPLiveStream");
-    MythTimer statusTimer;
-    int       delay = 250000;
-    statusTimer.start();
-
-    HTTPLiveStreamStatus status = GetDBStatus();
-    while ((status == kHLSStatusQueued) &&
-           (statusTimer.elapsed() < 30s))
-    {
-        delay = (int)(delay * 1.5);
-        usleep(delay);
-
-        status = GetDBStatus();
-    }
-
-    return GetLiveStreamInfo();
-}
-
-bool HTTPLiveStream::RemoveStream(int id)
-{
-    MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(
-        "SELECT startSegment, segmentCount "
-        "FROM livestream "
-        "WHERE id = :STREAMID; ");
-    query.bindValue(":STREAMID", id);
-
-    if (!query.exec() || !query.next())
-    {
-        LOG(VB_RECORD, LOG_ERR, "Error selecting stream info in RemoveStream");
-        return false;
-    }
-
-    auto *hls = new HTTPLiveStream(id);
-
-    if (hls->GetDBStatus() == kHLSStatusRunning) {
-        HTTPLiveStream::StopStream(id);
-    }
-
-    QString thisFile;
-    int startSegment = query.value(0).toInt();
-    int segmentCount = query.value(1).toInt();
-
-    for (int x = 0; x < segmentCount; ++x)
-    {
-        thisFile = hls->GetFilename(startSegment + x);
-
-        if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-            LOG(VB_GENERAL, LOG_ERR, SLOC +
-                QString("Unable to delete %1.").arg(thisFile));
-
-        thisFile = hls->GetFilename(startSegment + x, false, true);
-
-        if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-            LOG(VB_GENERAL, LOG_ERR, SLOC +
-                QString("Unable to delete %1.").arg(thisFile));
-    }
-
-    thisFile = hls->GetMetaPlaylistName();
-    if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-        LOG(VB_GENERAL, LOG_ERR, SLOC +
-            QString("Unable to delete %1.").arg(thisFile));
-
-    thisFile = hls->GetPlaylistName();
-    if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-        LOG(VB_GENERAL, LOG_ERR, SLOC +
-            QString("Unable to delete %1.").arg(thisFile));
-
-    thisFile = hls->GetPlaylistName(true);
-    if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-        LOG(VB_GENERAL, LOG_ERR, SLOC +
-            QString("Unable to delete %1.").arg(thisFile));
-
-    thisFile = hls->GetHTMLPageName();
-    if (!thisFile.isEmpty() && !QFile::remove(thisFile))
-        LOG(VB_GENERAL, LOG_ERR, SLOC +
-            QString("Unable to delete %1.").arg(thisFile));
-
-    query.prepare(
-        "DELETE FROM livestream "
-        "WHERE id = :STREAMID; ");
-    query.bindValue(":STREAMID", id);
-
-    if (!query.exec())
-        LOG(VB_RECORD, LOG_ERR, "Error deleting stream info in RemoveStream");
-
-    delete hls;
-    return true;
-}
-
-DTC::LiveStreamInfo *HTTPLiveStream::StopStream(int id)
-{
-    MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(
-        "UPDATE livestream "
-        "SET status = :STATUS "
-        "WHERE id = :STREAMID; ");
-    query.bindValue(":STATUS", (int)kHLSStatusStopping);
-    query.bindValue(":STREAMID", id);
-
-    if (!query.exec())
-    {
-        LOG(VB_GENERAL, LOG_ERR, SLOC +
-            QString("Unable to remove mark stream stopped for stream %1.")
-                    .arg(id));
-        return nullptr;
-    }
-
-    auto *hls = new HTTPLiveStream(id);
-    if (!hls)
-        return nullptr;
-
-    MythTimer statusTimer;
-    int       delay = 250000;
-    statusTimer.start();
-
-    HTTPLiveStreamStatus status = hls->GetDBStatus();
-    while ((status != kHLSStatusStopped) &&
-           (status != kHLSStatusCompleted) &&
-           (status != kHLSStatusErrored) &&
-           (statusTimer.elapsed() < 30s))
-    {
-        delay = (int)(delay * 1.5);
-        usleep(delay);
-
-        status = hls->GetDBStatus();
-    }
-
-    hls->LoadFromDB();
-    DTC::LiveStreamInfo *pLiveStreamInfo = hls->GetLiveStreamInfo();
-
-    delete hls;
-    return pLiveStreamInfo;
-}
-
-/////////////////////////////////////////////////////////////////////////////
-// Content Service API helpers
-/////////////////////////////////////////////////////////////////////////////
-
-DTC::LiveStreamInfo *HTTPLiveStream::GetLiveStreamInfo(
-    DTC::LiveStreamInfo *info)
-{
-    if (!info)
-        info = new DTC::LiveStreamInfo();
-
-    info->setId(m_streamid);
-    info->setWidth((int)m_width);
-    info->setHeight((int)m_height);
-    info->setBitrate((int)m_bitrate);
-    info->setAudioBitrate((int)m_audioBitrate);
-    info->setSegmentSize((int)m_segmentSize);
-    info->setMaxSegments((int)m_maxSegments);
-    info->setStartSegment((int)m_startSegment);
-    info->setCurrentSegment((int)m_curSegment);
-    info->setSegmentCount((int)m_segmentCount);
-    info->setPercentComplete((int)m_percentComplete);
-    info->setCreated(m_created);
-    info->setLastModified(m_lastModified);
-    info->setStatusStr(StatusToString(m_status));
-    info->setStatusInt((int)m_status);
-    info->setStatusMessage(m_statusMessage);
-    info->setSourceFile(m_sourceFile);
-    info->setSourceHost(m_sourceHost);
-    info->setAudioOnlyBitrate((int)m_audioOnlyBitrate);
-
-    if (m_width && m_height) {
-        info->setRelativeURL(m_relativeURL);
-        info->setFullURL(m_fullURL);
-        info->setSourceWidth(m_sourceWidth);
-        info->setSourceHeight(m_sourceHeight);
-    }
-
-    return info;
-}
-
-DTC::LiveStreamInfoList *HTTPLiveStream::GetLiveStreamInfoList(const QString &FileName)
-{
-    auto *infoList = new DTC::LiveStreamInfoList();
-
-    QString sql = "SELECT id FROM livestream ";
-
-    if (!FileName.isEmpty())
-        sql += "WHERE sourcefile LIKE :FILENAME ";
-
-    sql += "ORDER BY lastmodified DESC;";
-
-    MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare(sql);
-    if (!FileName.isEmpty())
-        query.bindValue(":FILENAME", QString("%%1%").arg(FileName));
-
-    if (!query.exec())
-    {
-        LOG(VB_GENERAL, LOG_ERR, SLOC + "Unable to get list of Live Streams");
-        return infoList;
-    }
-
-    DTC::LiveStreamInfo *info = nullptr;
-    HTTPLiveStream *hls = nullptr;
-    while (query.next())
-    {
-        hls = new HTTPLiveStream(query.value(0).toUInt());
-        info = infoList->AddNewLiveStreamInfo();
-        hls->GetLiveStreamInfo(info);
-        delete hls;
-    }
-
-    return infoList;
 }
 
 /* vim: set expandtab tabstop=4 shiftwidth=4: */

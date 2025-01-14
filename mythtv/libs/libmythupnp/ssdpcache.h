@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -19,8 +19,9 @@
 #include <QMap>
 
 // MythTV headers
-#include "referencecounter.h"
-#include "mythobservable.h"
+#include "libmythbase/mythobservable.h"
+#include "libmythbase/referencecounter.h"
+
 #include "upnpdevice.h"
 #include "upnpexp.h"
 
@@ -101,7 +102,7 @@ class UPNP_PUBLIC SSDPCache : public QObject,
     private:
 
         // ------------------------------------------------------------------
-        // Private so the singleton pattern can be inforced.
+        // Private so the singleton pattern can be enforced.
         // ------------------------------------------------------------------
 
         SSDPCache();

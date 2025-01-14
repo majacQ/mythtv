@@ -6,11 +6,11 @@
 #include <QObject>
 #include <QMap>
 
-#include "programtypes.h"
+#include "libmythbase/programtypes.h"
 
-#define MAX_BLANK_FRAMES 180
+static constexpr int64_t MAX_BLANK_FRAMES { 180 };
 
-enum CommMapValue {
+enum CommMapValue : std::uint8_t {
     MARK_START   = 0,
     MARK_END     = 1,
     MARK_PRESENT = 2,
@@ -36,8 +36,7 @@ public:
     void resume();
 
     virtual void GetCommercialBreakList(frm_dir_map_t &comms) = 0;
-    virtual void recordingFinished(long long totalFileSize)
-        { (void)totalFileSize; };
+    virtual void recordingFinished([[maybe_unused]] long long totalFileSize) {};
     virtual void requestCommBreakMapUpdate(void) {};
 
     virtual void PrintFullMap(

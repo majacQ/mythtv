@@ -6,64 +6,42 @@
 #include <unistd.h>
 
 // qt
-#include <QDomDocument>
-#include <QDir>
 #include <QCoreApplication>
+#include <QDir>
+#include <QDomDocument>
 
 // myth
-#include <mythcontext.h>
-#include <programinfo.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythdate.h>
-#include <mythsystemlegacy.h>
-#include <exitcodes.h>
-#include <mythlogging.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/exitcodes.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/programinfo.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
 
 // mytharchive
 #include "archiveutil.h"
-
 
 std::vector<ArchiveDestination> ArchiveDestinations
 {
     {AD_DVD_SL,
      QT_TRANSLATE_NOOP("SelectDestination", "Single Layer DVD"),
      QT_TRANSLATE_NOOP("SelectDestination", "Single Layer DVD (4,482 MB)"),
-     4482*1024},
+     4482*1024LL},
     {AD_DVD_DL,
      QT_TRANSLATE_NOOP("SelectDestination", "Dual Layer DVD"),
      QT_TRANSLATE_NOOP("SelectDestination", "Dual Layer DVD (8,964 MB)"),
-     8964*1024},
+     8964*1024LL},
     {AD_DVD_RW,
      QT_TRANSLATE_NOOP("SelectDestination", "DVD +/- RW"),
      QT_TRANSLATE_NOOP("SelectDestination", "Rewritable DVD"),
-     4482*1024},
+     4482*1024LL},
     {AD_FILE,
      QT_TRANSLATE_NOOP("SelectDestination", "File"),
      QT_TRANSLATE_NOOP("SelectDestination", "Any file accessable from your filesystem."),
-     -1},
+     -1LL},
 };
-
-QString formatSize(int64_t sizeKB, int prec)
-{
-    if (sizeKB>1024*1024*1024) // Terabytes
-    {
-        double sizeGB = sizeKB/(1024*1024*1024.0);
-        return QString("%1 TB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024*1024) // Gigabytes
-    {
-        double sizeGB = sizeKB/(1024*1024.0);
-        return QString("%1 GB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024) // Megabytes
-    {
-        double sizeMB = sizeKB/1024.0;
-        return QString("%1 MB").arg(sizeMB, 0, 'f', (sizeMB>10)?0:prec);
-    }
-    // Kilobytes
-    return QString("%1 KB").arg(sizeKB);
-}
 
 QString getTempDirectory(bool showError)
 {
@@ -213,7 +191,9 @@ ProgramInfo *getProgramInfoForFile(const QString &inFile)
         LOG(VB_JOBQUEUE, LOG_NOTICE, "File is not a MythTV recording.");
     }
     else
+    {
         LOG(VB_JOBQUEUE, LOG_NOTICE, "File is a MythTV recording.");
+    }
 
     return pinfo;
 }

@@ -6,14 +6,14 @@
 #include <QObject>
 #include <QMatrix4x4>
 
-// MythTV
-#include "mythcolourspace.h"
-#include "mythframe.h"
-#include "videoouttypes.h"
-#include "referencecounter.h"
-
 // FFmpeg
 #include "libavutil/pixfmt.h" // For AVCOL_xxx defines
+
+// MythTV
+#include "libmythbase/referencecounter.h"
+#include "libmythtv/mythframe.h"
+#include "libmythtv/videoouttypes.h"
+#include "libmythui/mythcolourspace.h"
 
 class MythVideoColourSpace : public QObject, public QMatrix4x4, public ReferenceCounter
 {
@@ -84,7 +84,7 @@ class MythVideoColourSpace : public QObject, public QMatrix4x4, public Reference
     int               m_chromaLocation         { AVCHROMA_LOC_LEFT };
     float             m_colourGamma            { 2.2F };
     float             m_displayGamma           { 2.2F };
-    QMatrix4x4        m_primaryMatrix          { };
+    QMatrix4x4        m_primaryMatrix;
     float             m_customDisplayGamma     { 0.0F };
     MythColourSpace*  m_customDisplayPrimaries { nullptr };
 };

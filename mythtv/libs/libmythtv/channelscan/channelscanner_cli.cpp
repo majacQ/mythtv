@@ -36,13 +36,13 @@
 
 void ChannelScannerCLI::HandleEvent(const ScannerEvent *scanEvent)
 {
-    if ((scanEvent->type() == ScannerEvent::ScanComplete) ||
-        (scanEvent->type() == ScannerEvent::ScanShutdown) ||
-        (scanEvent->type() == ScannerEvent::ScanErrored))
+    if ((scanEvent->type() == ScannerEvent::kScanComplete) ||
+        (scanEvent->type() == ScannerEvent::kScanShutdown) ||
+        (scanEvent->type() == ScannerEvent::kScanErrored))
     {
         std::cout<<std::endl;
 
-        if (scanEvent->type() == ScannerEvent::ScanShutdown)
+        if (scanEvent->type() == ScannerEvent::kScanShutdown)
             std::cerr<<"HandleEvent(void) -- scan shutdown"<<std::endl;
         else
             std::cerr<<"HandleEvent(void) -- scan complete"<<std::endl;
@@ -56,39 +56,57 @@ void ChannelScannerCLI::HandleEvent(const ScannerEvent *scanEvent)
 
         Teardown();
 
-        if (scanEvent->type() == ScannerEvent::ScanErrored)
+        if (scanEvent->type() == ScannerEvent::kScanErrored)
         {
             QString error = scanEvent->strValue();
             InformUser(error);
         }
         else if (!transports.empty())
+        {
             Process(transports);
+        }
 
         m_done = true;
         QCoreApplication::exit(0);
     }
-    else if (scanEvent->type() == ScannerEvent::AppendTextToLog)
+    else if (scanEvent->type() == ScannerEvent::kAppendTextToLog)
+    {
         m_statusLastLog = scanEvent->strValue();
-    else if (scanEvent->type() == ScannerEvent::SetStatusText)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetStatusText)
+    {
         m_statusText = scanEvent->strValue();
-    else if (scanEvent->type() == ScannerEvent::SetPercentComplete)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetPercentComplete)
+    {
         m_statusComplete = scanEvent->intValue();
-    else if (scanEvent->type() == ScannerEvent::SetStatusSignalLock)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetStatusSignalLock)
+    {
         m_statusLock = scanEvent->boolValue();
-    else if (scanEvent->type() == ScannerEvent::SetStatusSignalToNoise)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetStatusSignalToNoise)
+    {
         m_statusSnr = scanEvent->intValue() / 65535.0;
-#if THESE_ARE_CURRENTLY_IGNORED
-    else if (scanEvent->type() == ScannerEvent::SetStatusTitleText)
+}
+#if 0 // THESE_ARE_CURRENTLY_IGNORED
+    else if (scanEvent->type() == ScannerEvent::kSetStatusTitleText)
+    {
         ;
-    else if (scanEvent->type() == ScannerEvent::SetStatusRotorPosition)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetStatusRotorPosition)
+    {
         ;
-    else if (scanEvent->type() == ScannerEvent::SetStatusSignalStrength)
+    }
+    else if (scanEvent->type() == ScannerEvent::kSetStatusSignalStrength)
+    {
         ;
+    }
 #endif
 
     //cout<<"HERE<"<<verboseMask<<">"<<endl;
     QString msg;
-    if (VERBOSE_LEVEL_NONE || VERBOSE_LEVEL_CHECK(VB_CHANSCAN, LOG_INFO))
+    if (VERBOSE_LEVEL_NONE() || VERBOSE_LEVEL_CHECK(VB_CHANSCAN, LOG_INFO))
     {
         msg = QString("%1% S/N %2 %3 : %4 (%5) %6")
             .arg(m_statusComplete, 3)
@@ -109,7 +127,7 @@ void ChannelScannerCLI::HandleEvent(const ScannerEvent *scanEvent)
             s_oldMsg = msg;
         }
     }
-    else if (VERBOSE_LEVEL_NONE)
+    else if (VERBOSE_LEVEL_NONE())
     {
         if (msg.length() > 80)
             msg = msg.left(77) + "...";
@@ -120,7 +138,7 @@ void ChannelScannerCLI::HandleEvent(const ScannerEvent *scanEvent)
 
 void ChannelScannerCLI::InformUser(const QString &error)
 {
-    if (VERBOSE_LEVEL_NONE)
+    if (VERBOSE_LEVEL_NONE())
     {
         std::cerr<<"ERROR: "<<error.toLatin1().constData()<<std::endl;
     }
@@ -128,7 +146,7 @@ void ChannelScannerCLI::InformUser(const QString &error)
     {
         LOG(VB_GENERAL, LOG_ERR, LOC + error);
     }
-    post_event(m_scanMonitor, ScannerEvent::ScanComplete, 0);
+    post_event(m_scanMonitor, ScannerEvent::kScanComplete, 0);
 }
 
 void ChannelScannerCLI::Process(const ScanDTVTransportList &_transports)
@@ -145,6 +163,6 @@ void ChannelScannerCLI::Process(const ScanDTVTransportList &_transports)
 void ChannelScannerCLI::MonitorProgress(
     bool /*lock*/, bool /*strength*/, bool /*snr*/, bool /*rotor*/)
 {
-    if (VERBOSE_LEVEL_NONE)
+    if (VERBOSE_LEVEL_NONE())
         std::cout<<"\r0%"<<std::flush;
 }

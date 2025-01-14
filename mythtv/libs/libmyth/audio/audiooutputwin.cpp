@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "audiooutputwin.h"
 
 #include <windows.h>
@@ -91,9 +91,11 @@ class AudioOutputWinPrivate
     HANDLE    m_hEvent {nullptr};
 };
 
-void CALLBACK AudioOutputWinPrivate::waveOutProc(HWAVEOUT hwo, UINT uMsg,
+void CALLBACK AudioOutputWinPrivate::waveOutProc([[maybe_unused]] HWAVEOUT hwo,
+                                                 UINT uMsg,
                                                  DWORD dwInstance,
-                                                 DWORD dwParam1, DWORD dwParam2)
+                                                 [[maybe_unused]] DWORD dwParam1,
+                                                 [[maybe_unused]] DWORD dwParam2)
 {
     if (uMsg != WOM_DONE)
         return;

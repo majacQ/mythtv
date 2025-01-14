@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Contains any static and global variables for MythTV Python Bindings
+Contains static and global variables for MythTV Python Bindings.
+Version information is placed in '_versions.py'.
 """
 
-OWN_VERSION = (32,0,-1,0)
-SCHEMA_VERSION = 1370
-NVSCHEMA_VERSION = 1007
-MUSICSCHEMA_VERSION = 1025
-PROTO_VERSION = '91'
-PROTO_TOKEN = 'BuzzOff'
-BACKEND_SEP = '[]:[]'
-INSTALL_PREFIX = '/usr/local'
+from MythTV._versions import *
 
 class MARKUP( object ):
     MARK_UNSET            = -10
@@ -34,6 +28,7 @@ class MARKUP( object ):
     MARK_ASPECT_16_9      = 12
     MARK_ASPECT_2_21_1    = 13
     MARK_ASPECT_CUSTOM    = 14
+    MARK_SCAN_PROGRESSIVE = 15
     MARK_VIDEO_WIDTH      = 30
     MARK_VIDEO_HEIGHT     = 31
     MARK_VIDEO_RATE       = 32
@@ -65,6 +60,7 @@ class RECSEARCHTYPE( object ):
     kManualSearch       = 5
 
 class RECSTATUS( object ):
+    rsPending           = -15
     rsFailing           = -14
     rsTuning            = -10
     rsFailed            = -9
@@ -100,12 +96,18 @@ class AUDIO_PROPS( object ):
     AUD_VISUALIMPAIR    = 0x20
 
 class VIDEO_PROPS( object ):
-    VID_UNKNOWN         = 0x00
-    VID_HDTV            = 0x01
-    VID_WIDESCREEN      = 0x02
-    VID_AVC             = 0x04
-    VID_720             = 0x08
-    VID_1080            = 0x10
+    VID_UNKNOWN         = 0x0000
+    VID_WIDESCREEN      = 0x0001
+    VID_HDTV            = 0x0002
+    VID_MPEG2           = 0x0004
+    VID_AVC             = 0x0008
+    VID_HEVC            = 0x0010
+    VID_720             = 0x0020
+    VID_1080            = 0x0040
+    VID_4K              = 0x0080
+    VID_3DTV            = 0x0100
+    VID_PROGRESSIVE     = 0x0200
+    VID_DAMAGED         = 0x0400
 
 class SUBTITLE_TYPES( object ):
     SUB_UNKNOWN         = 0x00
@@ -113,6 +115,20 @@ class SUBTITLE_TYPES( object ):
     SUB_NORMAL          = 0x02
     SUB_ONSCREEN        = 0x04
     SUB_SIGNED          = 0x08
+
+class CAST_ROLES( object ):
+    UNKNOWN            = 0x0000
+    ACTOR              = 0x0001
+    DIRECTOR           = 0x0002
+    PRODUCER           = 0x0004
+    EXECUTIVE_PRODUCER = 0x0008
+    WRITER             = 0x0010
+    GUEST_STAR         = 0x0020
+    HOST               = 0x0040
+    ADAPTER            = 0x0080
+    PRESENTER          = 0x0100
+    COMMENTATOR        = 0x0200
+    GUEST              = 0x0400
 
 class JOBTYPE( object ):
     NONE         = 0x0000
@@ -247,6 +263,7 @@ class ERRCODES( object ):
     TZ_INVALID_FILE         = 251
     TZ_INVALID_TRANSITION   = 252
     TZ_CONVERSION_ERROR     = 253
+    TZ_VERSION_ERROR        = 254
 
 class MythSchema( object ):
     _schema_value = 'DBSchemaVer'

@@ -24,45 +24,31 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
 #ifndef RTJPEG_H
 #define RTJPEG_H
 
-#include "mythconfig.h"
 #include "mythtvexp.h"
+#include "libmythbase/sizetliteral.h"
 #include <cstdint>
 
 /*
  * Macros and definitions used internally to RTjpeg
  */
 
-#define RTJPEG_FILE_VERSION 0
-#define RTJPEG_HEADER_SIZE 12
+static constexpr uint8_t RTJPEG_FILE_VERSION {  0 };
+static constexpr uint8_t RTJPEG_HEADER_SIZE  { 12 };
 
 using RTjpegData16 = std::array<int16_t,64>;
 using RTjpegData32 = std::array<int32_t,64>;
 
-#if HAVE_BIGENDIAN
-#define RTJPEG_SWAP_WORD(a) ( ((a) << 24) | \
-			(((a) << 8) & 0x00ff0000) | \
-			(((a) >> 8) & 0x0000ff00) | \
-			((unsigned long)(a) >>24) )
-#define RTJPEG_SWAP_HALFWORD(a) ( (((a) << 8) & 0xff00) | \
-			(((a) >> 8) & 0x00ff) )
-#else
-#define RTJPEG_SWAP_WORD(a) (a)
-#define RTJPEG_SWAP_HALFWORD(a) (a)
-#endif
-
-#if HAVE_STDINT_H
-#include <cstdint>
-#endif
-
 #ifdef MMX
-#include "ffmpeg-mmx.h"
+#include "libmythbase/ffmpeg-mmx.h"
 #endif
 
 /* Format definitions */
 
-#define RTJ_YUV420 0
-#define RTJ_YUV422 1
-#define RTJ_RGB8   2
+enum RTJFormat {
+    RTJ_YUV420 = 0,
+    RTJ_YUV422 = 1,
+    RTJ_RGB8   = 2
+};
 
 class RTjpeg
 {
@@ -114,7 +100,7 @@ private:
 #endif
     
     alignas(32) RTjpegData16   m_block {0};
-    alignas(32) std::array<int32_t,64*4> m_ws    {0};
+    alignas(32) std::array<int32_t,64_UZ * 4> m_ws    {0};
     alignas(32) RTjpegData32   m_lqt   {0};
     alignas(32) RTjpegData32   m_cqt   {0};
     alignas(32) RTjpegData32   m_liqt  {0};
@@ -126,7 +112,6 @@ private:
     int32_t   m_ySize              {0};
     int32_t   m_cSize              {0};
     int16_t  *m_old                {nullptr};
-    int16_t  *m_oldStart           {nullptr};
     int       m_keyCount           {0};
 
     int       m_width              {0};

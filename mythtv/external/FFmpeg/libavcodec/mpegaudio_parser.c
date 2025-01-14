@@ -65,17 +65,17 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
             }
         }else{
             while(i<buf_size){
-                int ret, sr, channels, bit_rate, frame_size;
+                int ret, sr, channels, bit_rate, frame_size, dual_mono;
                 enum AVCodecID codec_id = avctx->codec_id;
 
                 state= (state<<8) + buf[i++];
 
-                ret = ff_mpa_decode_header(state, &sr, &channels, &frame_size, &bit_rate, &codec_id, &avctx->avcodec_dual_language);
+                ret = ff_mpa_decode_header(state, &sr, &channels, &frame_size, &bit_rate, &codec_id, &dual_mono);
                 if (ret < 4) {
                     if (i > 4)
                         s->header_count = -2;
                 } else {
-                    int header_threshold = (avctx->codec_id != AV_CODEC_ID_NONE && avctx->codec_id != codec_id) || avctx->sample_rate == 0;
+                    int header_threshold = avctx->codec_id != AV_CODEC_ID_NONE && avctx->codec_id != codec_id;
                     if((state&SAME_HEADER_MASK) != (s->header&SAME_HEADER_MASK) && s->header)
                         s->header_count= -3;
                     s->header= state;
@@ -84,7 +84,14 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
 
                     if (s->header_count > header_threshold) {
                         avctx->sample_rate= sr;
-                        avctx->channels   = channels;
+                        av_channel_layout_uninit(&avctx->ch_layout);
+                        if (dual_mono) {
+                            av_channel_layout_custom_init(&avctx->ch_layout, 2);
+                            avctx->ch_layout.u.map[0].id = AV_CHAN_FRONT_CENTER;
+                            avctx->ch_layout.u.map[1].id = AV_CHAN_FRONT_CENTER;
+                        } else {
+                            av_channel_layout_default(&avctx->ch_layout, channels);
+                        }
                         s1->duration      = frame_size;
                         avctx->codec_id   = codec_id;
                         if (s->no_bitrate || !avctx->bit_rate) {
@@ -135,7 +142,7 @@ static int mpegaudio_parse(AVCodecParserContext *s1,
 }
 
 
-AVCodecParser ff_mpegaudio_parser = {
+const AVCodecParser ff_mpegaudio_parser = {
     .codec_ids      = { AV_CODEC_ID_MP1, AV_CODEC_ID_MP2, AV_CODEC_ID_MP3, AV_CODEC_ID_MP3ADU },
     .priv_data_size = sizeof(MpegAudioParseContext),
     .parser_parse   = mpegaudio_parse,

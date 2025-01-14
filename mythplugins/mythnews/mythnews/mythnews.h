@@ -2,7 +2,7 @@
 #define MYTHNEWS_H
 
 // MythTV headers
-#include <mythscreentype.h>
+#include <libmythui/mythscreentype.h>
 
 // MythNews headers
 #include "newssite.h"
@@ -37,7 +37,6 @@ class MythNews : public MythScreenType
     void processAndShowNews(NewsSite *site);
     static QString cleanText(const QString &text);
 
-    static QString formatSize(long long bytes, int prec);
     static void playVideo(const NewsArticle &article);
 
     // menu stuff
@@ -46,11 +45,7 @@ class MythNews : public MythScreenType
     void ShowEditDialog(bool edit);
     void ShowFeedManager() const;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex m_lock            {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_lock;
-#endif
     NewsSite::List m_newsSites;
 
     QTimer        *m_retrieveTimer   {nullptr};

@@ -4,7 +4,7 @@
 #ifndef PROG_INFO_LIST_H
 #define PROG_INFO_LIST_H
 
-#include "mythuibuttonlist.h"
+#include "libmythui/mythuibuttonlist.h"
 
 class MythScreenType;
 
@@ -14,7 +14,7 @@ class ProgInfoList : QObject
     Q_OBJECT
 
   public:
-    enum VisibleLevel { kNone = 0, kLevel1 = 1, kLevel2 = 2 };
+    enum VisibleLevel : std::uint8_t { kNone = 0, kLevel1 = 1, kLevel2 = 2 };
 
     // name, data, level
     using DataItem = std::tuple<QString, QString, int>;

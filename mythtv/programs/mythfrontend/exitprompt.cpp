@@ -2,15 +2,16 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "config.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
+
+// MythFrontend
 #include "exitprompt.h"
-#include "mythcontext.h"
-#include "mythdialogbox.h"
-#include "mythmainwindow.h"
-#include "mythscreenstack.h"
-#include "mythsystemlegacy.h"
-#include "mythlogging.h"
-#include "exitcodes.h"
 
 ExitPrompter::ExitPrompter()
   : m_power(MythPower::AcquireRelease(this, true)),
@@ -26,7 +27,7 @@ ExitPrompter::ExitPrompter()
 ExitPrompter::~ExitPrompter()
 {
     // Ensure additional actions are not processed after we are deleted
-    if (m_dialog)
+    if (m_dialog && GetMythMainWindow()->GetStack("popup stack")->GetTopScreen() == m_dialog)
         m_dialog->SetReturnEvent(nullptr, QString());
 
     if (m_power)

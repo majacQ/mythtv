@@ -34,8 +34,9 @@
 
 #include <QObject>
 
+#include "libmythui/standardsettings.h"
+
 #include "mythtvexp.h"
-#include "standardsettings.h"
 #include "cardutil.h"
 
 class VideoSourceShow;
@@ -50,7 +51,7 @@ class TransportSetting : public GroupSetting
 
   public:
     TransportSetting(const QString &label, uint mplexid, uint sourceid,
-                     uint cardtype);
+                     CardUtil::INPUT_TYPES cardtype);
 
     bool keyPressEvent(QKeyEvent *event) override; // StandardSetting
 
@@ -73,7 +74,7 @@ class MTV_PUBLIC TransportListEditor : public GroupSetting
     explicit TransportListEditor(uint initial_sourceid);
     void Load(void) override; // StandardSetting
 
-    void SetSourceID(uint _sourceid);
+    void SetSourceID(uint sourceid);
 
   public slots:
     void SetSourceID(const QString &name);
@@ -88,7 +89,7 @@ class MTV_PUBLIC TransportListEditor : public GroupSetting
     VideoSourceShow *m_videosource {nullptr};
     QVector<StandardSetting*> m_list;
     uint m_sourceid  {0};
-    uint m_cardtype  {CardUtil::ERROR_PROBE};
+    CardUtil::INPUT_TYPES m_cardtype  {CardUtil::INPUT_TYPES::ERROR_PROBE};
     bool m_isLoading {false};
 };
 

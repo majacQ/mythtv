@@ -1,9 +1,11 @@
-#include "Histogram.h"
-#include <string>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
-#include "mythframe.h"
+#include "libmythtv/mythframe.h"
+
+#include "Histogram.h"
 
 void Histogram::generateFromImage(MythVideoFrame* frame, unsigned int frameWidth,
          unsigned int frameHeight, unsigned int minScanX, unsigned int maxScanX,
@@ -13,11 +15,9 @@ void Histogram::generateFromImage(MythVideoFrame* frame, unsigned int frameWidth
     m_data.fill(0);
     m_numberOfSamples = 0;
 
-    if (maxScanX > frameWidth-1)
-        maxScanX = frameWidth-1;
+    maxScanX = std::min(maxScanX, frameWidth-1);
 
-    if (maxScanY > frameHeight-1)
-        maxScanY = frameHeight-1;
+    maxScanY = std::min(maxScanY, frameHeight-1);
 
     unsigned char* framePtr = frame->m_buffer;
     int bytesPerLine = frame->m_pitches[0];
@@ -25,7 +25,7 @@ void Histogram::generateFromImage(MythVideoFrame* frame, unsigned int frameWidth
     {
         for(unsigned int x = minScanX; x < maxScanX; x += XSpacing)
         {
-            m_data[framePtr[y * bytesPerLine + x]]++;
+            m_data[framePtr[(y * bytesPerLine) + x]]++;
             m_numberOfSamples++;
         }
     }
@@ -38,7 +38,7 @@ unsigned int Histogram::getAverageIntensity(void) const
 
     long value = 0;
 
-    for(int i = 0; i < 256; i++)
+    for(long i = 0; i < 256; i++)
     {
         value += m_data[i]*i;
     }

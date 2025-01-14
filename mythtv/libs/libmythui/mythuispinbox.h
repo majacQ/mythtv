@@ -35,13 +35,13 @@ class MUI_PUBLIC MythUISpinBox : public MythUIButtonList
     bool keyPressEvent(QKeyEvent *event) override; // MythUIButtonList
 
     template <typename T>
-        typename std::enable_if<std::chrono::__is_duration<T>::value, T>::type
+        std::enable_if_t<std::chrono::__is_duration<T>::value, T>
         GetDuration()
     { return T(GetDataValue().toInt()); }
     template <typename T>
-        typename std::enable_if<std::chrono::__is_duration<T>::value, void>::type
+        std::enable_if_t<std::chrono::__is_duration<T>::value, void>
         SetDuration(T val)
-    { return SetValueByData(static_cast<int>(val.count())); }
+    { SetValueByData(static_cast<int>(val.count())); }
 
   protected:
     bool ParseElement(const QString &filename, QDomElement &element,
@@ -84,15 +84,15 @@ class MUI_PUBLIC SpinBoxEntryDialog : public MythScreenType
   protected:
     MythUIButtonList  *m_parentList;
     QString            m_searchText;
-    MythUITextEdit    *m_entryEdit;
-    MythUIButton      *m_cancelButton;
-    MythUIButton      *m_okButton;
-    MythUIText        *m_rulesText;
+    MythUITextEdit    *m_entryEdit    { nullptr };
+    MythUIButton      *m_cancelButton { nullptr };
+    MythUIButton      *m_okButton     { nullptr };
+    MythUIText        *m_rulesText    { nullptr };
     int                m_selection;
-    bool               m_okClicked;
-    int m_low;
-    int m_high;
-    int m_step;
+    bool               m_okClicked    { false   };
+    int                m_low;
+    int                m_high;
+    int                m_step;
 
 
 };

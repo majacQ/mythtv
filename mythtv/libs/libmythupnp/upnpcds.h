@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -22,14 +22,15 @@
 #include <QObject>
 #include <QString>
 
-#include "upnp.h"
-#include "upnpcdsobjects.h"
-#include "eventing.h"
-#include "mythdbcon.h"
+#include "libmythbase/mythdbcon.h"
+
+#include "libmythupnp/eventing.h"
+#include "libmythupnp/upnp.h"
+#include "libmythupnp/upnpcdsobjects.h"
 
 class UPnpCDS;
 
-enum UPnpCDSMethod
+enum UPnpCDSMethod : std::uint8_t
 {
     CDSM_Unknown                = 0,
     CDSM_GetServiceDescription  = 1,
@@ -42,14 +43,14 @@ enum UPnpCDSMethod
     CDSM_GetServiceResetToken   = 8
 };
 
-enum UPnpCDSBrowseFlag
+enum UPnpCDSBrowseFlag : std::uint8_t
 {
     CDS_BrowseUnknown         = 0,
     CDS_BrowseMetadata        = 1,
     CDS_BrowseDirectChildren  = 2
 };
 
-enum UPnpCDSClient
+enum UPnpCDSClient : std::uint8_t
 {
     CDS_ClientDefault         = 0,      // (no special attention required)
     CDS_ClientWMP             = 1,      // Windows Media Player
@@ -146,7 +147,7 @@ class UPNP_PUBLIC UPnPShortcutFeature : public UPnPFeature
      * ContentDirectory Service v4 2014
      * Table E-13  allowedValueListfor the Shortcut Name element
      */
-    enum ShortCutType
+    enum ShortCutType : std::uint8_t
     {
         MUSIC,
         MUSIC_ALBUMS,
@@ -251,12 +252,10 @@ class UPNP_PUBLIC UPnpCDSExtension
 
         UPnpCDSExtension( QString sName,
                           QString sExtensionId, 
-                          QString sClass )
-        {
-            m_sName        = std::move(sName);
-            m_sExtensionId = std::move(sExtensionId);
-            m_sClass       = std::move(sClass);
-        }
+                          QString sClass ) :
+            m_sExtensionId(std::move(sExtensionId)),
+            m_sName(std::move(sName)),
+            m_sClass(std::move(sClass)) {}
 
         virtual CDSObject *GetRoot ( );
 

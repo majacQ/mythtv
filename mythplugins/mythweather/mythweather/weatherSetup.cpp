@@ -1,23 +1,17 @@
-
-// MythWeather headers
-#include "weatherScreen.h"
-#include "weatherSource.h"
-#include "sourceManager.h"
-#include "weatherSetup.h"
-
-// MythTV headers
-//#include <mythdbcon.h>
-#include <mythdb.h>
-#include <mythprogressdialog.h>
-
 // QT headers
 #include <QApplication>
 #include <QSqlError>
 #include <QVariant>
 
-#define GLBL_SCREEN 0
-#define SCREEN_SETUP_SCREEN 1
-#define SRC_SCREEN 2
+// MythTV headers
+#include <libmythbase/mythdb.h>
+#include <libmythui/mythprogressdialog.h>
+
+// MythWeather headers
+#include "sourceManager.h"
+#include "weatherScreen.h"
+#include "weatherSetup.h"
+#include "weatherSource.h"
 
 bool GlobalSetup::Create()
 {
@@ -76,9 +70,7 @@ ScreenSetup::ScreenSetup(MythScreenStack *parent, const QString &name,
                          SourceManager *srcman)
     : MythScreenType(parent, name),
       m_sourceManager(srcman ? srcman : new SourceManager()),
-      m_createdSrcMan(srcman == nullptr),
-      m_helpText(nullptr),     m_activeList(nullptr),
-      m_inactiveList(nullptr), m_finishButton(nullptr)
+      m_createdSrcMan(srcman == nullptr)
 {
     m_sourceManager->clearSources();
     m_sourceManager->findScripts();
@@ -166,7 +158,7 @@ bool ScreenSetup::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "DELETE")
@@ -175,7 +167,9 @@ bool ScreenSetup::keyPressEvent(QKeyEvent *event)
                 deleteScreen();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -263,7 +257,7 @@ void ScreenSetup::loadData()
         si->m_units = ENG_UNITS;
 
         QStringList type_strs;
-        for (const QString& type : qAsConst(types))
+        for (const QString& type : std::as_const(types))
         {
             TypeListInfo ti(type);
             si->m_types.insert(type, ti);
@@ -275,7 +269,7 @@ void ScreenSetup::loadData()
         // available to satisfy the requirements.
         if (m_sourceManager->findPossibleSources(type_strs, scriptList))
         {
-            for (const auto *script : qAsConst(scriptList))
+            for (const auto *script : std::as_const(scriptList))
                 si->m_sources.append(script->name);
             auto *item = new MythUIButtonListItem(m_inactiveList, si->m_title);
             item->SetData(QVariant::fromValue(new ScreenListInfo(*si)));
@@ -328,7 +322,7 @@ void ScreenSetup::loadData()
             auto *item = new MythUIButtonListItem(m_activeList, si->m_title);
 
             // Only insert types meant for this screen
-            for (const auto & type : qAsConst(types))
+            for (const auto & type : std::as_const(types))
             {
                 if (type == dataitem)
                     si->m_types.insert(dataitem, ti);
@@ -340,7 +334,7 @@ void ScreenSetup::loadData()
         else
         {
             ScreenListInfo *si = active_screens[draworder];
-            for (const auto & type : qAsConst(types))
+            for (const auto & type : std::as_const(types))
             {
                 if (type == dataitem)
                 {
@@ -360,7 +354,7 @@ void ScreenSetup::saveData()
     {
         MythUIButtonListItem *item = m_activeList->GetItemAt(i);
         auto *si = item->GetData().value<ScreenListInfo *>();
-        for (const auto & type : qAsConst(si->m_types))
+        for (const auto & type : std::as_const(si->m_types))
         {
             if (type.m_src)
                 continue;
@@ -419,7 +413,7 @@ void ScreenSetup::saveData()
                     "weatherscreens_screen_id, weathersourcesettings_sourceid) "
                     "VALUES (:LOC, :ITEM, :SCREENID, :SRCID);";
             db2.prepare(query2);
-            for (const auto & type : qAsConst(si->m_types))
+            for (const auto & type : std::as_const(si->m_types))
             {
                 db2.bindValue(":LOC",      type.m_location);
                 db2.bindValue(":ITEM",     type.m_name);
@@ -511,8 +505,10 @@ void ScreenSetup::doListSelect(MythUIButtonListItem *selected)
                 doLocationDialog(si);
         }
         else
+        {
             LOG(VB_GENERAL, LOG_ERR, "Screen cannot be used, not all required "
                                      "data is supplied by existing sources");
+        }
     }
 }
 
@@ -669,15 +665,6 @@ void ScreenSetup::customEvent(QEvent *event)
 }
 
 ///////////////////////////////////////////////////////////////////////
-
-SourceSetup::SourceSetup(MythScreenStack *parent, const QString &name)
-    : MythScreenType(parent, name)
-{
-    m_sourceList = nullptr;
-    m_updateSpinbox = m_retrieveSpinbox = nullptr;
-    m_finishButton = nullptr;
-    m_sourceText = nullptr;
-}
 
 SourceSetup::~SourceSetup()
 {
@@ -855,11 +842,9 @@ LocationDialog::LocationDialog(MythScreenStack *parent, const QString &name,
                                SourceManager *srcman)
     : MythScreenType(parent, name),
       m_screenListInfo(new ScreenListInfo(*si)),   m_sourceManager(srcman),
-      m_retScreen(retScreen), m_locationList(nullptr),
-      m_locationEdit(nullptr),m_searchButton(nullptr),
-      m_resultsText(nullptr), m_sourceText(nullptr)
+      m_retScreen(retScreen)
 {
-    for (const auto & type : qAsConst(si->m_types))
+    for (const auto & type : std::as_const(si->m_types))
         m_types << type.m_name;
 }
 
@@ -938,7 +923,7 @@ void LocationDialog::doSearch()
     // if a screen makes it this far, theres at least one source for it
     m_sourceManager->findPossibleSources(m_types, sources);
     QString search = m_locationEdit->GetText();
-    for (auto *si : qAsConst(sources))
+    for (auto *si : std::as_const(sources))
     {
         if (!result_cache.contains(si))
         {

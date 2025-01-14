@@ -1,3 +1,4 @@
+#include <QtGlobal>
 #include <QAtomicInt>
 #include <QMutex>
 #include <QMutexLocker>
@@ -37,24 +38,21 @@
 #endif
 #define SYSLOG_NAMES
 #ifndef _WIN32
-#include <mythsyslog.h>
+#include "mythsyslog.h"
 #endif
 #include <unistd.h>
 
 // Various ways to get to thread's tid
-#if defined(linux)
+#if defined(__linux__)
 #include <sys/syscall.h>
 #elif defined(__FreeBSD__)
 extern "C" {
 #include <sys/ucontext.h>
 #include <sys/thr.h>
 }
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
 #include <mach/mach.h>
 #endif
-
-// QJson
-#include "qjsonwrapper/Json.h"
 
 #ifdef Q_OS_ANDROID
 #include <android/log.h>
@@ -77,11 +75,11 @@ struct LogPropagateOpts {
     bool    m_propagate;
     int     m_quiet;
     int     m_facility;
-    bool    m_dblog;
     QString m_path;
+    bool    m_loglong;
 };
 
-LogPropagateOpts        logPropagateOpts {false, 0, 0, true, ""};
+LogPropagateOpts        logPropagateOpts {false, 0, 0, "", false};
 QString                 logPropagateArgs;
 QStringList             logPropagateArgList;
 
@@ -127,20 +125,12 @@ LoggingItem::LoggingItem(const char *_file, const char *_function,
         ReferenceCounter("LoggingItem", false),
         m_threadId((uint64_t)(QThread::currentThreadId())),
         m_line(_line), m_type(_type), m_level(_level),
-        m_file(_file), m_function(_function)
+        m_function(_function)
 {
+    const char *slash = std::strrchr(_file, '/');
+    m_file = (slash != nullptr) ? slash+1 : _file;
     m_epoch = nowAsDuration<std::chrono::microseconds>();
     setThreadTid();
-}
-
-QByteArray LoggingItem::toByteArray(void)
-{
-    QVariantMap variant = QJsonWrapper::qobject2qvariant(this);
-    QByteArray json = QJsonWrapper::toJson(variant);
-
-    //cout << json.constData() << endl;
-
-    return json;
 }
 
 /// \brief Get the name of the thread that produced the LoggingItem
@@ -185,14 +175,13 @@ void LoggingItem::setThreadTid(void)
 
 #if defined(Q_OS_ANDROID)
         m_tid = (int64_t)gettid();
-#elif defined(linux)
+#elif defined(__linux__)
         m_tid = syscall(SYS_gettid);
 #elif defined(__FreeBSD__)
         long lwpid;
-        int dummy = thr_self( &lwpid );
-        (void)dummy;
+        [[maybe_unused]] int dummy = thr_self( &lwpid );
         m_tid = (int64_t)lwpid;
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
         m_tid = (int64_t)mach_thread_self();
 #endif
         logThreadTidHash[m_threadId] = m_tid;
@@ -224,16 +213,45 @@ char LoggingItem::getLevelChar (void)
     return '-';
 }
 
+std::string LoggingItem::toString()
+{
+    QString ptid = QString::number(pid()); // pid, add tid if non-zero
+    if(tid())
+    {
+        ptid.append("/").append(QString::number(tid()));
+    }
+    return qPrintable(QString("%1 %2 [%3] %4 %5:%6:%7  %8\n")
+                          .arg(getTimestampUs(),
+                               QString(QChar(getLevelChar())),
+                               ptid,
+                               threadName(),
+                               file(),
+                               QString::number(line()),
+                               function(),
+                               message()
+                              ));
+}
+
+std::string LoggingItem::toStringShort()
+{
+    return qPrintable(QString("%1 %2  %3\n")
+                          .arg(getTimestampUs(),
+                               QString(QChar(getLevelChar())),
+                               message()
+                              ));
+}
+
 /// \brief LoggerThread constructor.  Enables debugging of thread registration
 ///        and deregistration if the VERBOSE_THREADS environment variable is
 ///        set.
 LoggerThread::LoggerThread(QString filename, bool progress, bool quiet,
-                           QString table, int facility) :
+                           int facility, bool loglong) :
     MThread("Logger"),
     m_waitNotEmpty(new QWaitCondition()),
     m_waitEmpty(new QWaitCondition()),
     m_filename(std::move(filename)), m_progress(progress), m_quiet(quiet),
-    m_tablename(std::move(table)), m_facility(facility), m_pid(getpid())
+    m_loglong(loglong),
+    m_facility(facility), m_pid(getpid())
 {
     if (qEnvironmentVariableIsSet("VERBOSE_THREADS"))
     {
@@ -367,17 +385,7 @@ void LoggerThread::handleItem(LoggingItem *item)
 
     if (!item->m_message.isEmpty())
     {
-        /// TODO: This converts the LoggingItem to json for sending to
-        /// the log server.  Now that the log server is gone, it just
-        /// passed the json to the logForwardThread, where it will
-        /// eventually be converted back to a LoggingItem.  It should
-        /// be possible to eliminate the double conversion now that
-        /// the log server is gone and all logging happens in one
-        /// process.
-        QList<QByteArray> list;
-        list.append(QByteArray());
-        list.append(item->toByteArray());
-        logForwardMessage(list);
+        logForwardMessage(item);
     }
 }
 
@@ -402,41 +410,21 @@ bool LoggerThread::logConsole(LoggingItem *item) const
     }
     else
     {
-        QString timestamp = item->getTimestampUs();
-        char shortname = item->getLevelChar();
-
-#if CONFIG_DEBUGTYPE
-        if (item->tid())
+#if !defined(NDEBUG) || CONFIG_FORCE_LOGLONG
+        if (true)
+#else
+        if (m_loglong)
+#endif
         {
-            line = qPrintable(QString("%1 %2 [%3/%4] %5 %6:%7:%8  %9\n")
-                .arg(timestamp, QString(shortname),
-                     QString::number(item->pid()),
-                     QString::number(item->tid()),
-                     item->threadName(),
-                     item->m_file,
-                     QString::number(item->m_line),
-                     item->m_function,
-                     item->m_message));
+            line = item->toString();
         }
         else
         {
-            line = qPrintable(QString("%1 %2 [%3] %4 %5:%6:%7  %8\n")
-                .arg(timestamp, QString(shortname),
-                     QString::number(item->pid()),
-                     item->threadName(),
-                     item->m_file,
-                     QString::number(item->m_line),
-                     item->m_function,
-                     item->m_message));
+            line = item->toStringShort();
         }
-#else
-        line = qPrintable(QString("%1 %2  %3\n")
-                          .arg(timestamp, QString(shortname),
-                               item->m_message));
-#endif
     }
 
-    (void)write(1, line.data(), line.size());
+    std::cout << line << std::flush;
 
 #else // Q_OS_ANDROID
 
@@ -466,7 +454,7 @@ bool LoggerThread::logConsole(LoggingItem *item) const
         aprio = ANDROID_LOG_UNKNOWN;
         break;
     }
-#if CONFIG_DEBUGTYPE
+#ifndef NDEBUG
     __android_log_print(aprio, "mfe", "%s:%d:%s  %s", qPrintable(item->m_file),
                         item->m_line, qPrintable(item->m_function),
                         qPrintable(item->m_message));
@@ -517,7 +505,6 @@ void LoggerThread::fillItem(LoggingItem *item)
     item->setPid(m_pid);
     item->setThreadName(item->getThreadName());
     item->setAppName(m_appname);
-    item->setTable(m_tablename);
     item->setLogFile(m_filename);
     item->setFacility(m_facility);
 }
@@ -539,18 +526,6 @@ LoggingItem *LoggingItem::create(const char *_file,
 
     return item;
 }
-
-LoggingItem *LoggingItem::create(QByteArray &buf)
-{
-    // Deserialize buffer
-    QVariant variant = QJsonWrapper::parseJson(buf);
-
-    auto *item = new LoggingItem;
-    QJsonWrapper::qvariant2qobject(variant.toMap(), item);
-
-    return item;
-}
-
 
 /// \brief  Format and send a log message into the queue.  This is called from
 ///         the LOG() macro.  The intention is minimal blocking of the caller.
@@ -588,7 +563,7 @@ void LogPrintLine( uint64_t mask, LogLevel_t level, const char *file, int line,
         {
             item = logQueue.dequeue();
             qLock.unlock();
-            logThread->handleItem(item);
+            LoggerThread::handleItem(item);
             logThread->logConsole(item);
             item->DecrRef();
             qLock.relock();
@@ -628,10 +603,10 @@ void logPropagateCalc(void)
         logPropagateArgList << "--quiet";
     }
 
-    if (logPropagateOpts.m_dblog)
+    if (logPropagateOpts.m_loglong)
     {
-        logPropagateArgs += " --enable-dblog";
-        logPropagateArgList << "--enable-dblog";
+        logPropagateArgs += " --loglong";
+        logPropagateArgList << "--loglong";
     }
 
 #if !defined(_WIN32) && !defined(Q_OS_ANDROID)
@@ -671,13 +646,12 @@ bool logPropagateQuiet(void)
 /// \param  quiet       quiet level requested (squelches all console output)
 /// \param  facility    Syslog facility to use.  -1 to disable syslog output
 /// \param  level       Minimum logging level to put into the logs
-/// \param  dblog       true if database logging is requested
 /// \param  propagate   true if the logfile path needs to be propagated to child
 ///                     processes.
 /// \param  testHarness Should always be false. Set to true when
 ///                     invoked by the testing code.
 void logStart(const QString& logfile, bool progress, int quiet, int facility,
-              LogLevel_t level, bool dblog, bool propagate, bool testHarness)
+              LogLevel_t level, bool propagate, bool loglong, bool testHarness)
 {
     if (logThread && logThread->isRunning())
         return;
@@ -689,7 +663,7 @@ void logStart(const QString& logfile, bool progress, int quiet, int facility,
     logPropagateOpts.m_propagate = propagate;
     logPropagateOpts.m_quiet = quiet;
     logPropagateOpts.m_facility = facility;
-    logPropagateOpts.m_dblog = dblog;
+    logPropagateOpts.m_loglong = loglong;
 
     if (propagate)
     {
@@ -702,10 +676,8 @@ void logStart(const QString& logfile, bool progress, int quiet, int facility,
     if (testHarness)
         return;
 
-    QString table = dblog ? QString("logging") : QString("");
-
     if (!logThread)
-        logThread = new LoggerThread(logfile, progress, quiet, table, facility);
+        logThread = new LoggerThread(logfile, progress, quiet, facility, loglong);
 
     logThread->start();
 }
@@ -763,26 +735,23 @@ void loggingDeregisterThread(void)
 /// \brief  Map a syslog facility name back to the enumerated value
 /// \param  facility    QString containing the facility name
 /// \return Syslog facility as enumerated type.  Negative if not found.
-int syslogGetFacility(const QString& facility)
+int syslogGetFacility([[maybe_unused]] const QString& facility)
 {
 #ifdef _WIN32
     LOG(VB_GENERAL, LOG_NOTICE,
         "Windows does not support syslog, disabling" );
-    Q_UNUSED(facility);
     return( -2 );
 #elif defined(Q_OS_ANDROID)
     LOG(VB_GENERAL, LOG_NOTICE,
         "Android does not support syslog, disabling" );
-    Q_UNUSED(facility);
     return( -2 );
 #else
     const CODE *name = nullptr;
-    int i = 0;
     QByteArray ba = facility.toLocal8Bit();
     char *string = (char *)ba.constData();
 
-    for (i = 0, name = &facilitynames[0];
-         name->c_name && (strcmp(name->c_name, string) != 0); i++, name++);
+    for (name = &facilitynames[0];
+         name->c_name && (strcmp(name->c_name, string) != 0); name++);
 
     return( name->c_val );
 #endif
@@ -801,7 +770,7 @@ LogLevel_t logLevelGet(const QString& level)
         locker.relock();
     }
 
-    for (auto *item : qAsConst(loglevelMap))
+    for (auto *item : std::as_const(loglevelMap))
     {
         if ( item->name == level.toLower() )
             return (LogLevel_t)item->value;
@@ -825,7 +794,7 @@ QString logLevelGetName(LogLevel_t level)
     LoglevelMap::iterator it = loglevelMap.find((int)level);
 
     if ( it == loglevelMap.end() )
-        return QString("unknown");
+        return {"unknown"};
 
     return (*it)->name;
 }
@@ -957,14 +926,9 @@ int verboseArgParse(const QString& arg)
         return GENERIC_EXIT_INVALID_CMDLINE;
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList verboseOpts = arg.split(QRegularExpression("[^\\w:]+"),
-                                        QString::SkipEmptyParts);
-#else
-    QStringList verboseOpts = arg.split(QRegularExpression("[^\\w:]+"),
-                                        Qt::SkipEmptyParts);
-#endif
-    for (const auto& opt : qAsConst(verboseOpts))
+    static const QRegularExpression kSeparatorRE { "[^\\w:]+" };
+    QStringList verboseOpts = arg.split(kSeparatorRE, Qt::SkipEmptyParts);
+    for (const auto& opt : std::as_const(verboseOpts))
     {
         option = opt.toLower();
         bool reverseOption = false;

@@ -13,7 +13,7 @@
 #include <memory>
 
 #include <QMap>
-#include "mythframe.h"
+#include "libmythtv/mythframe.h"
 
 /*  
  * At least FreeBSD doesn't define LONG_LONG_MAX, but it does define  
@@ -33,7 +33,7 @@ public:
     virtual const char *name(void) const = 0;
 
     /* Analyze a video frame. */
-    enum analyzeFrameResult {
+    enum analyzeFrameResult : std::uint8_t {
         ANALYZE_OK,         /* Analysis OK */
         ANALYZE_ERROR,      /* Recoverable error */
         ANALYZE_FINISHED,   /* Analysis complete, don't need more frames. */
@@ -45,9 +45,9 @@ public:
     using FrameMap = QMap<long long, long long>;
 
     virtual enum analyzeFrameResult MythPlayerInited(
-            MythPlayer *player, long long nframes) {
-        (void)player;
-        (void)nframes;
+            [[maybe_unused]] MythPlayer *player,
+            [[maybe_unused]] long long nframes)
+    {
         return ANALYZE_OK;
     };
 
@@ -60,9 +60,9 @@ public:
     virtual enum analyzeFrameResult analyzeFrame(const MythVideoFrame *frame,
             long long frameno, long long *pNextFrame /* [out] */) = 0;
 
-    virtual int finished(long long nframes, bool final) {
-        (void)nframes;
-        (void)final;
+    virtual int finished([[maybe_unused]] long long nframes,
+                         [[maybe_unused]] bool final)
+    {
         return 0;
     }
     virtual int reportTime(void) const { return 0; }

@@ -6,23 +6,16 @@
 //                                                                            
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include "upnp.h"
-#include "mythevent.h"
-#include "mythlogging.h"
-#include "upnptaskcache.h"
-#include "portchecker.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/portchecker.h"
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-  #define QT_ENDL endl
-  #define QT_FLUSH flush
-#else
-  #define QT_ENDL Qt::endl
-  #define QT_FLUSH Qt::flush
-#endif
+#include "upnp.h"
+#include "upnptaskcache.h"
 
 SSDPCache* SSDPCache::g_pSSDPCache = nullptr;
 
@@ -52,7 +45,7 @@ void SSDPCacheEntries::Clear(void)
 {
     QMutexLocker locker(&m_mutex);
 
-    for (auto *const entry : qAsConst(m_mapEntries))
+    for (auto *const entry : std::as_const(m_mapEntries))
     {
         if (entry)
             entry->DecrRef();
@@ -185,7 +178,7 @@ QTextStream &SSDPCacheEntries::OutputXML(
 {
     QMutexLocker locker(&m_mutex);
 
-    for (auto *entry : qAsConst(m_mapEntries))
+    for (auto *entry : std::as_const(m_mapEntries))
     {
         if (entry == nullptr)
             continue;
@@ -194,7 +187,7 @@ QTextStream &SSDPCacheEntries::OutputXML(
         // holds one reference to each entry and we are holding m_mutex.
         os << "<Service usn='" << entry->m_sUSN
            << "' expiresInSecs='" << entry->ExpiresInSecs().count()
-           << "' url='" << entry->m_sLocation << "' />" << QT_ENDL;
+           << "' url='" << entry->m_sLocation << "' />" << Qt::endl;
 
         if (pnEntryCount != nullptr)
             (*pnEntryCount)++;
@@ -208,7 +201,7 @@ void SSDPCacheEntries::Dump(uint &nEntryCount) const
 {
     QMutexLocker locker(&m_mutex);
 
-    for (auto *entry : qAsConst(m_mapEntries))
+    for (auto *entry : std::as_const(m_mapEntries))
     {
         if (entry == nullptr)
             continue;
@@ -286,7 +279,7 @@ void SSDPCache::Clear(void)
 {
     QMutexLocker locker(&m_mutex);
 
-    for (auto *const it : qAsConst(m_cache))
+    for (auto *const it : std::as_const(m_cache))
     {
         if (it)
             it->DecrRef();
@@ -384,7 +377,9 @@ void SSDPCache::Add( const QString &sURI,
                     isGoodUrl=true;
                 }
                 else
+                {
                     m_badUrlList.append(hostport);
+                }
             }
             // Only add if the device can be connected
             if (isGoodUrl)
@@ -490,7 +485,7 @@ int SSDPCache::RemoveStale()
     // (This avoids issues when removing from a QMap while iterating it)
     // ----------------------------------------------------------------------
 
-    for (const auto & key : qAsConst(lstKeys))
+    for (const auto & key : std::as_const(lstKeys))
     {
         SSDPCacheEntriesMap::iterator it = m_cache.find( key );
         if (it == m_cache.end())
@@ -558,7 +553,7 @@ QTextStream &SSDPCache::OutputXML(
     {
         if (*it != nullptr)
         {
-            os << "<Device uri='" << it.key() << "'>" << QT_ENDL;
+            os << "<Device uri='" << it.key() << "'>" << Qt::endl;
 
             uint tmp = 0;
 
@@ -567,13 +562,13 @@ QTextStream &SSDPCache::OutputXML(
             if (pnEntryCount != nullptr)
                 *pnEntryCount += tmp;
 
-            os << "</Device>" << QT_ENDL;
+            os << "</Device>" << Qt::endl;
 
             if (pnDevCount != nullptr)
                 (*pnDevCount)++;
         }
     }
-    os << QT_FLUSH;
+    os << Qt::flush;
 
     return os;
 }

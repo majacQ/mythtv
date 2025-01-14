@@ -1,13 +1,17 @@
 // -*- Mode: c++ -*-
 
+// Qt Headers
+#include <QRegularExpression>
+
 // MythTV headers
-#include "sourceutil.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+
 #include "cardutil.h"
-#include "scaninfo.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
-#include "mythsystemlegacy.h"
+#include "channelscan/scaninfo.h"
+#include "sourceutil.h"
 
 bool SourceUtil::HasDigitalChannel(uint sourceid)
 {
@@ -53,11 +57,11 @@ QString SourceUtil::GetSourceName(uint sourceid)
     if (!query.exec())
     {
         MythDB::DBError("SourceUtil::GetSourceName()", query);
-        return QString();
+        return {};
     }
     if (!query.next())
     {
-        return QString();
+        return {};
     }
 
     return query.value(0).toString();
@@ -98,11 +102,11 @@ QString SourceUtil::GetChannelSeparator(uint sourceid)
     if (query.exec() && query.isActive() && query.size() > 0)
     {
         QMap<QString,uint> counts;
-        const QRegularExpression sepExpr(R"((_|-|#|\.))");
+        static const QRegularExpression kSeparatorRE { R"((_|-|#|\.))" };
         while (query.next())
         {
             const QString channum = query.value(0).toString();
-            const int where = channum.indexOf(sepExpr);
+            const int where = channum.indexOf(kSeparatorRE);
             if (channum.right(2).startsWith("0"))
                 counts["0"]++;
             else
@@ -233,7 +237,7 @@ bool SourceUtil::IsProperlyConnected(uint sourceid, bool strict)
 {
     QStringList types = get_inputtypes(sourceid);
     QMap<QString,uint> counts;
-    for (const auto & type : qAsConst(types))
+    for (const auto & type : std::as_const(types))
     {
         counts[type]++;
 
@@ -558,7 +562,7 @@ bool SourceUtil::DeleteSource(uint sourceid)
 
     if (!query.exec() || !query.isActive())
     {
-        MythDB::DBError("Deleting inputs", query);
+        MythDB::DBError("Disassociate source inputs", query);
         return false;
     }
 

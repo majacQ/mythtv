@@ -42,7 +42,7 @@ class MUI_PUBLIC MythEDID
     MythVRRRange GetVRRRange      () const;
 
   private:
-    enum HDREOTF
+    enum HDREOTF : std::uint8_t
     {
         SDR     = 1 << 0,
         HDRTrad = 1 << 1,
@@ -53,19 +53,19 @@ class MUI_PUBLIC MythEDID
     void        Parse             ();
     bool        ParseBaseBlock    (const quint8* Data);
     void        ParseDisplayDescriptor(const quint8* Data, uint Offset);
-    void        ParseDetailedTimingDescriptor(const quint8* Data, uint Offset);
-    bool        ParseCTA861       (const quint8* Data, uint Offset);
-    bool        ParseCTABlock     (const quint8* Data, uint Offset);
-    bool        ParseVSDB         (const quint8* Data, uint Offset, uint Length);
-    bool        ParseExtended     (const quint8* Data, uint Offset, uint Length);
+    void        ParseDetailedTimingDescriptor(const quint8* Data, size_t Offset);
+    bool        ParseCTA861       (const quint8* Data, size_t Offset);
+    bool        ParseCTABlock     (const quint8* Data, size_t Offset);
+    bool        ParseVSDB         (const quint8* Data, size_t Offset, size_t Length);
+    bool        ParseExtended     (const quint8* Data, size_t Offset, size_t Length);
 
     bool        m_valid           { false };
-    QByteArray  m_data            { };
-    uint        m_size            { 0 };
+    QByteArray  m_data;
+    size_t      m_size            { 0 };
     quint8      m_minorVersion    { 0 };
-    QSize       m_displaySize     { };    // N.B. Either size or aspect are valid
+    QSize       m_displaySize;    // N.B. Either size or aspect are valid
     double      m_displayAspect   { 0.0 };
-    QStringList m_serialNumbers   { };
+    QStringList m_serialNumbers;
     QString     m_name;
     int         m_vrangeMin       { 0 };
     int         m_vrangeMax       { 0 };

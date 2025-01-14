@@ -8,9 +8,12 @@
 #include <QMutex>
 #include <QString>
 
-#include "mythtvexp.h" // MTV_PUBLIC - Symbol Visibility
+#include "libmythbase/programinfo.h" // for subtitle types and audio and video properties
+#include "libmythtv/mythtvexp.h" // MTV_PUBLIC - Symbol Visibility
 #include "mpegdescriptors.h"
-#include "programinfo.h" // for subtitle types and audio and video properties
+
+MTV_PUBLIC QDateTime dvbdate2qt(const unsigned char *buf);
+MTV_PUBLIC time_t dvbdate2unix(const unsigned char *buf);
 
 /*
 // needed for scanning
@@ -46,23 +49,32 @@ inline QString dvb_decode_text(const unsigned char *src, uint length)
     return dvb_decode_text(src, length, {} );
 }
 
-QString dvb_decode_short_name(const unsigned char *src, uint raw_length);
+MTV_PUBLIC QString dvb_decode_short_name(const unsigned char *src, uint raw_length);
 
-#define byteBCDH2int(i) ((i) >> 4)
-#define byteBCDL2int(i) ((i) & 0x0f)
-#define byteBCD2int(i) (byteBCDH2int(i) * 10 + byteBCDL2int(i))
-#define byte2BCD2int(i, j) \
-  (byteBCDH2int(i) * 1000     + byteBCDL2int(i) * 100       + \
-   byteBCDH2int(j) * 10       + byteBCDL2int(j))
-#define byte3BCD2int(i, j, k) \
-  (byteBCDH2int(i) * 100000   + byteBCDL2int(i) * 10000     + \
-   byteBCDH2int(j) * 1000     + byteBCDL2int(j) * 100       + \
-   byteBCDH2int(k) * 10       + byteBCDL2int(k))
-#define byte4BCD2int(i, j, k, l) \
-  (byteBCDH2int(i) * 10000000LL + byteBCDL2int(i) * 1000000 + \
-   byteBCDH2int(j) * 100000     + byteBCDL2int(j) * 10000   + \
-   byteBCDH2int(k) * 1000       + byteBCDL2int(k) * 100     + \
-   byteBCDH2int(l) * 10         + byteBCDL2int(l))
+static constexpr uint8_t byteBCDH2int(uint8_t i) { return i >> 4; };
+static constexpr uint8_t byteBCDL2int(uint8_t i) { return i & 0x0f; };
+static constexpr uint8_t byteBCD2int(uint8_t i)
+{ return (byteBCDH2int(i) * 10) + byteBCDL2int(i); };
+static constexpr uint16_t byte2BCD2int(uint8_t i, uint8_t j)
+{ return ((byteBCDH2int(i) * 1000)     + (byteBCDL2int(i) * 100)       +
+          (byteBCDH2int(j) * 10)       +  byteBCDL2int(j)); };
+static constexpr uint32_t byte3BCD2int(uint8_t i, uint8_t j, uint8_t k)
+{ return ((byteBCDH2int(i) * 100000)   + (byteBCDL2int(i) * 10000)     +
+          (byteBCDH2int(j) * 1000)     + (byteBCDL2int(j) * 100)       +
+          (byteBCDH2int(k) * 10)       +  byteBCDL2int(k)); };
+static constexpr uint32_t byte4BCD2int(uint8_t i, uint8_t j, uint8_t k, uint8_t l)
+{ return ((byteBCDH2int(i) * 10000000)   + (byteBCDL2int(i) * 1000000) +
+          (byteBCDH2int(j) * 100000)     + (byteBCDL2int(j) * 10000)   +
+          (byteBCDH2int(k) * 1000)       + (byteBCDL2int(k) * 100)     +
+          (byteBCDH2int(l) * 10)         +  byteBCDL2int(l)); };
+static constexpr uint64_t byte4BCD2int64(uint8_t i, uint8_t j, uint8_t k, uint8_t l)
+{ return static_cast<uint64_t>(byte4BCD2int(i, j, k, l)); }
+
+static_assert( byteBCD2int(0x98) == 98);
+static_assert(byte2BCD2int(0x98, 0x76) == 9876);
+static_assert(byte3BCD2int(0x98, 0x76, 0x54) == 987654);
+static_assert(byte4BCD2int(0x98, 0x76, 0x54, 0x32) == 98765432);
+static_assert(byte4BCD2int64(0x98, 0x76, 0x54, 0x32) == 98765432ULL);
 
 // DVB Bluebook A038 (Sept 2011) p 77
 class NetworkNameDescriptor : public MPEGDescriptor
@@ -126,7 +138,7 @@ class LinkageDescriptor : public MPEGDescriptor
     // service_id              16   6.0
     uint ServiceID(void)       const { return (m_data[6]<<8) | m_data[7]; }
     // linkage_type             8   8.0
-    enum
+    enum : std::uint8_t
     {
         kInformationService          = 0x01,
         kEPGService                  = 0x02,
@@ -148,7 +160,7 @@ class LinkageDescriptor : public MPEGDescriptor
     // if (linkage_type == 0x08)
     // {
     //    hand-over_type        4   9.0
-    enum
+    enum : std::uint8_t
     {
         kHandOverIdentical         = 0x01,
         kHandOverLocalVariation    = 0x02,
@@ -158,7 +170,7 @@ class LinkageDescriptor : public MPEGDescriptor
     QString MobileHandOverTypeString(void) const;
     //    reserved_future_use   3   9.4
     //    origin_type           1   9.7
-    enum
+    enum : std::uint8_t
     {
         kOriginNIT = 0x0,
         kOriginSDT = 0x1,
@@ -219,9 +231,9 @@ class ApplicationSignallingDescriptor : public MPEGDescriptor
     //  }
     uint Count() const { return DescriptorLength() / 3; }
     uint ApplicationType(uint i) const
-        { return (m_data[2 + i*3] & 0x7F) << 8 | m_data[2 + i*3 + 1] ; }
+        { return (m_data[2 + (i*3)] & 0x7F) << 8 | m_data[2 + (i*3) + 1] ; }
     uint AITVersionNumber(uint i) const
-        { return m_data[2 + i*3 + 2] & 0x1F ; }
+        { return m_data[2 + (i*3) + 2] & 0x1F ; }
     QString toString(void) const override; // MPEGDescriptor
 };
 
@@ -324,7 +336,7 @@ class CAIdentifierDescriptor : public MPEGDescriptor
     // for (i=0; i<N; i++)
     //   { CA_system_id 16 }
     int CASystemId(uint i) const
-        { return (m_data[2 + i*2] << 8) | m_data[3 + i*2]; }
+        { return (m_data[2 + (i*2)] << 8) | m_data[3 + (i*2)]; }
     QString toString(void) const override; // MPEGDescriptor
 };
 
@@ -662,7 +674,7 @@ class CountryAvailabilityDescriptor : public MPEGDescriptor
     QString CountryNames(void) const
     {
         QString countries="";
-        for (uint i=0; i<CountryCount(); i++)
+        for (size_t i=0; i<CountryCount(); i++)
         {
             if (i!=0) countries.append(" ");
             countries.append(QString::fromLatin1(
@@ -755,11 +767,11 @@ class CableDeliverySystemDescriptor : public MPEGDescriptor
     {
         if (m_data == nullptr)
             return 0;
-        return byte4BCD2int(m_data[2], m_data[3], m_data[4], m_data[5]) * 100;
+        return byte4BCD2int64(m_data[2], m_data[3], m_data[4], m_data[5]) * 100;
     }
     // reserved_future_use     12   6.0
     // FEC_outer                4   7.4
-    enum
+    enum : std::uint8_t
     {
         kOuterFEC_None        = 0x1,
         kOuterFEC_RS204_RS188 = 0x2,
@@ -767,11 +779,14 @@ class CableDeliverySystemDescriptor : public MPEGDescriptor
     uint FECOuter(void) const { return m_data[7] & 0xf; }
     QString FECOuterString(void) const
     {
-        return (FECOuter() == kOuterFEC_None) ? "None" :
-            ((FECOuter() == kOuterFEC_RS204_RS188) ? "RS(204/188)" : "unknown");
+        if (FECOuter() == kOuterFEC_None)
+            return "None";
+        if (FECOuter() == kOuterFEC_RS204_RS188)
+            return "RS(204/188)";
+        return "unknown";
     }
     // modulation               8   8.0
-    enum
+    enum : std::uint8_t
     {
         kModulationQAM16  = 0x01,
         kModulationQAM32  = 0x02,
@@ -799,7 +814,7 @@ class CableDeliverySystemDescriptor : public MPEGDescriptor
                 (byteBCDH2int(m_data[12]) * 100));
     }
     // FEC_inner                4  12.4
-    enum
+    enum : std::uint8_t
     {
         kInnerFEC_1_2_ConvolutionCodeRate = 0x1,
         kInnerFEC_2_3_ConvolutionCodeRate = 0x2,
@@ -831,9 +846,9 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
         return ((m_data[2]<<24) | (m_data[3]<<16) |
                 (m_data[4]<<8)  | (m_data[5]));
     }
-    unsigned long long FrequencykHz(void) const
+    uint64_t FrequencykHz(void) const
     {
-        return byte4BCD2int(m_data[2], m_data[3], m_data[4], m_data[5]) * 10;
+        return byte4BCD2int64(m_data[2], m_data[3], m_data[4], m_data[5]) * 10;
     }
     /// orbital_position       16   6.0
     uint OrbitalPosition(void) const
@@ -853,7 +868,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
     uint Polarization(void)       const { return (m_data[8]>>5)&0x3; }
     QString PolarizationString()  const
     {
-        static std::array<QString,4> ps { "h", "v", "l", "r" };
+        static const std::array<const QString,4> ps { "h", "v", "l", "r" };
         return ps[Polarization()];
     }
     bool IsCircularPolarization(void) const       { return ((m_data[8]>>6)&0x1) != 0; }
@@ -861,7 +876,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
     bool IsHorizontalLeftPolarization(void) const { return ((m_data[8]>>5)&0x1) != 0; }
     bool IsVerticalRightPolarization(void) const  { return ((m_data[8]>>5)&0x1) == 0; }
     // roll off                 2   8.3
-    enum
+    enum : std::uint8_t
     {
         kRollOff_35,
         kRollOff_20,
@@ -871,7 +886,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
     uint RollOff(void) const { return (m_data[8]>>3)&0x3; }
     QString RollOffString(void) const
     {
-        static std::array<QString,4> ro { "0.35", "0.20", "0.25", "auto" };
+        static const std::array<const QString,4> ro { "0.35", "0.20", "0.25", "auto" };
         return ro[RollOff()];
     }
     // modulation system        1   8.5
@@ -881,7 +896,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
         return ModulationSystem() ? "DVB-S2" : "DVB-S";
     }
     // modulation               2   8.6
-    enum
+    enum : std::uint8_t
     {
         kModulationQPSK_NS = 0x0, // Non standard QPSK for Bell ExpressVu
         // should be "auto" according to DVB SI standard
@@ -892,7 +907,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
     uint Modulation(void) const { return m_data[8]&0x03; }
     QString ModulationString(void) const
     {
-        static std::array<QString,4> ms { "qpsk", "qpsk", "8psk", "qam_16" };
+        static const std::array<const QString,4> ms { "qpsk", "qpsk", "8psk", "qam_16" };
         return ms[Modulation()];
     }
     // symbol_rate             28   9.0
@@ -907,7 +922,7 @@ class SatelliteDeliverySystemDescriptor : public MPEGDescriptor
                 (byteBCDH2int(m_data[12]) * 100));
     }
     // FEC_inner                4  12.4
-    enum
+    enum : std::uint8_t
     {
         kInnerFEC_1_2_ConvolutionCodeRate = 0x1,
         kInnerFEC_2_3_ConvolutionCodeRate = 0x2,
@@ -943,7 +958,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     uint64_t FrequencyHz(void) const { return uint64_t(Frequency()) * 10ULL; }
 
     // bandwidth                3   6.0
-    enum
+    enum : std::uint8_t
     {
         kBandwidth8Mhz = 0x0,
         kBandwidth7Mhz = 0x1,
@@ -965,7 +980,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     bool IsMPE_FECUsed(void) const { return (m_data[6] & 0x04) == 0; }
     // reserved_future_use      2   6.6
     // constellation            2   7.0
-    enum
+    enum : std::uint8_t
     {
         kConstellationQPSK  = 0x0,
         kConstellationQAM16 = 0x1,
@@ -980,7 +995,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
             cs[Constellation()] : "auto";
     }
     // hierarchy_information    3   7.2
-    enum
+    enum : std::uint8_t
     {
         kHierarchyInfoNonHierarchicalNativeInterleaver  = 0x0,
         kHierarchyInfoAlpha1NativeInterleaver           = 0x1,
@@ -996,7 +1011,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     /// \bug returns "a" for values >= 4 for compatibility with siparser.cpp
     QString HierarchyString(void) const
     {
-        static std::array<QString,8> hs { "n", "1", "2", "4", "a", "a", "a", "a" };
+        static const std::array<const QString,8> hs { "n", "1", "2", "4", "a", "a", "a", "a" };
         return hs[Hierarchy()];
     }
     bool NativeInterleaver(void) const { return ( m_data[7] & 0x20 ) != 0; }
@@ -1006,7 +1021,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
         return (0x2 == i) ? 4 : i;
     }
     // code_rate-HP_stream      3   7.5
-    enum
+    enum : std::uint8_t
     {
         kCodeRate_1_2 = 0x0,
         kCodeRate_2_3 = 0x1,
@@ -1017,7 +1032,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     uint CodeRateHP(void) const { return m_data[7] & 0x7; }
     QString CodeRateHPString(void) const
     {
-        static std::array<QString,8> cr {
+        static const std::array<const QString,8> cr {
             "1/2", "2/3", "3/4", "5/6", "7/8", "auto", "auto", "auto"
         };
         return cr[CodeRateHP()];
@@ -1026,13 +1041,13 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     uint CodeRateLP(void) const { return (m_data[8]>>5) & 0x7; }
     QString CodeRateLPString(void) const
     {
-        static std::array<QString,8> cr {
+        static const std::array<const QString,8> cr {
             "1/2", "2/3", "3/4", "5/6", "7/8", "auto", "auto", "auto"
         };
         return cr[CodeRateLP()];
     }
     // guard_interval           2   8.3
-    enum
+    enum : std::uint8_t
     {
         kGuardInterval_1_32 = 0x0,
         kGuardInterval_1_16 = 0x1,
@@ -1042,11 +1057,11 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     uint GuardInterval(void) const { return (m_data[8]>>3) & 0x3; }
     QString GuardIntervalString(void) const
     {
-        static std::array<QString,4> gi { "1/32", "1/16", "1/8", "1/4" };
+        static const std::array<const QString,4> gi { "1/32", "1/16", "1/8", "1/4" };
         return gi[GuardInterval()];
     }
     // transmission_mode        2   8.5
-    enum
+    enum : std::uint8_t
     {
         kTransmissionMode2k = 0x00,
         kTransmissionMode8k = 0x01,
@@ -1055,7 +1070,7 @@ class TerrestrialDeliverySystemDescriptor : public MPEGDescriptor
     uint TransmissionMode(void) const { return (m_data[8]>>1) & 0x3; }
     QString TransmissionModeString(void) const
     {
-        static std::array<QString,4> tm { "2", "8", "4", "auto" };
+        static const std::array<const QString,4> tm { "2", "8", "4", "auto" };
         return tm[TransmissionMode()];
     }
     // other_frequency_flag     1   8.7
@@ -1116,11 +1131,13 @@ class T2DeliverySystemDescriptor : public MPEGDescriptor
         const unsigned char *data, int len = 300) :
         MPEGDescriptor(data, len, DescriptorID::extension)
     {
-        if (DescriptorTagExtension() != DescriptorID::t2_delivery_system)
+        if (IsValid())
         {
-            m_data = nullptr;
+            if (DescriptorTagExtension() != DescriptorID::t2_delivery_system)
+                m_data = nullptr;
+            else
+                Parse();
         }
-        Parse();
     }
     //       Name             bits  loc  expected value
     // descriptor_tag           8   0.0       0x7f      extension
@@ -1149,7 +1166,7 @@ class T2DeliverySystemDescriptor : public MPEGDescriptor
     }
 
     // bandwidth                4   6.2
-    enum
+    enum : std::uint8_t
     {
         kBandwidth8Mhz = 0x0,
         kBandwidth7Mhz = 0x1,
@@ -1173,7 +1190,7 @@ class T2DeliverySystemDescriptor : public MPEGDescriptor
     }
 
     // guard_interval           3   7.0
-    enum
+    enum : std::uint8_t
     {
         kGuardInterval_1_32    = 0x0,
         kGuardInterval_1_16    = 0x1,
@@ -1192,7 +1209,7 @@ class T2DeliverySystemDescriptor : public MPEGDescriptor
     }
 
     // transmission_mode        3   7.3
-    enum
+    enum : std::uint8_t
     {
         kTransmissionMode2k  = 0x00,
         kTransmissionMode8k  = 0x01,
@@ -1223,13 +1240,13 @@ class T2DeliverySystemDescriptor : public MPEGDescriptor
 
     uint CentreFrequency(int i, int j) const
     {
-        return (m_cellPtrs[i][3+4*j] << 24) | (m_cellPtrs[i][4+4*j] << 16) | (m_cellPtrs[i][5+4*j] << 8) | m_cellPtrs[i][6+4*j];
+        return (m_cellPtrs[i][3+(4*j)] << 24) | (m_cellPtrs[i][4+(4*j)] << 16) | (m_cellPtrs[i][5+(4*j)] << 8) | m_cellPtrs[i][6+(4*j)];
     }
     uint SubcellInfoLoopLength(uint i) const { return m_subCellPtrs[i][0]; }
-    uint CellIDExtension(uint i, uint j) const { return m_subCellPtrs[i][1+5*j]; }
+    uint CellIDExtension(uint i, uint j) const { return m_subCellPtrs[i][1+(5*j)]; }
     uint TransposerFrequency(uint i, uint j) const
     {
-        return (m_subCellPtrs[i][1+5*j] << 24) | (m_subCellPtrs[i][2+5*j] << 16) | (m_subCellPtrs[i][3+5*j] << 8) | m_cellPtrs[i][4+5*j];
+        return (m_subCellPtrs[i][1+(5*j)] << 24) | (m_subCellPtrs[i][2+(5*j)] << 16) | (m_subCellPtrs[i][3+(5*j)] << 8) | m_cellPtrs[i][4+(5*j)];
     }
 
     void Parse(void) const;
@@ -1605,7 +1622,7 @@ class FrequencyListDescriptor : public MPEGDescriptor
 
     // reserved_future_use      6   2.0
     // coding_type              2   2.6
-    enum
+    enum : std::uint8_t
     {
         kCodingTypeNotDefined  = 0x0,
         kCodingTypeSatellite   = 0x1,
@@ -1622,13 +1639,13 @@ class FrequencyListDescriptor : public MPEGDescriptor
     {
         if (kCodingTypeTerrestrial == CodingType())
         {
-            return (((unsigned long long)m_data[i*4+3]<<24) |
-                                        (m_data[i*4+4]<<16) |
-                                        (m_data[i*4+5]<<8)  |
-                                        (m_data[i*4+6]));
+            return (((unsigned long long)m_data[(i*4)+3]<<24) |
+                                        (m_data[(i*4)+4]<<16) |
+                                        (m_data[(i*4)+5]<<8)  |
+                                        (m_data[(i*4)+6]));
         }
-        return byte4BCD2int(m_data[i*4+3], m_data[i*4+4],
-                            m_data[i*4+5], m_data[i*4+6]);
+        return byte4BCD2int(m_data[(i*4)+3], m_data[(i*4)+4],
+                            m_data[(i*4)+5], m_data[(i*4)+6]);
     }
     unsigned long long FrequencyHz(uint i) const
     {
@@ -1641,7 +1658,7 @@ class FrequencyListDescriptor : public MPEGDescriptor
 
 // DVB Bluebook A038 (Sept 2011) p 70
 // ETSI EN 300 468 p 58
-class LocalTimeOffsetDescriptor : public MPEGDescriptor
+class MTV_PUBLIC LocalTimeOffsetDescriptor : public MPEGDescriptor
 {
   public:
     explicit LocalTimeOffsetDescriptor(const unsigned char *data, int len = 300) :
@@ -1655,33 +1672,40 @@ class LocalTimeOffsetDescriptor : public MPEGDescriptor
     //   country_code          24   0.0+p
     uint CountryCode(uint i) const
     {
-        int o = 2 + i*13;
+        int o = 2 + (i*13);
         return ((m_data[o] << 16) | (m_data[o+1] << 8) | m_data[o+2]);
     }
     QString CountryCodeString(uint i) const
     {
-        int o = 2 + i*13;
+        int o = 2 + (i*13);
         std::array<QChar,3> code
             { QChar(m_data[o]), QChar(m_data[o+1]), QChar(m_data[o+2]) };
         return QString(code.data(), 3);
     }
     //   country_region_id      6   3.0+p
-    uint CountryRegionId(uint i) const { return m_data[2 + i*13 + 3] >> 2; }
+    uint CountryRegionId(uint i) const { return m_data[2 + (i*13) + 3] >> 2; }
     //   reserved               1   3.6+p
     //   local_time_off_polarity 1   3.7+p
     /// -1 if true, +1 if false (behind utc, ahead of utc, resp).
     bool LocalTimeOffsetPolarity(uint i) const
-        { return (m_data[2 + i*13 + 3] & 0x01) != 0; }
+        { return (m_data[2 + (i*13) + 3] & 0x01) != 0; }
     //   local_time_offset     16   4.0+p
     uint LocalTimeOffset(uint i) const
-        { return (m_data[2 + i*13 + 4] << 8) | m_data[2 + i*13 + 5]; }
+        { return (byteBCD2int(m_data[2 + (i*13) + 4]) * 60) +
+                 byteBCD2int(m_data[2 + (i*13) + 5]); }
     int LocalTimeOffsetWithPolarity(uint i) const
         { return (LocalTimeOffsetPolarity(i) ? -1 : +1) * LocalTimeOffset(i); }
     //   time_of_change        40   6.0+p
-    // TODO decode this
+    const unsigned char *TimeOfChangeData(uint i) const
+        { return &m_data[2 + (i*13) + 6]; }
+    QDateTime TimeOfChange(uint i)  const
+        { return dvbdate2qt(TimeOfChangeData(i));   }
+    time_t TimeOfChangeUnix(uint i) const
+        { return dvbdate2unix(TimeOfChangeData(i)); }
     //   next_time_offset      16  11.0+p
     uint NextTimeOffset(uint i) const
-        { return (m_data[2 + i*13 + 11]<<8) | m_data[2 + i*13 + 12]; }
+        { return (byteBCD2int(m_data[2 + (i*13) + 11]) * 60) +
+                 byteBCD2int(m_data[2 + (i*13) + 12]); }
     // }                           13.0
     QString toString(void) const override; // MPEGDescriptor
 };
@@ -1812,13 +1836,13 @@ class NVODReferenceDescriptor : public MPEGDescriptor
     // {
     //   transport_stream_id   16
     uint TransportStreamId(uint i) const
-        { return (m_data[i * 6 + 2] << 8) | m_data[i * 6 + 3]; }
+        { return (m_data[(i * 6) + 2] << 8) | m_data[(i * 6) + 3]; }
     //   original_network_id   16
     uint OriginalNetworkId(uint i) const
-        { return (m_data[i * 6 + 4] << 8) |  m_data[i * 6 + 5]; }
+        { return (m_data[(i * 6) + 4] << 8) |  m_data[(i * 6) + 5]; }
     //   service_id            16
     uint ServiceId(uint i) const
-        { return (m_data[i * 6 + 6] << 8) | m_data[i * 6 + 7]; }
+        { return (m_data[(i * 6) + 6] << 8) | m_data[(i * 6) + 7]; }
     // }
     QString toString(void) const override; // MPEGDescriptor
 };
@@ -1844,9 +1868,9 @@ class ParentalRatingDescriptor : public MPEGDescriptor
     // }
     QString CountryCodeString(uint i) const
     {
-        int o = 2 + i*4;
+        int o = 2 + (i*4);
         if (i >= Count())
-            return QString("");
+            return {""};
         std::array<QChar,3> code
             { QChar(m_data[o]), QChar(m_data[o+1]), QChar(m_data[o+2]) };
         return QString(code.data(), 3);
@@ -1858,13 +1882,13 @@ class ParentalRatingDescriptor : public MPEGDescriptor
             return -1;
         }
 
-        unsigned char rawRating = m_data[2 + 3 + i*4];
+        unsigned char rawRating = m_data[2 + 3 + (i*4)];
         if (rawRating == 0)
         {
             // 0x00 - undefined
             return -1;
         }
-        if ((rawRating >= 0x01) && (rawRating <= 0x0F))
+        if (rawRating <= 0x0F)
         {
             // 0x01 to 0x0F - minumum age = rating + 3 years
             return rawRating + 3;
@@ -1938,8 +1962,8 @@ class ScramblingDescriptor : public MPEGDescriptor
 class ServiceDescriptorMapping
 {
   public:
-    explicit ServiceDescriptorMapping(const uint service_type) { m_serviceType = service_type; }
-    enum
+    explicit ServiceDescriptorMapping(const uint service_type) : m_serviceType(service_type) {}
+    enum : std::uint8_t
     {
         kServiceTypeDigitalTelevision          = 0x01,
         kServiceTypeDigitalRadioSound          = 0x02,
@@ -2125,9 +2149,9 @@ class ServiceListDescriptor : public MPEGDescriptor
     uint ServiceCount(void) const { return DescriptorLength() / 3; }
 
     uint ServiceID(uint i) const
-        { return (m_data[2+i*3] << 8) | m_data[3+i*3]; }
+        { return (m_data[2+(i*3)] << 8) | m_data[3+(i*3)]; }
 
-    uint ServiceType(uint i) const { return m_data[4+i*3]; }
+    uint ServiceType(uint i) const { return m_data[4+(i*3)]; }
 
     QString toString(void) const override // MPEGDescriptor
     {
@@ -2627,11 +2651,13 @@ class FreesatLCNDescriptor : public MPEGDescriptor
     explicit FreesatLCNDescriptor(const unsigned char *data, int len = 300) :
         MPEGDescriptor(data, len, PrivateDescriptorID::freesat_lcn_table)
     {
-        assert(PrivateDescriptorID::freesat_lcn_table== DescriptorTag());
+        assert(m_data && PrivateDescriptorID::freesat_lcn_table== DescriptorTag());
+        if (nullptr == m_data) // assert is disabled when NDEBUG is defined
+            return;
 
         const unsigned char *payload = &data[2];
 
-        uint offset = 0;
+        size_t offset = 0;
         while ((offset + 5 < DescriptorLength()) &&
                (offset + 5 + payload[offset+4] <= DescriptorLength()))
         {
@@ -2656,20 +2682,20 @@ class FreesatLCNDescriptor : public MPEGDescriptor
     uint ServiceCount(void) const
         { return m_entries.size(); }
 
-    uint ServiceID(int i) const
+    uint ServiceID(size_t i) const
         { return *m_entries[i] << 8 | *(m_entries[i]+1); }
 
-    uint ChanID(int i) const
+    uint ChanID(size_t i) const
         { return (*(m_entries[i] + 2) << 8 | *(m_entries[i] + 3)) & 0x7FFF; }
 
-    uint LCNCount(int i) const
+    uint LCNCount(size_t i) const
         { return *(m_entries[i] + 4) / 4; }
 
-    uint LogicalChannelNumber(int i, int j) const
-        { return (*(m_entries[i] + 5 + j*4) << 8 | *(m_entries[i] + 5 + j*4 + 1)) & 0xFFF; }
+    uint LogicalChannelNumber(size_t i, size_t j) const
+        { return (*(m_entries[i] + 5 + (j*4)) << 8 | *(m_entries[i] + 5 + (j*4) + 1)) & 0xFFF; }
 
-    uint RegionID(int i, int j) const
-        { return *(m_entries[i] + 5 + j*4 + 2) << 8 | *(m_entries[i] + 5 + j*4 + 3); }
+    uint RegionID(size_t i, size_t j) const
+        { return *(m_entries[i] + 5 + (j*4) + 2) << 8 | *(m_entries[i] + 5 + (j*4) + 3); }
 
     QString toString(void) const override; // MPEGDescriptor
 
@@ -2692,7 +2718,9 @@ class FreesatRegionDescriptor : public MPEGDescriptor
     explicit FreesatRegionDescriptor(const unsigned char *data, int len = 300) :
         MPEGDescriptor(data, len, PrivateDescriptorID::freesat_region_table)
     {
-        assert(PrivateDescriptorID::freesat_region_table == DescriptorTag());
+        assert(m_data && PrivateDescriptorID::freesat_region_table == DescriptorTag());
+        if (nullptr == m_data) // assert is disabled when NDEBUG is defined
+            return;
 
         const unsigned char *payload = &data[2];
 
@@ -2747,7 +2775,7 @@ class FreesatCallsignDescriptor : public MPEGDescriptor
     explicit FreesatCallsignDescriptor(const unsigned char *data, int len = 300) :
         MPEGDescriptor(data, len, PrivateDescriptorID::freesat_callsign)
     {
-        assert(PrivateDescriptorID::freesat_callsign == DescriptorTag());
+        assert(m_data && PrivateDescriptorID::freesat_callsign == DescriptorTag());
     }
 
     //       Name             bits  loc  expected value
@@ -2785,7 +2813,7 @@ class SkyLCNDescriptor : public MPEGDescriptor
     explicit SkyLCNDescriptor(const unsigned char *data, int len = 300) :
         MPEGDescriptor(data, len, PrivateDescriptorID::sky_lcn_table)
     {
-        assert(PrivateDescriptorID::sky_lcn_table== DescriptorTag());
+        assert(m_data && PrivateDescriptorID::sky_lcn_table== DescriptorTag());
     }
     //       Name                 bits  loc  expected value
     // descriptor_tag               8   0.0       0xd3
@@ -2808,20 +2836,20 @@ class SkyLCNDescriptor : public MPEGDescriptor
     uint ServiceCount(void) const
         { return (DescriptorLength() - 2) / 9; }
 
-    uint ServiceID(int i) const
-        { return *(m_data + 4 + i*9) << 8 | *(m_data + 5 + i*9); }
+    uint ServiceID(size_t i) const
+        { return *(m_data + 4 + (i*9)) << 8 | *(m_data + 5 + (i*9)); }
 
-    uint ServiceType(int i) const
-        { return *(m_data + 6 + i*9); }
+    uint ServiceType(size_t i) const
+        { return *(m_data + 6 + (i*9)); }
 
-    uint ChannelID(int i) const
-        { return *(m_data + 7 + i*9) << 8 | *(m_data + 8 + i*9); }
+    uint ChannelID(size_t i) const
+        { return *(m_data + 7 + (i*9)) << 8 | *(m_data + 8 + (i*9)); }
 
-    uint LogicalChannelNumber(int i) const
-        { return *(m_data + 9 + i*9) << 8 | *(m_data + 10 + i*9); }
+    uint LogicalChannelNumber(size_t i) const
+        { return *(m_data + 9 + (i*9)) << 8 | *(m_data + 10 + (i*9)); }
 
-    uint Flags(int i) const
-        { return *(m_data + 11 + i*9) << 8 | *(m_data + 12 + i*9); }
+    uint Flags(size_t i) const
+        { return *(m_data + 11 + (i*9)) << 8 | *(m_data + 12 + (i*9)); }
 
     QString toString(void) const override; // MPEGDescriptor
 };
@@ -2894,11 +2922,12 @@ class DVBContentIdentifierDescriptor : public MPEGDescriptor
     // A content identifier is a URI.  It may contain UTF-8 encoded using %XX.
     QString ContentId(size_t n=0) const
     {
-        // cppcheck-suppress AssignmentAddressToInteger
-        int length = m_crid[n][1];
+        // Access the array in two steps so cppcheck doesn't get confused.
+        const uint8_t* cridN = m_crid[n];
+        int length = cridN[1];
         int positionOfHash = length-1;
         while (positionOfHash >= 0) {
-            if (m_crid[n][2 + positionOfHash] == '#') {
+            if (cridN[2 + positionOfHash] == '#') {
                 length = positionOfHash; /* remove the hash and the following IMI */
                 break;
             }
@@ -2937,6 +2966,51 @@ class DefaultAuthorityDescriptor : public MPEGDescriptor
         return QString("DefaultAuthorityDescriptor: Authority(%1)")
             .arg(DefaultAuthority());
     }
+};
+
+// Draft ETSI EN 300 468 V1.16.1 (2019-05)
+// DVB Bluebook A038 (Feb 2019) p 59
+// Table 42: S2 satellite delivery system descriptor
+// 0x79
+class S2SatelliteDeliverySystemDescriptor : public MPEGDescriptor
+{
+  public:
+    explicit S2SatelliteDeliverySystemDescriptor(
+        const unsigned char *data, int len = 300) :
+        MPEGDescriptor(data, len, DescriptorID::s2_satellite_delivery_system) { }
+    //       Name                     bits  loc     expected value
+    // descriptor_tag                   8   0.0     0x79
+    // descriptor_length                8   1.0
+    // scrambling_sequence_selector     1   2.0
+    uint ScramblingSequenceSelector() const
+        { return (m_data[2] >> 7) & 0x01; }
+
+    // multiple_input_stream_flag       1   2.1
+    uint MultipleInputStreamFlag() const
+        { return (m_data[2] >> 6) & 0x01; }
+
+    // reserved_zero_future_use         1   2.2
+    // not_timeslice_flag               1   2.3
+    uint NotTimesliceFlag() const
+        { return (m_data[2] >> 4) & 0x01; }
+
+    // reserved_future_use              2   2.4
+    // TS_GS_mode                       2   2.6
+    uint TSGSMode() const
+        { return m_data[2] & 0x03; }
+
+    // if (scrambling_sequence_selector == 1){
+    //   reserved_future_use            6   3.0
+    //   scrambling_sequence_index     18   3.6
+    // }
+    // if (multiple_input_stream_flag == 1){
+    //   input_stream_identifier        8   6.0
+    // }
+    // if (not_timeslice_flag == 0){
+    //   timeslice_number               8   7.0
+    // }
+
+    QString toString(void) const override; // MPEGDescriptor
 };
 
 /*

@@ -1,12 +1,17 @@
 // Copyright (c) 2005, Daniel Thor Kristjansson
 // based on earlier work in MythTV's videout_xvmc.cpp
 
+// Std
+#include <chrono>
+#include <thread>
+
 // MythTV
-#include "mythconfig.h"
-#include "mythcontext.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
+
 #include "fourcc.h"
-#include "compat.h"
-#include "mythlogging.h"
 #include "mythcodecid.h"
 #include "videobuffers.h"
 
@@ -15,12 +20,8 @@ extern "C" {
 #include "libavcodec/avcodec.h"
 }
 
-// Std
-#include <chrono>
-#include <thread>
-
-#define TRY_LOCK_SPINS                 2000
-#define TRY_LOCK_SPINS_BEFORE_WARNING  9999
+static constexpr uint16_t TRY_LOCK_SPINS                 { 2000 };
+static constexpr uint16_t TRY_LOCK_SPINS_BEFORE_WARNING  { 9999 };
 static constexpr std::chrono::milliseconds TRY_LOCK_SPIN_WAIT { 1ms };
 
 int next_dbg_str = 0;
@@ -1061,7 +1062,7 @@ QString VideoBuffers::GetStatus(uint Num) const
  ** Debugging functions below **
  *******************************/
 
-#define DBG_STR_ARR_SIZE 40
+static constexpr size_t DBG_STR_ARR_SIZE { 40 };
 const std::array<const QString,DBG_STR_ARR_SIZE> dbg_str_arr
 {
     "A       ",    " B      ",    "  C     ",    "   D    ",

@@ -3,24 +3,25 @@
 
 #include "netbase.h"
 
-// libmythui
-#include <mythuibuttonlist.h>
-#include <mythuibuttontree.h>
-#include <mythgenerictree.h>
-#include <mythuiprogressbar.h>
-#include <mythprogressdialog.h>
-#include <mythuistatetype.h>
-#include <mythscreentype.h>
-#include <mythdialogbox.h>
-#include <netgrabbermanager.h>
-#include <mythrssmanager.h>
-#include <mythdownloadmanager.h>
-#include <metadata/metadataimagedownload.h>
+// MythTV
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythbase/netgrabbermanager.h>
+#include <libmythbase/rssmanager.h>
+#include <libmythmetadata/metadataimagedownload.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythgenerictree.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythscreentype.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuibuttontree.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuistatetype.h>
 
-enum DialogType { DLG_DEFAULT = 0, DLG_GALLERY = 0x1, DLG_TREE = 0x2,
-                  DLG_BROWSER = 0x4, dtLast };
+enum DialogType : std::uint8_t
+                { DLG_DEFAULT = 0, DLG_GALLERY = 0x1, DLG_TREE = 0x2,
+                  DLG_BROWSER = 0x4, dtLast = 0x5 };
 
-enum TreeNodeType {
+enum TreeNodeType : std::int8_t {
     kSubFolder = -1,
     kUpFolder = -2,
     kRootNode = -3,
@@ -28,11 +29,11 @@ enum TreeNodeType {
 };
 
 // Tree node attribute index
-enum TreeNodeAttributes {
+enum TreeNodeAttributes : std::uint8_t {
     kNodeSort
 };
 
-enum NodeOrder {
+enum NodeOrder : std::uint8_t {
     kOrderUp,
     kOrderSub,
     kOrderItem

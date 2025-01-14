@@ -1,8 +1,8 @@
 // MythTV
-#include "mythlogging.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
 #ifdef USING_OPENGL
-#include "opengl/mythrenderopengl.h"
+#include "libmythui/opengl/mythrenderopengl.h"
 #endif
 #include "videovisualgoom.h"
 
@@ -12,8 +12,6 @@
 
 VideoVisualGoom::VideoVisualGoom(AudioPlayer* Audio, MythRender* Render, bool HD)
   : VideoVisual(Audio, Render),
-    m_buffer(nullptr),
-    m_glSurface(nullptr),
     m_hd(HD)
 {
     int max_width  = m_hd ? 1200 : 600;
@@ -84,7 +82,8 @@ void VideoVisualGoom::Draw(const QRect Area, MythPainter* /*Painter*/, QPaintDev
             {
                 m_glSurface->m_crop = false;
                 if (m_buffer != last)
-                    m_glSurface->m_texture->setData(m_glSurface->m_pixelFormat, m_glSurface->m_pixelType, m_buffer);
+                    m_glSurface->m_texture->setData(m_glSurface->m_pixelFormat, m_glSurface->m_pixelType,
+						    reinterpret_cast<const uint8_t *>(m_buffer));
                 // goom doesn't render properly due to changes in video alpha blending
                 // so turn blend off
                 glrender->SetBlend(false);

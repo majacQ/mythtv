@@ -1,3 +1,5 @@
+include (settings2.pro)
+
 win32-msvc* {
 
   SRC_PATH_BARE = $$(SRC_PATH_BARE)
@@ -25,11 +27,9 @@ win32-msvc* {
   include ( config.mak )
 }
 
-contains(QT_MAJOR_VERSION, 6) {
-QT += core5compat
-}
 CONFIG += $$CCONFIG
 CONFIG += c++17
+CONFIG += no_qt_rpath
 
 # Make sure all the Qt header files are marked as system headers
 QMAKE_DEFAULT_INCDIRS += $$[QT_INSTALL_HEADERS]
@@ -78,9 +78,6 @@ isEmpty( LIBDIRNAME ) {
 isEmpty( LIBDIR ) {
     LIBDIR = $${RUNPREFIX}/$${LIBDIRNAME}
 }
-
-LIBVERSION = 32
-VERSION = 32.0
 
 # Die on the (common) case where OS X users inadvertently use Fink's
 # Qt/X11 install instead of Qt/Mac. '
@@ -181,6 +178,11 @@ win32 {
         # This corrects the moc tool path from a DOS-style to a unix style:
         QMAKE_MOC = $$[QT_INSTALL_BINS]/moc
         QMAKE_EXTENSION_SHLIB = dll
+
+        isEmpty(QMAKE_EXTENSION_LIB) {
+            QMAKE_EXTENSION_LIB=a
+        }
+        MYTH_LIB_EXT  =$${LIBVERSION}.$${QMAKE_EXTENSION_LIB}
     }
 
     # if CYGWIN compile, set up flag in CONFIG
@@ -188,7 +190,6 @@ win32 {
 
         CONFIG += cygwin
         QMAKE_EXTENSION_SHLIB=dll.a
-        DEFINES += CONFIG_CYGWIN
     }
 
 } else {
@@ -277,11 +278,6 @@ macx {
 }
 
 profile:!win32:!macx:CONFIG += debug
-
-release:contains( ARCH_POWERPC, yes ) {
-    # Auto-inlining causes some Qt moc methods to go missing
-    macx:QMAKE_CXXFLAGS_RELEASE += -fno-inline-functions
-}
 
 # figure out defines
 DEFINES += $$CONFIG_DEFINES

@@ -4,12 +4,12 @@
 #include <QDir>
 #include <QFile>
 
-#include "mythdirs.h"
-#include "mythdate.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythui/mythuibuttonlist.h"
 
-#include "mythuibuttonlist.h"
 #include "metadataimagedownload.h"
-#include "mythcorecontext.h"
 
 ImageSearchResultsDialog::ImageSearchResultsDialog(
     MythScreenStack *lparent,
@@ -18,9 +18,9 @@ ImageSearchResultsDialog::ImageSearchResultsDialog(
 
     MythScreenType(lparent, "videosearchresultspopup"),
     m_list(std::move(list)),
-    m_type(type)
+    m_type(type),
+    m_imageDownload(new MetadataImageDownload(this))
 {
-    m_imageDownload = new MetadataImageDownload(this);
 }
 
 ImageSearchResultsDialog::~ImageSearchResultsDialog()
@@ -47,7 +47,7 @@ bool ImageSearchResultsDialog::Create()
         return false;
     }
 
-    for (const auto & info : qAsConst(m_list))
+    for (const auto & info : std::as_const(m_list))
     {
             auto *button = new MythUIButtonListItem(m_resultsList, QString());
             button->SetText(info.label, "label");

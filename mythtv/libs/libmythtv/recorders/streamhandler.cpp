@@ -1,10 +1,12 @@
 // -*- Mode: c++ -*-
 
+// C++ headers
+#include <utility>
+
 // MythTV headers
 #include "streamhandler.h"
 
-#include "threadedfilewriter.h"
-#include <utility>
+#include "libmythbase/threadedfilewriter.h"
 
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0
@@ -196,6 +198,8 @@ bool StreamHandler::AddPIDFilter(PIDInfo *info)
     QMutexLocker writing_locker(&m_pidLock);
     m_pidInfo[info->m_pid] = info;
 
+    m_filtersChanged = true;
+
     CycleFiltersByPriority();
 
     return true;
@@ -227,6 +231,8 @@ bool StreamHandler::RemovePIDFilter(uint pid)
     }
 
     delete tmp;
+
+    m_filtersChanged = true;
 
     return ok;
 }
@@ -353,7 +359,7 @@ void StreamHandler::WriteMPTS(const unsigned char * buffer, uint len)
     m_mptsTfw->Write(buffer, len);
 }
 
-bool StreamHandler::AddNamedOutputFile(const QString &file)
+bool StreamHandler::AddNamedOutputFile([[maybe_unused]] const QString &file)
 {
 #if !defined( USING_MINGW ) && !defined( _MSC_VER )
     QMutexLocker lk(&m_mptsLock);
@@ -391,12 +397,11 @@ bool StreamHandler::AddNamedOutputFile(const QString &file)
                 .arg(m_mptsBaseFile, fn));
         }
     }
-
 #endif //  !defined( USING_MINGW ) && !defined( _MSC_VER )
     return true;
 }
 
-void StreamHandler::RemoveNamedOutputFile(const QString &file)
+void StreamHandler::RemoveNamedOutputFile([[maybe_unused]] const QString &file)
 {
 #if !defined( USING_MINGW ) && !defined( _MSC_VER )
     QMutexLocker lk(&m_mptsLock);

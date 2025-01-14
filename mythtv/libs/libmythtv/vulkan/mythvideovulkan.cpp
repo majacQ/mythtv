@@ -2,10 +2,10 @@
 #include <QGuiApplication>
 
 // MythTV
-#include "mythlogging.h"
-#include "vulkan/mythdebugvulkan.h"
-#include "vulkan/mythwindowvulkan.h"
-#include "vulkan/mythpaintervulkan.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/vulkan/mythdebugvulkan.h"
+#include "libmythui/vulkan/mythpaintervulkan.h"
+#include "libmythui/vulkan/mythwindowvulkan.h"
 #include "vulkan/mythvideoshadersvulkan.h"
 #include "vulkan/mythvideotexturevulkan.h"
 #include "vulkan/mythvideovulkan.h"
@@ -80,7 +80,7 @@ void MythVideoVulkan::StartFrame()
 
 void MythVideoVulkan::PrepareFrame(MythVideoFrame* Frame, FrameScanType /*Scan*/)
 {
-    if (!(m_valid && IsValidVulkan() && (Frame->m_type == FMT_NONE)))
+    if (!m_valid || !IsValidVulkan() || (Frame->m_type != FMT_NONE))
         return;
 
     // No hardware frame support yet

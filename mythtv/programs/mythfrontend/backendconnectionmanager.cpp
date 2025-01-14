@@ -1,23 +1,27 @@
+// C++
+#include <chrono> // for milliseconds
+#include <thread> // for sleep_for
 
-#include "backendconnectionmanager.h"
-
+// Qt
 #include <QCoreApplication>
 #include <QRunnable>
 #include <QString>
 #include <QEvent>
 #include <QTimer>
 
-#include "mythcorecontext.h"
-#include "mythdialogbox.h"
-#include "mythscreenstack.h"
-#include "mythmainwindow.h"
-#include "mthreadpool.h"
-#include "mythlogging.h"
-#include "exitcodes.h"
-#include "mythtimezone.h"
+// MythTV
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtimezone.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
 
-#include <chrono> // for milliseconds
-#include <thread> // for sleep_for
+// MythFrontend
+#include "backendconnectionmanager.h"
+
 
 using namespace MythTZ;
 
@@ -39,12 +43,12 @@ class Reconnect : public QRunnable
 };
 
 BackendConnectionManager::BackendConnectionManager()
+  : m_reconnectTimer(new QTimer(this))
 {
     setObjectName("BackendConnectionManager");
     gCoreContext->addListener(this);
 
     uint reconnect_timeout = 1;
-    m_reconnectTimer = new QTimer(this);
     m_reconnectTimer->setSingleShot(true);
     connect(m_reconnectTimer, &QTimer::timeout,
             this,              &BackendConnectionManager::ReconnectToBackend);
@@ -63,7 +67,7 @@ void BackendConnectionManager::customEvent(QEvent *event)
     bool reconnect = false;
     uint reconnect_timeout = 5000;
 
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)

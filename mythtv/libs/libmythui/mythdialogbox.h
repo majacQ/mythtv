@@ -11,10 +11,10 @@
 #include <QStringList>
 
 // MythTV headers
-#include "mythscreentype.h"
-#include "mythuitextedit.h"
-#include "mythmainwindow.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreentype.h"
+#include "libmythui/mythuitextedit.h"
 
 
 class QTimer;
@@ -54,7 +54,7 @@ class MUI_PUBLIC DialogCompletionEvent : public QEvent
     QString GetResultText() { return m_resultText; }
     QVariant GetData() { return m_resultData; }
 
-    static Type kEventType;
+    static const Type kEventType;
 
   private:
     QString m_id;
@@ -225,6 +225,7 @@ class MUI_PUBLIC MythDialogBox : public MythScreenType
     }
 
     bool keyPressEvent(QKeyEvent *event) override; // MythScreenType
+    bool inputMethodEvent(QInputMethodEvent *event) override;// MythScreenType
     bool gestureEvent(MythGestureEvent *event) override; // MythScreenType
 
   public slots:
@@ -370,10 +371,10 @@ class MUI_PUBLIC MythSpinBoxDialog : public MythScreenType
      void haveResult(QString);
 
   protected:
-    MythUISpinBox *m_spinBox;
+    MythUISpinBox *m_spinBox { nullptr };
     QString m_message;
     QString m_defaultValue;
-    QObject *m_retObject;
+    QObject *m_retObject     { nullptr };
     QString m_id;
 
   protected slots:
@@ -400,11 +401,26 @@ class MUI_PUBLIC MythUISearchDialog : public MythScreenType
   Q_OBJECT
 
   public:
+    /** \brief the classes constructor
+     *  \param parent the MythScreenStack this widget belongs to
+     *  \param title  the text to show as the title
+     *  \param list   the list of text strings to search
+     *  \param matchAnywhere if true will match the input text anywhere in the string.
+     *                       if false will match only strings that start with the input text.
+     *                       Default is false.
+     *  \param defaultValue  The initial value for the input text. Default is ""
+     */
     MythUISearchDialog(MythScreenStack *parent,
-                     const QString &title,
-                     const QStringList &list,
+                     QString title,
+                     QStringList list,
                      bool  matchAnywhere = false,
-                     const QString &defaultValue = "");
+                     QString defaultValue = "")
+        : MythScreenType(parent, "mythsearchdialogpopup"),
+          m_title(std::move(title)),
+          m_defaultValue(std::move(defaultValue)),
+          m_list(std::move(list)),
+          m_matchAnywhere(matchAnywhere),
+          m_id("") {};
 
     bool Create(void) override; // MythScreenType
     void SetReturnEvent(QObject *retobject, const QString &resultid);
@@ -413,17 +429,17 @@ class MUI_PUBLIC MythUISearchDialog : public MythScreenType
      void haveResult(QString);
 
   private:
-    MythUIButtonList *m_itemList;
-    MythUITextEdit   *m_textEdit;
-    MythUIText       *m_titleText;
-    MythUIText       *m_matchesText;
+    MythUIButtonList *m_itemList      { nullptr };
+    MythUITextEdit   *m_textEdit      { nullptr };
+    MythUIText       *m_titleText     { nullptr };
+    MythUIText       *m_matchesText   { nullptr };
 
     QString           m_title;
     QString           m_defaultValue;
     QStringList       m_list;
-    bool              m_matchAnywhere;
+    bool              m_matchAnywhere { false   };
 
-    QObject          *m_retObject;
+    QObject          *m_retObject     { nullptr };
     QString           m_id;
 
   private slots:
@@ -445,7 +461,7 @@ class MUI_PUBLIC MythTimeInputDialog : public MythScreenType
 
   public:
     // FIXME Not sure about this enum
-    enum TimeInputResolution {
+    enum TimeInputResolution : std::uint16_t {
         // Date Resolution
         kNoDate       = 0x01,
         kYear         = 0x02,
@@ -485,17 +501,17 @@ class MUI_PUBLIC MythTimeInputDialog : public MythScreenType
     QStringList       m_list;
     QString           m_currentValue;
 
-    MythUIButtonList *m_dateList;
-    MythUIButtonList *m_timeList;
+    MythUIButtonList *m_dateList  { nullptr };
+    MythUIButtonList *m_timeList  { nullptr };
 
-    QObject          *m_retObject;
+    QObject          *m_retObject { nullptr };
     QString           m_id;
 };
 
 MUI_PUBLIC MythConfirmationDialog  *ShowOkPopup(const QString &message, bool showCancel = false);
 template <class OBJ, typename FUNC>
-MUI_PUBLIC MythConfirmationDialog  *ShowOkPopup(const QString &message, const OBJ *parent,
-                                                FUNC slot, bool showCancel = false)
+MythConfirmationDialog  *ShowOkPopup(const QString &message, const OBJ *parent,
+                                     FUNC slot, bool showCancel = false)
 {
     QString                  LOC = "ShowOkPopup('" + message + "') - ";
     MythScreenStack         *stk = nullptr;

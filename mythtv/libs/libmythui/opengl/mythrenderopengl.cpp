@@ -1,7 +1,6 @@
 // Std
 #include <algorithm>
 #include <cmath>
-using std::min;
 
 // Qt
 #include <QLibrary>
@@ -11,14 +10,15 @@ using std::min;
 #include <QGuiApplication>
 
 // MythTV
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythmainwindow.h"
 #include "mythrenderopengl.h"
 #include "mythrenderopenglshaders.h"
-#include "mythlogging.h"
 #include "mythuitype.h"
 #ifdef USING_X11
-#include "mythxdisplay.h"
+#include "platforms/mythxdisplay.h"
 #endif
 
 #define LOC QString("OpenGL: ")
@@ -28,17 +28,16 @@ using std::min;
 #include <QWindow>
 #endif
 
-#define VERTEX_INDEX  0
-#define COLOR_INDEX   1
-#define TEXTURE_INDEX 2
-#define VERTEX_SIZE   2
-#define TEXTURE_SIZE  2
+static constexpr GLuint VERTEX_INDEX  { 0 };
+static constexpr GLuint COLOR_INDEX   { 1 };
+static constexpr GLuint TEXTURE_INDEX { 2 };
+static constexpr GLint  VERTEX_SIZE   { 2 };
+static constexpr GLint  TEXTURE_SIZE  { 2 };
 
-static const GLuint kVertexOffset  = 0;
-static const GLuint kTextureOffset = 8 * sizeof(GLfloat);
-const GLuint MythRenderOpenGL::kVertexSize = 16 * sizeof(GLfloat);
+static constexpr GLuint kVertexOffset  { 0 };
+static constexpr GLuint kTextureOffset { 8 * sizeof(GLfloat) };
 
-#define MAX_VERTEX_CACHE 500
+static constexpr int MAX_VERTEX_CACHE { 500 };
 
 MythGLTexture::MythGLTexture(QOpenGLTexture *Texture)
   : m_texture(Texture)
@@ -392,7 +391,10 @@ bool MythRenderOpenGL::Init(void)
     return true;
 }
 
-#define GLYesNo(arg) ((arg) ? "Yes" : "No")
+static constexpr QLatin1String GLYesNo (bool v)
+{
+    return v ? QLatin1String("Yes") : QLatin1String("No");
+}
 
 void MythRenderOpenGL::DebugFeatures(void)
 {
@@ -402,7 +404,7 @@ void MythRenderOpenGL::DebugFeatures(void)
             .arg(fmt.majorVersion()).arg(fmt.minorVersion());
     QString qtglsurface = QString("RGBA: %1:%2:%3:%4 Depth: %5 Stencil: %6")
             .arg(fmt.redBufferSize()).arg(fmt.greenBufferSize())
-            .arg(fmt.greenBufferSize()).arg(fmt.alphaBufferSize())
+            .arg(fmt.blueBufferSize()).arg(fmt.alphaBufferSize())
             .arg(fmt.depthBufferSize()).arg(fmt.stencilBufferSize());
     QStringList shaders {"None"};
     if (m_features & Shaders)
@@ -807,6 +809,27 @@ void MythRenderOpenGL::ClearFramebuffer(void)
     doneCurrent();
 }
 
+void MythRenderOpenGL::DrawProcedural(QRect Area, int Alpha, QOpenGLFramebufferObject* Target,
+                                      QOpenGLShaderProgram *Program, float TimeVal)
+{
+    if (!Program)
+        return;
+
+    makeCurrent();
+    BindFramebuffer(Target);
+    glEnableVertexAttribArray(VERTEX_INDEX);
+    GetCachedVBO(GL_TRIANGLE_STRIP, Area);
+    glVertexAttribPointerI(VERTEX_INDEX, VERTEX_SIZE, GL_FLOAT, GL_FALSE, VERTEX_SIZE * sizeof(GLfloat), kVertexOffset);
+    SetShaderProjection(Program);
+    Program->setUniformValue("u_time",  TimeVal);
+    Program->setUniformValue("u_alpha", static_cast<float>(Alpha / 255.0F));
+    Program->setUniformValue("u_res",   QVector2D(m_window->width(), m_window->height()));
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
+    glDisableVertexAttribArray(VERTEX_INDEX);
+    doneCurrent();
+}
+
 void MythRenderOpenGL::DrawBitmap(MythGLTexture *Texture, QOpenGLFramebufferObject *Target,
                                   const QRect Source, const QRect Destination,
                                   QOpenGLShaderProgram *Program, int Alpha, qreal Scale)
@@ -988,9 +1011,9 @@ void MythRenderOpenGL::DrawRoundRect(QOpenGLFramebufferObject *Target,
     float halfwidth = Area.width() / 2.0F;
     float halfheight = Area.height() / 2.0F;
     float radius = CornerRadius;
-    if (radius < 1.0F) radius = 1.0F;
-    if (radius > halfwidth) radius = halfwidth;
-    if (radius > halfheight) radius = halfheight;
+    radius = std::max(radius, 1.0F);
+    radius = std::min(radius, halfwidth);
+    radius = std::min(radius, halfheight);
 
     // Set shader parameters
     // Centre of the rectangle
@@ -1018,7 +1041,7 @@ void MythRenderOpenGL::DrawRoundRect(QOpenGLFramebufferObject *Target,
     if (edge)
     {
         float innerradius = radius - LinePen.width();
-        if (innerradius < 1.0F) innerradius = 1.0F;
+        innerradius = std::max(innerradius, 1.0F);
         m_parameters(3,0) = innerradius;
         // Adjust the size for the inner radius (edge)
         m_parameters(2,1) = halfwidth - LinePen.width();
@@ -1148,8 +1171,8 @@ bool MythRenderOpenGL::UpdateTextureVertices(MythGLTexture *Texture, const QRect
     GLfloat *data = Texture->m_vertexData.data();
     QSize    size = Texture->m_size;
 
-    int width  = Texture->m_crop ? min(Source.width(),  size.width())  : Source.width();
-    int height = Texture->m_crop ? min(Source.height(), size.height()) : Source.height();
+    int width  = Texture->m_crop ? std::min(Source.width(),  size.width())  : Source.width();
+    int height = Texture->m_crop ? std::min(Source.height(), size.height()) : Source.height();
 
     if (Texture->m_target != QOpenGLTexture::TargetRectangle)
     {
@@ -1171,8 +1194,8 @@ bool MythRenderOpenGL::UpdateTextureVertices(MythGLTexture *Texture, const QRect
     data[4 + TEX_OFFSET] = data[6 + TEX_OFFSET];
     data[5 + TEX_OFFSET] = data[1 + TEX_OFFSET];
 
-    width  = Texture->m_crop ? min(static_cast<int>(width * Scale), Destination.width())   : Destination.width();
-    height = Texture->m_crop ? min(static_cast<int>(height * Scale), Destination.height()) : Destination.height();
+    width  = Texture->m_crop ? std::min(static_cast<int>(width * Scale), Destination.width())   : Destination.width();
+    height = Texture->m_crop ? std::min(static_cast<int>(height * Scale), Destination.height()) : Destination.height();
 
     data[2] = data[0] = Destination.left();
     data[5] = data[1] = Destination.top();
@@ -1406,7 +1429,7 @@ QOpenGLShaderProgram *MythRenderOpenGL::CreateShaderProgram(const QString &Verte
     if (VERBOSE_LEVEL_CHECK(VB_GENERAL, LOG_DEBUG))
     {
         QList<QOpenGLShader*> shaders = program->shaders();
-        for (QOpenGLShader* shader : qAsConst(shaders))
+        for (QOpenGLShader* shader : std::as_const(shaders))
             LOG(VB_GENERAL, LOG_DEBUG, "\n" + shader->sourceCode());
     }
     program->bindAttributeLocation("a_position",  VERTEX_INDEX);
@@ -1430,7 +1453,7 @@ QOpenGLShaderProgram* MythRenderOpenGL::CreateComputeShader(const QString &Sourc
     if (VERBOSE_LEVEL_CHECK(VB_GENERAL, LOG_DEBUG))
     {
         QList<QOpenGLShader*> shaders = program->shaders();
-        for (QOpenGLShader* shader : qAsConst(shaders))
+        for (QOpenGLShader* shader : std::as_const(shaders))
             LOG(VB_GENERAL, LOG_DEBUG, "\n" + shader->sourceCode());
     }
 

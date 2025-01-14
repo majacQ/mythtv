@@ -1,23 +1,30 @@
 // -*- Mode: c++ -*-
+#include "backendselect.h"
+
+#include <utility>
 
 #include <QEventLoop>
 
-#include "mythuistatetype.h"
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-#include "backendselect.h"
-#include "configuration.h"
-#include "mythxmlclient.h"
-#include "mythuibuttonlist.h"
-#include "mythuibutton.h"
-#include "mythlogging.h"
-#include "mythversion.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythupnp/mythxmlclient.h"
 
 BackendSelection::BackendSelection(
-    MythScreenStack *parent, DatabaseParams *params,
-    Configuration *pConfig, bool exitOnFinish) :
+    MythScreenStack *parent,
+    DatabaseParams *params,
+    QString config_filename,
+    bool exitOnFinish
+    ) :
     MythScreenType(parent, "BackEnd Selection"),
-    m_dbParams(params), m_pConfig(pConfig), m_exitOnFinish(exitOnFinish)
+    m_dbParams(params),
+    m_configFilename(std::move(config_filename)),
+    m_exitOnFinish(exitOnFinish)
 {
     if (exitOnFinish)
     {
@@ -45,7 +52,7 @@ BackendSelection::~BackendSelection()
 }
 
 BackendSelection::Decision BackendSelection::Prompt(
-    DatabaseParams *dbParams, Configuration  *pConfig)
+    DatabaseParams *dbParams, const QString& config_filename)
 {
     Decision ret = kCancelConfigure;
     MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
@@ -53,7 +60,7 @@ BackendSelection::Decision BackendSelection::Prompt(
         return ret;
 
     auto *backendSettings =
-        new BackendSelection(mainStack, dbParams, pConfig, true);
+        new BackendSelection(mainStack, dbParams, config_filename, true);
 
     if (backendSettings->Create())
     {
@@ -63,7 +70,9 @@ BackendSelection::Decision BackendSelection::Prompt(
         mainStack->PopScreen(backendSettings, false);
     }
     else
+    {
         delete backendSettings;
+    }
 
     return ret;
 }
@@ -108,12 +117,12 @@ void BackendSelection::Accept(MythUIButtonListItem *item)
 
     if (ConnectBackend(dev))
     {
-        if (m_pConfig)
         {
+            auto config = XmlConfiguration(m_configFilename);
             if (!m_pinCode.isEmpty())
-                m_pConfig->SetValue(kDefaultPIN, m_pinCode);
-            m_pConfig->SetValue(kDefaultUSN, m_usn);
-            m_pConfig->Save();
+                config.SetValue(kDefaultPIN, m_pinCode);
+            config.SetValue(kDefaultUSN, m_usn);
+            config.Save();
         }
         CloseWithDecision(kAcceptConfigure);
     }
@@ -175,7 +184,9 @@ void BackendSelection::AddItem(DeviceLocation *dev)
         item->DisplayState(needPin ? "yes" : "no", "securitypin");
     }
     else
+    {
         m_mutex.unlock();
+    }
 }
 
 /**
@@ -253,7 +264,7 @@ void BackendSelection::Init(void)
         pEntries->GetEntryMap(ourMap);
         pEntries->DecrRef();
 
-        for (auto * devLoc : qAsConst(ourMap))
+        for (auto * devLoc : std::as_const(ourMap))
         {
             AddItem(devLoc);
             devLoc->DecrRef();
@@ -287,7 +298,8 @@ bool BackendSelection::TryDBfromURL(const QString &error, const QString& URL)
     if (ShowOkPopup(error + tr("Shall I attempt to connect to this"
                     " host with default database parameters?")))
     {
-        QRegularExpression re {"http[s]?://([^:/]+)", QRegularExpression::CaseInsensitiveOption};
+        static const QRegularExpression re {"http[s]?://([^:/]+)",
+            QRegularExpression::CaseInsensitiveOption};
         QRegularExpressionMatch match = re.match(URL);
         if (match.hasMatch())
         {
@@ -301,7 +313,7 @@ bool BackendSelection::TryDBfromURL(const QString &error, const QString& URL)
 
 void BackendSelection::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
@@ -365,7 +377,9 @@ void BackendSelection::PromptForPassword(void)
         popupStack->AddScreen(pwDialog);
     }
     else
+    {
         delete pwDialog;
+    }
 }
 
 void BackendSelection::Close(void)

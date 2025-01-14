@@ -9,9 +9,6 @@
 #include <QRunnable>
 #include <QMutex>
 
-// MythTV
-#include "mythmiscutil.h"
-
 class TVRec;
 class MThread;
 class ChannelBase;
@@ -28,18 +25,16 @@ class EITSource
     virtual void SetEITRate(float rate) = 0;
 };
 
-class EITScanner;
-
 class EITScanner : public QRunnable
 {
   public:
     explicit EITScanner(uint cardnum);
     ~EITScanner() override { TeardownAll(); }
 
-    void StartPassiveScan(ChannelBase *channel, EITSource *eitSource);
-    void StopPassiveScan(void);
+    void StartEITEventProcessing(ChannelBase *channel, EITSource *eitSource);
+    void StopEITEventProcessing(void);
 
-    void StartActiveScan(TVRec *rec, std::chrono::seconds max_seconds_per_source);
+    void StartActiveScan(TVRec *rec, std::chrono::seconds max_seconds_per_multiplex);
     void StopActiveScan(void);
 
   protected:
@@ -47,8 +42,7 @@ class EITScanner : public QRunnable
 
   private:
     void TeardownAll(void);
-    static void *SpawnEventLoop(void*);
-           void  RescheduleRecordings(void);
+    void  RescheduleRecordings(void);
 
     QMutex                m_lock;
     ChannelBase          *m_channel                 {nullptr};
@@ -57,23 +51,22 @@ class EITScanner : public QRunnable
     EITHelper            *m_eitHelper               {nullptr};
     MThread              *m_eventThread             {nullptr};
     volatile bool         m_exitThread              {false};
-    QWaitCondition        m_exitThreadCond;                     // protected by lock
+    QWaitCondition        m_exitThreadCond;                     // protected by m_lock
 
     TVRec                *m_rec                     {nullptr};
-    volatile bool         m_activeScan              {false};
-    volatile bool         m_activeScanStopped       {true};     // protected by lock
-    QWaitCondition        m_activeScanCond;                     // protected by lock
+    volatile bool         m_activeScan              {false};    // active scan true, passive scan false
+    volatile bool         m_activeScanStopped       {true};     // protected by m_lock
+    QWaitCondition        m_activeScanCond;                     // protected by m_lock
     QDateTime             m_activeScanNextTrig;
     std::chrono::seconds  m_activeScanTrigTime      {0s};
     QStringList           m_activeScanChannels;
     QStringList::iterator m_activeScanNextChan;
-    uint                  m_activeScanNextChanIndex {MythRandom()};
 
-    uint                  m_cardnum;
-
-    static QMutex         s_resched_lock;
-    static QDateTime      s_resched_next_time;
-
+    uint                  m_cardnum                 {0};
+    uint                  m_sourceid                {0};        // Video source ID
+    QString               m_sourceName;                         // Video source name
+    uint                  m_eitCount                {0};        // Processsed EIT events
+    uint                  m_mplexid                 {0};        // Transport stream multiplex ID
 };
 
 #endif // EITSCANNER_H

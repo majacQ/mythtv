@@ -1,0 +1,19 @@
+<div class="statusBox">
+    <h2>{{ 'dashboard.status.schedule_title' | translate }}</h2>
+    <div *ngIf="scheduled?.length != 0; else noSchedule">
+        <p>{{ 'dashboard.status.schedule_text' |
+            translate: { length: scheduled?.length } }}</p>
+        <ul>
+            <li *ngFor="let schedule of scheduled" class="flex">
+                <div pTooltip="{{schedule.Description}}" tooltipPosition="bottom">
+                    {{ utility.formatDate(schedule.StartTime) }} {{ utility.formatTime(schedule.StartTime) }} - {{schedule.Recording.EncoderId}} - {{schedule.Channel.CallSign}} -
+                    {{schedule.Title}}
+                </div>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<ng-template #noSchedule>
+    <p>{{ 'dashboard.status.schedule_none' | translate }}</p>
+</ng-template>

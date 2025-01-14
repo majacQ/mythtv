@@ -27,12 +27,7 @@ SOURCES += requesthandler/fileserverhandler.cpp requesthandler/deletethread.cpp
 SOURCES += requesthandler/fileserverutil.cpp sockethandler/filetransfer.cpp
 SOURCES += requesthandler/messagehandler.cpp
 
-INCLUDEPATH += ../libmythbase ../libmyth ../libmythtv ../libmythui
-INCLUDEPATH += ../.. ../../external/FFmpeg ../ ./
-INCLUDEPATH += ../libmythservicecontracts
-
-DEPENDPATH += ../ ../libmythbase ../libmythtv ../libmyth ../libmythui
-DEPENDPATH += ../libmythupnp ../libmythservicecontracts
+INCLUDEPATH += .. ../../external/FFmpeg
 
 LIBS += -L../libmythbase -L../libmyth -L../libmythtv -L../libmythui
 LIBS += -L../libmythupnp -L../libmythservicecontracts
@@ -45,9 +40,8 @@ LIBS += -lmythservicecontracts-$$LIBVERSION
 LIBS += -lmythavutil -lmythavcodec -lmythavformat -lmythswscale
 LIBS += $$EXTRA_LIBS $$LATE_LIBS $$QMAKE_LIBS_DYNLOAD
 using_mheg:LIBS += -L../libmythfreemheg -lmythfreemheg-$$LIBVERSION
-using_live:LIBS += -L../libmythlivemedia -lmythlivemedia-$$LIBVERSION
 
-inc.path = $${PREFIX}/include/mythtv/protoserver
+inc.path = $${PREFIX}/include/mythtv/libmythprotoserver
 
 inc.files = $HEADERS
 

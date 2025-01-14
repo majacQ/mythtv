@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
                                                                        
@@ -15,8 +15,9 @@
 
 #include <QString>
 
+#include "libmythbase/mythlogging.h"
+
 #include "msocketdevice.h"
-#include "mythlogging.h"
 
 /////////////////////////////////////////////////////////////////////////////
 // Broadcast Socket is used for XBox (original) since Multicast is not supported
@@ -30,7 +31,6 @@ class MBroadcastSocketDevice : public MSocketDevice
         m_address(sAddress), m_port(nPort)
     {
         m_address.setAddress( sAddress );
-        m_port = nPort;
 
         setProtocol(IPv4);
         setSocket(createNewSocket(), MSocketDevice::Datagram);

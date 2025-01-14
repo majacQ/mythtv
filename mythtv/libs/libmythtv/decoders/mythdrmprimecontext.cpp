@@ -5,11 +5,7 @@
 
 #define LOC QString("DRMPRIMECtx: ")
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-QMutex MythDRMPRIMEContext::s_drmPrimeLock(QMutex::Recursive);
-#else
 QRecursiveMutex MythDRMPRIMEContext::s_drmPrimeLock;
-#endif
 
 QStringList MythDRMPRIMEContext::s_drmPrimeDecoders;
 
@@ -43,7 +39,7 @@ MythDRMPRIMEContext::~MythDRMPRIMEContext()
 }
 
 MythCodecID MythDRMPRIMEContext::GetPrimeCodec(AVCodecContext **Context,
-                                               AVCodec        **Codec,
+                                               const AVCodec  **Codec,
                                                AVStream        *Stream,
                                                MythCodecID      Successs,
                                                MythCodecID      Failure,
@@ -54,7 +50,7 @@ MythCodecID MythDRMPRIMEContext::GetPrimeCodec(AVCodecContext **Context,
     QString name = QString((*Codec)->name) + "_" + CodecName;
     if (name.startsWith("mpeg2video"))
         name = "mpeg2_" + CodecName;
-    AVCodec *codec = avcodec_find_decoder_by_name(name.toLocal8Bit());
+    const AVCodec *codec = avcodec_find_decoder_by_name(name.toLocal8Bit());
     auto *decoder = dynamic_cast<AvFormatDecoder*>(reinterpret_cast<DecoderBase*>((*Context)->opaque));
     if (!codec || !decoder)
     {
@@ -72,7 +68,7 @@ MythCodecID MythDRMPRIMEContext::GetPrimeCodec(AVCodecContext **Context,
 }
 
 MythCodecID MythDRMPRIMEContext::GetSupportedCodec(AVCodecContext **Context,
-                                                   AVCodec **Codec,
+                                                   const AVCodec **Codec,
                                                    const QString &Decoder,
                                                    AVStream *Stream,
                                                    uint StreamType)
@@ -175,7 +171,6 @@ bool MythDRMPRIMEContext::GetDRMBuffer(AVCodecContext *Context, MythVideoFrame *
     Frame->m_swPixFmt = Context->sw_pix_fmt;
     Frame->m_directRendering = true;
     AvFrame->opaque = Frame;
-    AvFrame->reordered_opaque = Context->reordered_opaque;
 
     // Frame->data[0] holds AVDRMFrameDescriptor
     Frame->m_buffer = AvFrame->data[0];
@@ -225,11 +220,7 @@ bool MythDRMPRIMEContext::HavePrimeDecoders(bool Reinit /*=false*/, AVCodecID Co
                 // device contexts. None exist yet:)
                 if (config->methods & AV_CODEC_HW_CONFIG_METHOD_INTERNAL)
                 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                    QStringList name = QString(codec->name).split("_", QString::SkipEmptyParts);
-#else
                     QStringList name = QString(codec->name).split("_", Qt::SkipEmptyParts);
-#endif
                     if (name.size() > 1 && !s_drmPrimeDecoders.contains(name[1]))
                         s_drmPrimeDecoders.append(name[1]);
                     if (!s_supportedCodecs.contains(codec->id))

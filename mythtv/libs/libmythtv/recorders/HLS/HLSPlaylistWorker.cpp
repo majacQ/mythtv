@@ -30,7 +30,7 @@ void HLSPlaylistWorker::Cancel(void)
 
 void HLSPlaylistWorker::run(void)
 {
-    std::chrono::seconds wakeup = 1s;
+    std::chrono::milliseconds wakeup = 1s;
     double      delay = 0;
 
     LOG(VB_RECORD, LOG_INFO, LOC + "run -- begin");
@@ -44,11 +44,12 @@ void HLSPlaylistWorker::run(void)
         m_lock.lock();
         if (!m_wokenup)
         {
-            std::chrono::seconds waittime = std::min(1s, wakeup);
+            std::chrono::milliseconds waittime = std::max(1000ms, wakeup);
             LOG(VB_RECORD, (waittime > 12s ? LOG_INFO : LOG_DEBUG), LOC +
-                QString("refreshing in %2s")
+                QString("refreshing in %2ms")
                 .arg(waittime.count()));
-            m_waitcond.wait(&m_lock, duration_cast<std::chrono::milliseconds>(waittime).count());
+            m_waitcond.wait(&m_lock, duration_cast<std::chrono::milliseconds>(
+                                waittime).count());
         }
         m_wokenup = false;
         m_lock.unlock();
@@ -112,19 +113,31 @@ void HLSPlaylistWorker::run(void)
                 delay = 0.5;
             }
             else if (m_parent->PlaylistRetryCount() == 1)
+            {
                 delay = 0.5;
+            }
             else if (m_parent->PlaylistRetryCount() == 2)
+            {
                 delay = 1;
+            }
             else
+            {
                 delay = 2;
+            }
         }
 
         // When should the playlist be reloaded
         wakeup = m_parent->TargetDuration() > 0s ?
                  m_parent->TargetDuration() : 10s;
-        wakeup *= delay;
+
+        wakeup = std::chrono::milliseconds(static_cast<int>(delay * wakeup.count()));
+
         if (wakeup > 60s)
             wakeup = 60s;
+
+        LOG(VB_RECORD, LOG_DEBUG, LOC +
+            QString(" TargetDuration:%1s").arg(m_parent->TargetDuration().count()) +
+            QString(" wakeup:%1ms delay:%2").arg(wakeup.count()).arg(delay));
     }
 
     if (downloader)

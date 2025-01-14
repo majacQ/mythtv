@@ -26,11 +26,12 @@
 #include <QFileInfo>
 #include <QPainter>
 
-#include "captions/teletextextractorreader.h"
-#include "avformatdecoder.h"
-#include "captions/subtitlescreen.h"
+#include "libmythbase/iso639.h"
+
 #include "captions/srtwriter.h"
-#include "iso639.h"
+#include "captions/subtitlescreen.h"
+#include "captions/teletextextractorreader.h"
+#include "decoders/avformatdecoder.h"
 #include "mythccextractorplayer.h"
 
 SRTStuff::~SRTStuff()
@@ -50,8 +51,6 @@ MythCCExtractorPlayer::MythCCExtractorPlayer(PlayerContext *Context, PlayerFlags
                                              QString fileName,
                                              const QString &destdir) :
     MythPlayer(Context, flags),
-    m_curTime(0ms),
-    m_myFramesPlayed(0),
     m_showProgress(showProgress),
     m_fileName(std::move(fileName))
 {
@@ -83,7 +82,7 @@ void MythCCExtractorPlayer::OnGotNewFrame(void)
         double fps = frame->m_frameRate;
         if (fps <= 0)
             fps = GetDecoder()->GetFPS();
-        double duration = 1 / fps + static_cast<double>(frame->m_repeatPic) * 0.5 / fps;
+        double duration = (1 / fps) + (static_cast<double>(frame->m_repeatPic) * 0.5 / fps);
         m_curTime += secondsFromFloat(duration);
         m_videoOutput->DoneDisplayingFrame(frame);
     }
@@ -414,7 +413,7 @@ void MythCCExtractorPlayer::Ingest708Captions(void)
                 CC708Window &win = service->m_windows[windowIdx];
                 if (win.GetChanged())
                 {
-                    vector<CC708String*> strings;
+                    std::vector<CC708String*> strings;
                     if (win.GetVisible())
                     {
                         strings = win.GetStrings();
@@ -434,7 +433,7 @@ void MythCCExtractorPlayer::Ingest708Caption(
     uint streamId, uint serviceIdx,
     uint windowIdx, uint start_row, uint start_column,
     const CC708Window &win,
-    const vector<CC708String*> &content)
+    const std::vector<CC708String*> &content)
 {
     FormattedTextSubtitle708 fsub(win, windowIdx, content);
     QStringList winContent = fsub.ToSRT();
@@ -445,17 +444,17 @@ void MythCCExtractorPlayer::Ingest708Caption(
     cc708win[windowIdx].text = winContent;
 
     QMap<uint, QStringList> orderedContent;
-    for (const auto& ccIt : qAsConst(cc708win))
+    for (const auto& ccIt : std::as_const(cc708win))
     {
-        uint idx = ccIt.row * 1000 + ccIt.column;
-        for (const auto& str : qAsConst(ccIt.text))
+        uint idx = (ccIt.row * 1000) + ccIt.column;
+        for (const auto& str : std::as_const(ccIt.text))
         {
             orderedContent[idx] += str;
         }
     }
 
     QStringList screenContent;
-    for (const auto & ordered : qAsConst(orderedContent))
+    for (const auto & ordered : std::as_const(orderedContent))
         screenContent += ordered;
     IngestSubtitle(m_cc708Info[streamId].m_subs[serviceIdx], screenContent);
 }
@@ -817,7 +816,7 @@ SubtitleReader *MythCCExtractorPlayer::GetSubReader(uint id)
 {
     if (!m_dvbsubInfo[id].m_reader)
     {
-        m_dvbsubInfo[id].m_reader = new SubtitleReader();
+        m_dvbsubInfo[id].m_reader = new SubtitleReader(this);
         m_dvbsubInfo[id].m_reader->EnableAVSubtitles(true);
         m_dvbsubInfo[id].m_reader->EnableTextSubtitles(true);
         m_dvbsubInfo[id].m_reader->EnableRawTextSubtitles(true);

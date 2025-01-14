@@ -1,15 +1,15 @@
-// qt
+// Qt
 #include <QString>
 #include <QVariant>
 
-// myth
-#include "mythcontext.h"
-#include "mythsystemlegacy.h"
-#include "mythdbcon.h"
-#include "mythdirs.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/hardwareprofile.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythsystemlegacy.h"
 
-#include "hardwareprofile.h"
-
+// MythFrontend
 #include "audiogeneralsettings.h"
 #include "setupwizard_general.h"
 #include "setupwizard_audio.h"
@@ -17,10 +17,10 @@
 // ---------------------------------------------------
 
 GeneralSetupWizard::GeneralSetupWizard(MythScreenStack *parent, const char *name)
-    : MythScreenType(parent, name)
+    : MythScreenType(parent, name),
+      m_hardwareProfile(new HardwareProfile())
 {
     m_popupStack = GetMythMainWindow()->GetStack("popup stack");
-    m_hardwareProfile = new HardwareProfile();
 }
 
 bool GeneralSetupWizard::Create()
@@ -114,7 +114,9 @@ void GeneralSetupWizard::slotNext(void)
         mainStack->AddScreen(sw);
     }
     else
+    {
         delete sw;
+    }
 }
 
 void GeneralSetupWizard::slotSubmit(void)

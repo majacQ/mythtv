@@ -1,3 +1,6 @@
+#include <fstream>
+
+#include <QtGlobal>
 #include <QAtomicInt>
 #include <QMutex>
 #include <QMutexLocker>
@@ -23,9 +26,9 @@
 
 #include <cstdlib>
 #ifndef _WIN32
-#include <mythsyslog.h>
+#include "mythsyslog.h"
 #if CONFIG_SYSTEMD_JOURNAL
-#define SD_JOURNAL_SUPPRESS_LOCATION 1
+#define SD_JOURNAL_SUPPRESS_LOCATION 1 // NOLINT(cppcoreguidelines-macro-usage)
 #include <systemd/sd-journal.h>
 #endif
 #endif
@@ -42,14 +45,14 @@
 #include <csignal>
 
 // Various ways to get to thread's tid
-#if defined(linux)
+#if defined(__linux__)
 #include <sys/syscall.h>
 #elif defined(__FreeBSD__)
 extern "C" {
 #include <sys/ucontext.h>
 #include <sys/thr.h>
 }
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
 #include <mach/mach.h>
 #endif
 
@@ -64,21 +67,21 @@ struct LoggerListItem {
     LoggerList *m_itemList;
     std::chrono::seconds m_itemEpoch;
 };
-using  ClientMap = QMap<QString, LoggerListItem *>;
 
-using  ClientList = QList<QString>;
-using  RevClientMap = QHash<LoggerBase *, ClientList *>;
+// A list of logging objects that process messages.
+static QMutex                       gLoggerListMutex;
+static LoggerListItem               *gLoggerList {nullptr};
 
-static QMutex                       logClientMapMutex;
-static ClientMap                    logClientMap;
-static QAtomicInt                   logClientCount;
-
-static QMutex                       logRevClientMapMutex;
-static RevClientMap                 logRevClientMap;
-
-static QMutex                       logMsgListMutex;
-static LogMessageList               logMsgList;
-static QWaitCondition               logMsgListNotEmpty;
+// This is a FIFO queue containing the incoming messages "sent" from a
+// client to this server. As each message arrives, it is queued here
+// for later retrieval by a different thread.  This used to be
+// populated by a thread that received messages from the network, and
+// drained by a different thread that logged the messages.  It is now
+// populated by the thread that generated the message, and drained by
+// a different thread that logs the messages.
+static QMutex                       gLogItemListMutex;
+static LoggingItemList              gLogItemList;
+static QWaitCondition               gLogItemListNotEmpty;
 
 /// \brief LoggerBase class constructor.  Adds the new logger instance to the
 ///        loggerMap.
@@ -103,10 +106,9 @@ LoggerBase::~LoggerBase()
 /// \brief FileLogger constructor
 /// \param filename Filename of the logfile.
 FileLogger::FileLogger(const char *filename) :
-        LoggerBase(filename)
+        LoggerBase(filename),
+        m_ofstream(filename, std::ios::app)
 {
-    m_fd = open(filename, O_WRONLY|O_CREAT|O_APPEND, 0664);
-    m_opened = (m_fd != -1);
     LOG(VB_GENERAL, LOG_INFO, QString("Added logging to %1")
              .arg(filename));
 }
@@ -115,13 +117,11 @@ FileLogger::FileLogger(const char *filename) :
 /// \brief FileLogger deconstructor - close the logfile
 FileLogger::~FileLogger()
 {
-    if( m_opened )
+    if(m_ofstream.is_open())
     {
         LOG(VB_GENERAL, LOG_INFO, QString("Removed logging to %1")
             .arg(m_handle));
-        close(m_fd);
-        m_fd = -1;
-        m_opened = false;
+        m_ofstream.close();
     }
 }
 
@@ -130,7 +130,7 @@ FileLogger *FileLogger::create(const QString& filename, QMutex *mutex)
     QByteArray ba = filename.toLocal8Bit();
     const char *file = ba.constData();
     auto *logger =
-        qobject_cast<FileLogger *>(loggerMap.value(filename, nullptr));
+        dynamic_cast<FileLogger *>(loggerMap.value(filename, nullptr));
 
     if (logger)
         return logger;
@@ -141,8 +141,6 @@ FileLogger *FileLogger::create(const QString& filename, QMutex *mutex)
     logger = new FileLogger(file);
     mutex->lock();
 
-    auto *clients = new ClientList;
-    logRevClientMap.insert(logger, clients);
     return logger;
 }
 
@@ -150,10 +148,9 @@ FileLogger *FileLogger::create(const QString& filename, QMutex *mutex)
 ///        This allows for logrollers to be used.
 void FileLogger::reopen(void)
 {
-    close(m_fd);
+    m_ofstream.close();
 
-    m_fd = open(qPrintable(m_handle), O_WRONLY|O_CREAT|O_APPEND, 0664);
-    m_opened = (m_fd != -1);
+    m_ofstream.open(qPrintable(m_handle), std::ios::app);
     LOG(VB_GENERAL, LOG_INFO, QString("Rolled logging on %1") .arg(m_handle));
 }
 
@@ -161,43 +158,18 @@ void FileLogger::reopen(void)
 /// \param item LoggingItem containing the log message to process
 bool FileLogger::logmsg(LoggingItem *item)
 {
-    if (!m_opened)
+    if (!m_ofstream.is_open())
         return false;
 
-    QString timestamp = item->getTimestampUs();
-    QChar shortname = item->getLevelChar();
+    std::string line = item->toString();
 
-    std::string line;
-    if( item->tid() )
-    {
-        line = qPrintable(QString("%1 %2 [%3/%4] %5 %6:%7 (%8) - %9\n")
-                          .arg(timestamp, shortname,
-                               QString::number(item->pid()),
-                               QString::number(item->tid()),
-                               item->threadName(), item->file(),
-                               QString::number(item->line()),
-                               item->function(),
-                               item->message()));
-    }
-    else
-    {
-        line = qPrintable(QString("%1 %2 [%3] %5 %6:%7 (%8) - %9\n")
-                          .arg(timestamp, shortname,
-                               QString::number(item->pid()),
-                               item->threadName(), item->file(),
-                               QString::number(item->line()),
-                               item->function(),
-                               item->message()));
-    }
+    m_ofstream << line;
 
-    int result = write(m_fd, line.data(), line.size());
-
-    if( result == -1 )
+    if (m_ofstream.bad())
     {
         LOG(VB_GENERAL, LOG_ERR,
-                 QString("Closed Log output on fd %1 due to errors").arg(m_fd));
-        m_opened = false;
-        close( m_fd );
+            QString("Closed Log output to %1 due to unrecoverable error(s).").arg(m_handle));
+        m_ofstream.close();
         return false;
     }
     return true;
@@ -228,7 +200,7 @@ SyslogLogger::~SyslogLogger()
 
 SyslogLogger *SyslogLogger::create(QMutex *mutex, bool open)
 {
-    auto *logger = qobject_cast<SyslogLogger *>(loggerMap.value("", nullptr));
+    auto *logger = dynamic_cast<SyslogLogger *>(loggerMap.value("", nullptr));
     if (logger)
         return logger;
 
@@ -238,8 +210,6 @@ SyslogLogger *SyslogLogger::create(QMutex *mutex, bool open)
     logger = new SyslogLogger(open);
     mutex->lock();
 
-    auto *clients = new ClientList;
-    logRevClientMap.insert(logger, clients);
     return logger;
 }
 
@@ -276,7 +246,7 @@ JournalLogger::~JournalLogger()
 
 JournalLogger *JournalLogger::create(QMutex *mutex)
 {
-    auto *logger = qobject_cast<JournalLogger *>(loggerMap.value("", nullptr));
+    auto *logger = dynamic_cast<JournalLogger *>(loggerMap.value("", nullptr));
     if (logger)
         return logger;
 
@@ -286,8 +256,6 @@ JournalLogger *JournalLogger::create(QMutex *mutex)
     logger = new JournalLogger();
     mutex->lock();
 
-    auto *clients = new ClientList;
-    logRevClientMap.insert(logger, clients);
     return logger;
 }
 
@@ -311,308 +279,6 @@ bool JournalLogger::logmsg(LoggingItem *item)
 }
 #endif
 #endif
-
-/// \brief DatabaseLogger constructor
-/// \param table C-string of the database table to log to
-DatabaseLogger::DatabaseLogger(const char *table) :
-    LoggerBase(table)
-{
-    m_query = QString(
-        "INSERT INTO %1 "
-        "    (`host`, `application`, `pid`, `tid`, `thread`, `filename`, "
-        "     `line`, `function`, `msgtime`, `level`, `message`) "
-        "VALUES (:HOST, :APP, :PID, :TID, :THREAD, :FILENAME, "
-        "        :LINE, :FUNCTION, :MSGTIME, :LEVEL, :MESSAGE)")
-        .arg(m_handle);
-
-    LOG(VB_GENERAL, LOG_INFO, QString("Added database logging to table %1")
-        .arg(m_handle));
-
-    m_thread = new DBLoggerThread(this);
-    m_thread->start();
-}
-
-/// \brief DatabaseLogger deconstructor
-DatabaseLogger::~DatabaseLogger()
-{
-    LOG(VB_GENERAL, LOG_INFO, "Removing database logging");
-
-    DatabaseLogger::stopDatabaseAccess();
-}
-
-DatabaseLogger *DatabaseLogger::create(const QString& table, QMutex *mutex)
-{
-    QByteArray ba = table.toLocal8Bit();
-    const char *tble = ba.constData();
-    auto *logger =
-        qobject_cast<DatabaseLogger *>(loggerMap.value(table, nullptr));
-
-    if (logger)
-        return logger;
-
-    // Need to add a new FileLogger
-    mutex->unlock();
-    // inserts into loggerMap
-    logger = new DatabaseLogger(tble);
-    mutex->lock();
-
-    auto *clients = new ClientList;
-    logRevClientMap.insert(logger, clients);
-    return logger;
-}
-
-/// \brief Stop logging to the database and wait for the thread to stop.
-void DatabaseLogger::stopDatabaseAccess(void)
-{
-    if( m_thread )
-    {
-        m_thread->stop();
-        m_thread->wait();
-        delete m_thread;
-        m_thread = nullptr;
-    }
-}
-
-/// \brief Process a log message, queuing it for logging to the database
-/// \param item LoggingItem containing the log message to process
-bool DatabaseLogger::logmsg(LoggingItem *item)
-{
-    if (!m_thread)
-        return false;
-
-    if (!m_thread->isRunning())
-    {
-        m_disabledTime.start();
-    }
-
-    if (!m_disabledTime.isValid() && m_thread->queueFull())
-    {
-        m_disabledTime.start();
-        LOG(VB_GENERAL, LOG_CRIT,
-            "Disabling DB Logging: too many messages queued");
-        return false;
-    }
-
-    if (m_disabledTime.isValid() && m_disabledTime.hasExpired(kMinDisabledTime.count()))
-    {
-        if (isDatabaseReady() && !m_thread->queueFull())
-        {
-            m_disabledTime.invalidate();
-            LOG(VB_GENERAL, LOG_CRIT, "Reenabling DB Logging");
-        }
-    }
-
-    if (m_disabledTime.isValid())
-        return false;
-
-    m_thread->enqueue(item);
-    return true;
-}
-
-
-/// \brief Actually insert a log message from the queue into the database
-/// \param query    The database insert query to use
-/// \param item     LoggingItem containing the log message to insert
-bool DatabaseLogger::logqmsg(MSqlQuery &query, LoggingItem *item)
-{
-    QString timestamp = item->getTimestamp();
-
-    query.bindValue(":TID",         item->tid());
-    query.bindValue(":THREAD",      item->threadName());
-    query.bindValue(":FILENAME",    item->file());
-    query.bindValue(":LINE",        item->line());
-    query.bindValue(":FUNCTION",    item->function());
-    query.bindValue(":MSGTIME",     timestamp);
-    query.bindValue(":LEVEL",       item->level());
-    query.bindValue(":MESSAGE",     item->message());
-    query.bindValue(":APP",         item->appName());
-    query.bindValue(":PID",         item->pid());
-
-    if (!query.exec())
-    {
-        // Suppress Driver not loaded errors that occur at startup.
-        // and suppress additional errors for one second after the
-        // previous error (to avoid spamming the log).
-        QSqlError err = query.lastError();
-        if ((err.type() != 1
-             || !err.nativeErrorCode().isEmpty()
-                ) &&
-            (!m_errorLoggingTime.isValid() ||
-             (m_errorLoggingTime.hasExpired(1000))))
-        {
-            MythDB::DBError("DBLogging", query);
-            m_errorLoggingTime.start();
-        }
-        return false;
-    }
-
-    return true;
-}
-
-/// \brief Prepare the database query for use, and bind constant values to it.
-/// \param query    The database query to prepare
-void DatabaseLogger::prepare(MSqlQuery &query)
-{
-    query.prepare(m_query);
-    query.bindValue(":HOST", gCoreContext->GetHostName());
-}
-
-/// \brief Check if the database is ready for use
-/// \return true when database is ready, false otherwise
-bool DatabaseLogger::isDatabaseReady(void)
-{
-    bool ready = false;
-    MythDB *db = GetMythDB();
-
-    if ((db) && db->HaveValidDatabase())
-    {
-        if ( !m_loggingTableExists )
-            m_loggingTableExists = tableExists(m_handle);
-
-        if ( m_loggingTableExists )
-            ready = true;
-    }
-
-    return ready;
-}
-
-/// \brief Checks whether table exists and is ready for writing
-/// \param  table  The name of the table to check (without schema name)
-/// \return true if table exists in schema or false if not
-bool DatabaseLogger::tableExists(const QString &table)
-{
-    bool result = false;
-    MSqlQuery query(MSqlQuery::InitCon());
-    if (query.isConnected())
-    {
-        QString sql = "SELECT COLUMN_NAME "
-                      "  FROM INFORMATION_SCHEMA.COLUMNS "
-                      " WHERE TABLE_SCHEMA = DATABASE() "
-                      "   AND TABLE_NAME = :TABLENAME "
-                      "   AND COLUMN_NAME = :COLUMNNAME;";
-        if (query.prepare(sql))
-        {
-            query.bindValue(":TABLENAME", table);
-            query.bindValue(":COLUMNNAME", "function");
-            if (query.exec() && query.next())
-                result = true;
-        }
-    }
-    return result;
-}
-
-
-/// \brief DBLoggerThread constructor
-/// \param logger DatabaseLogger instance that this thread belongs to
-DBLoggerThread::DBLoggerThread(DatabaseLogger *logger) :
-    MThread("DBLogger"), m_logger(logger),
-    m_queue(new QQueue<LoggingItem *>),
-    m_wait(new QWaitCondition())
-{
-}
-
-/// \brief DBLoggerThread deconstructor.  Waits for the thread to finish, then
-///        Empties what remains in the queue before deleting it.
-DBLoggerThread::~DBLoggerThread()
-{
-    stop();
-    wait();
-
-    QMutexLocker qLock(&m_queueMutex);
-    while (!m_queue->empty())
-        m_queue->dequeue()->DecrRef();
-    delete m_queue;
-    delete m_wait;
-    m_queue = nullptr;
-    m_wait = nullptr;
-}
-
-/// \brief Start the thread.
-void DBLoggerThread::run(void)
-{
-    RunProlog();
-
-    // Wait a bit before we start logging to the DB..  If we wait too long,
-    // then short-running tasks (like mythpreviewgen) will not log to the db
-    // at all, and that's undesirable.
-    while (true)
-    {
-        if ((m_aborted || (gCoreContext && m_logger->isDatabaseReady())))
-            break;
-
-        QMutexLocker locker(&m_queueMutex);
-        m_wait->wait(locker.mutex(), 100);
-    }
-
-    if (!m_aborted)
-    {
-        // We want the query to be out of scope before the RunEpilog() so
-        // shutdown occurs correctly as otherwise the connection appears still
-        // in use, and we get a qWarning on shutdown.
-        auto *query = new MSqlQuery(MSqlQuery::InitCon());
-        m_logger->prepare(*query);
-
-        QMutexLocker qLock(&m_queueMutex);
-        while (!m_aborted || !m_queue->isEmpty())
-        {
-            if (m_queue->isEmpty())
-            {
-                m_wait->wait(qLock.mutex(), 100);
-                continue;
-            }
-
-            LoggingItem *item = m_queue->dequeue();
-            if (!item)
-                continue;
-
-            if (!item->message().isEmpty())
-            {
-                qLock.unlock();
-                bool logged = m_logger->logqmsg(*query, item);
-                qLock.relock();
-
-                if (!logged)
-                {
-                    m_queue->prepend(item);
-                    m_wait->wait(qLock.mutex(), 100);
-                    delete query;
-                    query = new MSqlQuery(MSqlQuery::InitCon());
-                    m_logger->prepare(*query);
-                    continue;
-                }
-            }
-
-            item->DecrRef();
-        }
-
-        delete query;
-    }
-
-    RunEpilog();
-}
-
-/// \brief Tell the thread to stop by setting the m_aborted flag.
-void DBLoggerThread::stop(void)
-{
-    QMutexLocker qLock(&m_queueMutex);
-    m_aborted = true;
-    m_wait->wakeAll();
-}
-
-bool DBLoggerThread::enqueue(LoggingItem *item)
-{
-    QMutexLocker qLock(&m_queueMutex);
-    if (!m_aborted)
-    {
-        if (item)
-        {
-            item->IncrRef();
-        }
-        m_queue->enqueue(item);
-    }
-    return true;
-}
-
 
 #ifndef _WIN32
 /// \brief Signal handler for SIGHUP.  This passes it to the LogForwardThread
@@ -664,21 +330,21 @@ void LogForwardThread::run(void)
         qApp->sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
         {
-            QMutexLocker lock(&logMsgListMutex);
-            if (logMsgList.isEmpty() &&
-                !logMsgListNotEmpty.wait(lock.mutex(), 90))
+            QMutexLocker lock(&gLogItemListMutex);
+            if (gLogItemList.isEmpty() &&
+                !gLogItemListNotEmpty.wait(lock.mutex(), 90))
             {
                 continue;
             }
 
             int processed = 0;
-            while (!logMsgList.isEmpty())
+            while (!gLogItemList.isEmpty())
             {
                 processed++;
-                LogMessage *msg = logMsgList.takeFirst();
+                LoggingItem *item = gLogItemList.takeFirst();
                 lock.unlock();
-                forwardMessage(msg);
-                delete msg;
+                forwardMessage(item);
+                item->DecrRef();
 
                 // Force a processEvents every 128 messages so a busy queue
                 // doesn't preclude timer notifications, etc.
@@ -726,50 +392,18 @@ void LogForwardThread::handleSigHup(void)
 #endif
 }
 
-void LogForwardThread::forwardMessage(LogMessage *msg)
+void LogForwardThread::forwardMessage(LoggingItem *item)
 {
-#ifdef DUMP_PACKET
-    QList<QByteArray>::const_iterator it = msg->begin();
-    int i = 0;
-    for (; it != msg->end(); ++it, i++)
-    {
-        QByteArray buf = *it;
-        cout << i << ":\t" << buf.size() << endl << "\t"
-             << buf.toHex().constData() << endl << "\t"
-             << buf.constData() << endl;
-    }
-#endif
+    QMutexLocker lock(&gLoggerListMutex);
+    LoggerListItem *logItem = gLoggerList;
 
-    // First section is the client id
-    QByteArray clientBa = msg->first();
-    QString clientId = QString(clientBa.toHex());
-
-    QByteArray json     = msg->at(1);
-
-    if (json.size() == 0)
-    {
-        // cout << "invalid msg, no json data " << qPrintable(clientId) << endl;
-        return;
-    }
-
-    QMutexLocker lock(&logClientMapMutex);
-    LoggerListItem *logItem = logClientMap.value(clientId, nullptr);
-
-    // cout << "msg  " << clientId.toLocal8Bit().constData() << endl;
     if (logItem)
     {
         logItem->m_itemEpoch = nowAsDuration<std::chrono::seconds>();
     }
     else
     {
-        LoggingItem *item = LoggingItem::create(json);
-
-        logClientCount.ref();
-        LOG(VB_FILE, LOG_DEBUG, QString("New Logging Client: ID: %1 (#%2)")
-            .arg(clientId).arg(logClientCount.fetchAndAddOrdered(0)));
-
         QMutexLocker lock2(&loggerMapMutex);
-        QMutexLocker lock3(&logRevClientMapMutex);
 
         // Need to find or create the loggers
         auto *loggers = new LoggerList;
@@ -779,11 +413,6 @@ void LogForwardThread::forwardMessage(LogMessage *msg)
         if (!logfile.isEmpty())
         {
             LoggerBase *logger = FileLogger::create(logfile, lock2.mutex());
-
-            ClientList *clients = logRevClientMap.value(logger);
-
-            if (clients)
-                clients->insert(0, clientId);
 
             if (logger && loggers)
                 loggers->insert(0, logger);
@@ -796,11 +425,6 @@ void LogForwardThread::forwardMessage(LogMessage *msg)
         {
             LoggerBase *logger = SyslogLogger::create(lock2.mutex());
 
-            ClientList *clients = logRevClientMap.value(logger);
-
-            if (clients)
-                clients->insert(0, clientId);
-
             if (logger && loggers)
                 loggers->insert(0, logger);
         }
@@ -811,48 +435,27 @@ void LogForwardThread::forwardMessage(LogMessage *msg)
         {
             LoggerBase *logger = JournalLogger::create(lock2.mutex());
 
-            ClientList *clients = logRevClientMap.value(logger);
-
-            if (clients)
-                clients->insert(0, clientId);
-
             if (logger && loggers)
                 loggers->insert(0, logger);
         }
 #endif
 #endif
 
-        // DatabaseLogger from table
-        QString table = item->table();
-        if (!table.isEmpty())
-        {
-            LoggerBase *logger = DatabaseLogger::create(table, lock2.mutex());
-
-            ClientList *clients = logRevClientMap.value(logger);
-
-            if (clients)
-                clients->insert(0, clientId);
-
-            if (logger && loggers)
-                loggers->insert(0, logger);
-        }
-
+        // Add the list of loggers for this client into the map.
         logItem = new LoggerListItem;
         logItem->m_itemEpoch = nowAsDuration<std::chrono::seconds>();
         logItem->m_itemList = loggers;
-        logClientMap.insert(clientId, logItem);
-
-        item->DecrRef();
+        gLoggerList = logItem;
     }
 
-    if (logItem && logItem->m_itemList && !logItem->m_itemList->isEmpty())
+    // Does this client have an entry in the loggers map, does that
+    // entry have a list of loggers, and does that list have anything
+    // in it.  I.E. is there anywhere to log this item.
+    if (logItem->m_itemList && !logItem->m_itemList->isEmpty())
     {
-        LoggingItem *item = LoggingItem::create(json);
-        if (!item)
-            return;
-        for (auto *it : qAsConst(*logItem->m_itemList))
+        // Log this item on each of the loggers.
+        for (auto *it : std::as_const(*logItem->m_itemList))
             it->logmsg(item);
-        item->DecrRef();
     }
 }
 
@@ -879,24 +482,20 @@ void logForwardStop(void)
     logForwardThread->stop();
     delete logForwardThread;
     logForwardThread = nullptr;
-
-    QMutexLocker locker(&loggerMapMutex);
-    for (auto it = loggerMap.begin(); it != loggerMap.end(); ++it)
-    {
-        it.value()->stopDatabaseAccess();
-    }
 }
 
-void logForwardMessage(const QList<QByteArray> &msg)
+// Take a logging item and queue it for the logging server thread to
+// process.
+void logForwardMessage(LoggingItem *item)
 {
-    auto *message = new LogMessage(msg);
-    QMutexLocker lock(&logMsgListMutex);
+    QMutexLocker lock(&gLogItemListMutex);
 
-    bool wasEmpty = logMsgList.isEmpty();
-    logMsgList.append(message);
+    bool wasEmpty = gLogItemList.isEmpty();
+    item->IncrRef();
+    gLogItemList.append(item);
 
     if (wasEmpty)
-        logMsgListNotEmpty.wakeAll();
+        gLogItemListNotEmpty.wakeAll();
 }
 
 /*

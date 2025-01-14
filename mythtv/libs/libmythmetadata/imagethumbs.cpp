@@ -3,12 +3,11 @@
 #include <QDir>
 #include <QStringList>
 
-#include "mythlogging.h"
-#include "mythcorecontext.h"  // for events
-#include "mythsystemlegacy.h" // for previewgen
-#include "mythdirs.h"         // for previewgen
-#include "exitcodes.h"        // for previewgen
-#include "mythimage.h"
+#include "libmythbase/mythcorecontext.h"  // for MYTH_APPNAME_MYTHPREVIEWGEN
+#include "libmythbase/mythdirs.h"         // for GetAppBinDir
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythui/mythimage.h"
 
 #include "imagemetadata.h"
 
@@ -171,7 +170,7 @@ void ThumbThread<DBFS>::run()
         }
         else if (task->m_action == "DELETE")
         {
-            for (const auto& im : qAsConst(task->m_images))
+            for (const auto& im : std::as_const(task->m_images))
             {
                 QString thumbnail = im->m_thumbPath;
                 if (!QDir::root().remove(thumbnail))
@@ -192,7 +191,7 @@ void ThumbThread<DBFS>::run()
         }
         else if (task->m_action == "MOVE")
         {
-            for (const auto& im : qAsConst(task->m_images))
+            for (const auto& im : std::as_const(task->m_images))
             {
                 // Build new thumb path
                 QString newThumbPath =
@@ -222,8 +221,10 @@ void ThumbThread<DBFS>::run()
             }
         }
         else
+        {
             LOG(VB_GENERAL, LOG_ERR,
                 QString("Unknown task %1").arg(task->m_action));
+        }
     }
 
     RunEpilog();
@@ -236,13 +237,13 @@ void ThumbThread<DBFS>::run()
  \param thumbPriority 
  */
 template <class DBFS>
-QString ThumbThread<DBFS>::CreateThumbnail(ImagePtrK im, int thumbPriority)
+QString ThumbThread<DBFS>::CreateThumbnail(const ImagePtrK &im, int thumbPriority)
 {
     if (QDir::root().exists(im->m_thumbPath))
     {
         LOG(VB_FILE, LOG_DEBUG,  QString("[%3] %2 already exists")
             .arg(im->m_thumbPath).arg(thumbPriority));
-        return QString(); // Notify anyway
+        return {}; // Notify anyway
     }
 
     // Local filenames are always absolute
@@ -294,8 +295,10 @@ QString ThumbThread<DBFS>::CreateThumbnail(ImagePtrK im, int thumbPriority)
             return QString("Failed to open preview %1").arg(im->m_thumbPath);
     }
     else
+    {
         return QString("Can't create thumbnail for type %1 (image %2)")
                 .arg(im->m_type).arg(imagePath);
+    }
 
     // Compensate for any Qt auto-orientation
     int orientBy = Orientation(im->m_orientation)
@@ -311,7 +314,7 @@ QString ThumbThread<DBFS>::CreateThumbnail(ImagePtrK im, int thumbPriority)
 
     LOG(VB_FILE, LOG_INFO,  QString("[%2] Created %1")
         .arg(im->m_thumbPath).arg(thumbPriority));
-    return QString();
+    return {};
 }
 
 
@@ -376,7 +379,7 @@ void ImageThumb<DBFS>::ClearThumbs(int devId, const QString &action)
 
     // Generate file & thumbnail urls (as per image cache) of mountpoints
     QStringList mesg;
-    for (const auto& mount : qAsConst(mountPaths))
+    for (const auto& mount : std::as_const(mountPaths))
         mesg << m_dbfs.MakeFileUrl(mount)
              << m_dbfs.MakeThumbUrl(mount);
 
@@ -399,7 +402,7 @@ QString ImageThumb<DBFS>::DeleteThumbs(const ImageList &images)
     // Pictures & videos are deleted by their own threads
     ImageListK pics;
     ImageListK videos;
-    for (const auto& im : qAsConst(images))
+    for (const auto& im : std::as_const(images))
     {
         if (im->m_type == kVideoFile)
             videos.append(im);

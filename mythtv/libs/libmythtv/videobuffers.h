@@ -1,24 +1,20 @@
 #ifndef VIDEOBUFFERS_H
 #define VIDEOBUFFERS_H
 
-// Qt
-#include <QSize>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
-#include <QRecursiveMutex>
-#endif
-#include <QString>
-
-// MythTV
-#include "mythtvexp.h"
-#include "mythframe.h"
-#include "mythdeque.h"
-#include "mythcodecid.h"
-
 // Std
 #include <vector>
 #include <map>
+
+// Qt
+#include <QSize>
+#include <QRecursiveMutex>
+#include <QString>
+
+// MythTV
+#include "libmythbase/mythdeque.h"
+#include "libmythtv/mythtvexp.h"
+#include "libmythtv/mythframe.h"
+#include "libmythtv/mythcodecid.h"
 
 using frame_queue_t  = MythDeque<MythVideoFrame*> ;
 using frame_vector_t = std::vector<MythVideoFrame>;
@@ -27,7 +23,7 @@ using vbuffer_map_t  = std::map<const MythVideoFrame*, uint>;
 const QString& DebugString(const MythVideoFrame *Frame, bool Short = false);
 const QString& DebugString(uint  FrameNum, bool Short = false);
 
-enum BufferType
+enum BufferType : std::uint8_t
 {
     kVideoBuffer_avail     = 0x00000001,
     kVideoBuffer_limbo     = 0x00000002,
@@ -121,11 +117,7 @@ class MTV_PUBLIC VideoBuffers
     uint                 m_needPrebufferFramesSmall  { 0 };
     uint                 m_rpos                      { 0 };
     uint                 m_vpos                      { 0 };
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex       m_globalLock                { QMutex::Recursive };
-#else
     mutable QRecursiveMutex m_globalLock;
-#endif
 };
 
 #endif // VIDEOBUFFERS_H

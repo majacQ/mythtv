@@ -6,20 +6,16 @@
 #include <QUrl>
 #include <utility>
 
-// libmythbase
-#include "mythevent.h"
-#include "mythlogging.h"
-#include "mythdate.h"
-
-// libmyth
-#include "mythcontext.h"
-#include "remoteutil.h"
-
-// libmythui
-#include "mythscreenstack.h"
-#include "mythprogressdialog.h"
-#include "mythdialogbox.h"
-#include "mythmainwindow.h"
+// mythtv
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythscreenstack.h"
 
 // libmythmetadata
 #include "videometadatalistmanager.h"
@@ -28,7 +24,7 @@
 #include "dbaccess.h"
 #include "dirscan.h"
 
-QEvent::Type VideoScanChanges::kEventType =
+const QEvent::Type VideoScanChanges::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 namespace
@@ -41,19 +37,17 @@ namespace
                    const QStringList &image_extensions) :
             m_videoFiles(video_files)
         {
-            for (const auto& ext : qAsConst(image_extensions))
+            for (const auto& ext : std::as_const(image_extensions))
                 m_imageExt.insert(ext.toLower());
         }
 
-        DirectoryHandler *newDir(const QString &dir_name,
-                                 const QString &fq_dir_name) override // DirectoryHandler
+        DirectoryHandler *newDir([[maybe_unused]] const QString &dir_name,
+                                 [[maybe_unused]] const QString &fq_dir_name) override // DirectoryHandler
         {
-            (void) dir_name;
-            (void) fq_dir_name;
             return this;
         }
 
-        void handleFile(const QString &file_name,
+        void handleFile([[maybe_unused]] const QString &file_name,
                         const QString &fq_file_name,
                         const QString &extension,
                         const QString &host) override // DirectoryHandler
@@ -63,7 +57,6 @@ namespace
             LOG(VB_GENERAL, LOG_DEBUG,
                 QString("handleFile: %1 :: %2").arg(fq_file_name).arg(host));
 #endif
-            (void) file_name;
             if (m_imageExt.find(extension.toLower()) == m_imageExt.end())
             {
                 m_videoFiles[fq_file_name].check = false;
@@ -82,11 +75,11 @@ class VideoMetadataListManager;
 class MythUIProgressDialog;
 
 VideoScannerThread::VideoScannerThread(QObject *parent) :
-    MThread("VideoScanner")
+    MThread("VideoScanner"),
+    m_parent(parent),
+    m_hasGUI(gCoreContext->HasGUI()),
+    m_dbMetadata(new VideoMetadataListManager)
 {
-    m_parent = parent;
-    m_dbMetadata = new VideoMetadataListManager;
-    m_hasGUI = gCoreContext->HasGUI();
     m_listUnknown = gCoreContext->GetBoolSetting("VideoListUnknownFiletypes", false);
 }
 
@@ -98,7 +91,7 @@ VideoScannerThread::~VideoScannerThread()
 void VideoScannerThread::SetHosts(const QStringList &hosts)
 {
     m_liveSGHosts.clear();
-    for (const auto& host : qAsConst(hosts))
+    for (const auto& host : std::as_const(hosts))
         m_liveSGHosts << host.toLower();
 }
 
@@ -172,7 +165,7 @@ void VideoScannerThread::run()
 
     QList<QByteArray> image_types = QImageReader::supportedImageFormats();
     QStringList imageExtensions;
-    for (const auto & format : qAsConst(image_types))
+    for (const auto & format : std::as_const(image_types))
         imageExtensions.push_back(QString(format));
 
     LOG(VB_GENERAL, LOG_INFO, QString("Beginning Video Scan."));
@@ -183,7 +176,7 @@ void VideoScannerThread::run()
     if (m_hasGUI)
         SendProgressEvent(counter, (uint)m_directories.size(),
                           tr("Searching for video files"));
-    for (const auto & dir : qAsConst(m_directories))
+    for (const auto & dir : std::as_const(m_directories))
     {
         if (!buildFileList(dir, imageExtensions, fs_files))
         {
@@ -214,12 +207,11 @@ void VideoScannerThread::run()
 
         QStringList slist;
 
-        QList<int>::const_iterator i;
-        for (int id : qAsConst(m_addList))
+        for (int id : std::as_const(m_addList))
             slist << QString("added::%1").arg(id);
-        for (int id : qAsConst(m_movList))
+        for (int id : std::as_const(m_movList))
             slist << QString("moved::%1").arg(id);
-        for (int id : qAsConst(m_delList))
+        for (int id : std::as_const(m_delList))
             slist << QString("deleted::%1").arg(id);
 
         MythEvent me("VIDEO_LIST_CHANGE", slist);
@@ -227,17 +219,17 @@ void VideoScannerThread::run()
         gCoreContext->SendEvent(me);
     }
     else
+    {
         gCoreContext->SendMessage("VIDEO_LIST_NO_CHANGE");
+    }
 
     RunEpilog();
 }
 
 
 void VideoScannerThread::removeOrphans(unsigned int id,
-                                       const QString &filename)
+                                       [[maybe_unused]] const QString &filename)
 {
-    (void) filename;
-
     // TODO: use single DB connection for all calls
     if (m_removeAll)
         m_dbMetadata->purgeByID(id);
@@ -273,7 +265,7 @@ void VideoScannerThread::verifyFiles(FileCheckList &files,
                 {
                     // file has changed hosts
                     // add to delete list for further processing
-                    remove.push_back(std::make_pair(file->GetID(), lname));
+                    remove.emplace_back(file->GetID(), lname);
                 }
                 else
                 {
@@ -286,14 +278,14 @@ void VideoScannerThread::verifyFiles(FileCheckList &files,
             {
                 // If it's only in the database, and not on a host we
                 // cannot reach, mark it as for removal later.
-                remove.push_back(std::make_pair(file->GetID(), lname));
+                remove.emplace_back(file->GetID(), lname);
             }
             else if (m_liveSGHosts.contains(lhost))
             {
                 LOG(VB_GENERAL, LOG_INFO,
                     QString("Removing file SG(%1) :%2:")
                         .arg(lhost, lname));
-                remove.push_back(std::make_pair(file->GetID(), lname));
+                remove.emplace_back(file->GetID(), lname);
             }
             else
             {
@@ -419,8 +411,8 @@ void VideoScannerThread::SendProgressEvent(uint progress, uint total,
 }
 
 VideoScanner::VideoScanner()
+  : m_scanThread(new VideoScannerThread(this))
 {
-    m_scanThread = new VideoScannerThread(this);
 }
 
 VideoScanner::~VideoScanner()

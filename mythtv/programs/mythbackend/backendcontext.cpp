@@ -1,18 +1,12 @@
 
 #include "backendcontext.h"
 
-#include "mythlogging.h"
-#include "mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
 
-QMap<int, EncoderLink *> tvList;
-AutoExpire  *expirer      = nullptr;
-JobQueue    *jobqueue     = nullptr;
-HouseKeeper *housekeeping = nullptr;
-MediaServer *g_pUPnp      = nullptr;
+QMap<int, EncoderLink *> gTVList;
+AutoExpire  *gExpirer      = nullptr;
 BackendContext *gBackendContext = nullptr;
-QString      pidfile;
-QString      logfile;
-MythSystemEventHandler *sysEventHandler = nullptr;
 
 BackendContext::~BackendContext()
 {

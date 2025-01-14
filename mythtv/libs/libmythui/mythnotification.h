@@ -9,17 +9,17 @@
 #ifndef MYTHTV_MYTHNOTIFICATION_H
 #define MYTHTV_MYTHNOTIFICATION_H
 
+// Std
+#include <utility>
+
 // Qt
 #include <QImage>
 #include <QMap>
 #include <QMutex>
 
 // MythTV
-#include "mythevent.h"
-#include "mythuiexp.h"
-
-// Std
-#include <utility>
+#include "libmythbase/mythevent.h"
+#include "libmythui/mythuiexp.h"
 
 using namespace std::chrono_literals;
 
@@ -29,13 +29,13 @@ using VNMask = unsigned int;
 class MUI_PUBLIC MythNotification : public MythEvent
 {
   public:
-    static inline Type New     = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Update  = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Info    = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Error   = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Warning = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Check   = static_cast<QEvent::Type>(QEvent::registerEventType());
-    static inline Type Busy    = static_cast<QEvent::Type>(QEvent::registerEventType());
+    static const Type kNew;
+    static const Type kUpdate;
+    static const Type kInfo;
+    static const Type kError;
+    static const Type kWarning;
+    static const Type kCheck;
+    static const Type kBusy;
 
     MythNotification(Type nType, void* Parent = nullptr);
     MythNotification(int Id, void* Parent);
@@ -55,7 +55,7 @@ class MUI_PUBLIC MythNotification : public MythEvent
      * A notification can be given a priority. Display order of notification
      * will be sorted according to the priority level
      */
-    enum Priority
+    enum Priority : std::uint8_t
     {
         kDefault = 0,
         kLow,
@@ -71,10 +71,10 @@ class MUI_PUBLIC MythNotification : public MythEvent
      * This is used to prevent redundant information appearing more than once:
      * like in MythMusic, there's no need to show music notifications
      */
-    enum Visibility
+    enum Visibility : std::uint8_t
     {
         kNone       = 0,
-        kAll        = ~0,
+        kAll        = 0xFF,
         kPlayback   = (1 << 0),
         kSettings   = (1 << 1),
         kWizard     = (1 << 2),

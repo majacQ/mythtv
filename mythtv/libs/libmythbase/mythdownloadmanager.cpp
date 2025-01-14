@@ -8,6 +8,7 @@
 #include <QNetworkCookie>
 #include <QAuthenticator>
 #include <QTextStream>
+#include <QTimeZone>
 #include <QNetworkProxy>
 #include <QMutexLocker>
 #include <QUrl>
@@ -32,7 +33,7 @@
 #include "portchecker.h"
 
 #define LOC      QString("DownloadManager: ")
-#define CACHE_REDIRECTION_LIMIT     10
+static constexpr int CACHE_REDIRECTION_LIMIT { 10 };
 
 MythDownloadManager *downloadManager = nullptr;
 QMutex               dmCreateLock;
@@ -664,7 +665,9 @@ void MythDownloadManager::downloadQNetworkRequest(MythDownloadInfo *dlInfo)
         dlInfo->m_request = nullptr;
     }
     else
+    {
         request.setUrl(qurl);
+    }
 
     if (dlInfo->m_reload)
     {
@@ -709,7 +712,11 @@ void MythDownloadManager::downloadQNetworkRequest(MythDownloadInfo *dlInfo)
             {
                 QDateTime loadDate =
                     MythDate::fromString(dateString, kDateFormat);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
                 loadDate.setTimeSpec(Qt::UTC);
+#else
+                loadDate.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
                 if (loadDate.secsTo(now) <= 720)
                 {
                     dlInfo->m_preferCache = true;
@@ -727,7 +734,7 @@ void MythDownloadManager::downloadQNetworkRequest(MythDownloadInfo *dlInfo)
     if (!request.hasRawHeader("User-Agent"))
     {
         request.setRawHeader("User-Agent",
-                             "MythTV v" MYTH_BINARY_VERSION
+                             QByteArray("MythTV v") + MYTH_BINARY_VERSION +
                              " MythDownloadManager");
     }
 
@@ -766,13 +773,8 @@ void MythDownloadManager::downloadQNetworkRequest(MythDownloadInfo *dlInfo)
                 this, &MythDownloadManager::authCallback);
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,15,0)
-    connect(dlInfo->m_reply, qOverload<QNetworkReply::NetworkError>(&QNetworkReply::error),
-            this, &MythDownloadManager::downloadError);
-#else
     connect(dlInfo->m_reply, &QNetworkReply::errorOccurred,
             this, &MythDownloadManager::downloadError);
-#endif
     connect(dlInfo->m_reply, &QNetworkReply::downloadProgress,
             this, &MythDownloadManager::downloadProgress);
 }
@@ -859,7 +861,9 @@ bool MythDownloadManager::downloadNow(MythDownloadInfo *dlInfo, bool deleteInfo)
         }
     }
     else if (deleteInfo)
+    {
         delete dlInfo;
+    }
 
     m_infoLock->unlock();
 
@@ -942,7 +946,8 @@ bool MythDownloadManager::downloadNowLinkLocal(MythDownloadInfo *dlInfo, bool de
         if (dlInfo->m_headers)
             headers = *dlInfo->m_headers;
         if (!headers.contains("User-Agent"))
-            headers.insert("User-Agent", "MythDownloadManager v" MYTH_BINARY_VERSION);
+            headers.insert("User-Agent", QByteArray("MythDownloadManager v") +
+                           MYTH_BINARY_VERSION);
         headers.insert("Connection", "close");
         headers.insert("Accept-Encoding", "identity");
         if (!buffer->isEmpty())
@@ -1022,7 +1027,7 @@ void MythDownloadManager::cancelDownload(const QString &url, bool block)
 void MythDownloadManager::cancelDownload(const QStringList &urls, bool block)
 {
     m_infoLock->lock();
-    for (const auto& url : qAsConst(urls))
+    for (const auto& url : std::as_const(urls))
     {
         QMutableListIterator<MythDownloadInfo*> lit(m_downloadQueue);
         while (lit.hasNext())
@@ -1264,7 +1269,8 @@ void MythDownloadManager::downloadFinished(MythDownloadInfo *dlInfo)
         }
 
         request.setRawHeader("User-Agent",
-                             "MythDownloadManager v" MYTH_BINARY_VERSION);
+                             "MythDownloadManager v" +
+                             QByteArray(MYTH_BINARY_VERSION));
 
         switch (dlInfo->m_requestType)
         {
@@ -1279,13 +1285,8 @@ void MythDownloadManager::downloadFinished(MythDownloadInfo *dlInfo)
 
         m_downloadReplies[dlInfo->m_reply] = dlInfo;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,15,0)
-        connect(dlInfo->m_reply, qOverload<QNetworkReply::NetworkError>(&QNetworkReply::error),
-                this, &MythDownloadManager::downloadError);
-#else
         connect(dlInfo->m_reply, &QNetworkReply::errorOccurred,
                 this, &MythDownloadManager::downloadError);
-#endif
         connect(dlInfo->m_reply, &QNetworkReply::downloadProgress,
                 this, &MythDownloadManager::downloadProgress);
 
@@ -1592,7 +1593,11 @@ QDateTime MythDownloadManager::GetLastModified(const QString &url)
             {
                 QDateTime loadDate =
                     MythDate::fromString(date, kDateFormat);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
                 loadDate.setTimeSpec(Qt::UTC);
+#else
+                loadDate.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
                 if (loadDate.secsTo(now) <= 1200) // 20 Minutes
                 {
                     result = urlData.lastModified().toUTC();
@@ -1727,7 +1732,7 @@ void MythDownloadManager::updateCookieJar(void)
 QString MythDownloadManager::getHeader(const QUrl& url, const QString& header)
 {
     if (!m_manager || !m_manager->cache())
-        return QString();
+        return {};
 
     m_infoLock->lock();
     QNetworkCacheMetaData metadata = m_manager->cache()->metaData(url);
@@ -1745,10 +1750,10 @@ QString MythDownloadManager::getHeader(const QNetworkCacheMetaData &cacheData,
                                        const QString& header)
 {
     auto headers = cacheData.rawHeaders();
-    for (const auto& rh : qAsConst(headers))
+    for (const auto& rh : std::as_const(headers))
         if (QString(rh.first) == header)
-            return QString(rh.second);
-    return QString();
+            return {rh.second};
+    return {};
 }
 
 
@@ -1803,13 +1808,8 @@ void MythCookieJar::save(const QString &filename)
     QList<QNetworkCookie> cookieList = allCookies();
     QTextStream stream(&f);
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    for (const auto& cookie : qAsConst(cookieList))
-        stream << cookie.toRawForm() << endl;
-#else
-    for (const auto& cookie : qAsConst(cookieList))
+    for (const auto& cookie : std::as_const(cookieList))
         stream << cookie.toRawForm() << Qt::endl;
-#endif
 }
 
 

@@ -9,7 +9,7 @@
 #include <QCoreApplication>
 
 // MythTV headers
-#include <standardsettings.h>
+#include <libmythui/standardsettings.h>
 
 
 class ArchiveSettings : public GroupSetting

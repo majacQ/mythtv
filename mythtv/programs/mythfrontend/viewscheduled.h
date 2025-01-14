@@ -7,9 +7,11 @@
 #include <QMap>
 
 // MythTV
+#include "libmythbase/programinfo.h"
+#include "libmythui/mythscreentype.h"
+
+// MythFrontend
 #include "schedulecommon.h"
-#include "mythscreentype.h"
-#include "programinfo.h"
 
 class TV;
 class Timer;
@@ -59,6 +61,10 @@ class ViewScheduled : public ScheduleCommon
 
     void EmbedTVWindow(void);
 
+    void UpdateUIListItem(MythUIButtonListItem* item,
+                          ProgramInfo *pginfo) const;
+    static void CalcRecordedPercent(ProgramInfo &pg);
+
     bool  m_conflictBool              {false};
     QDate m_conflictDate;
 
@@ -66,6 +72,7 @@ class ViewScheduled : public ScheduleCommon
 
     MythUIButtonList *m_schedulesList {nullptr};
     MythUIButtonList *m_groupList     {nullptr};
+    MythUIProgressBar *m_progressBar  {nullptr};
 
     bool              m_showAll       {false};
 

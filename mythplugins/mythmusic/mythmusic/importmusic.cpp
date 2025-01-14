@@ -1,32 +1,32 @@
 // qt
+#include <QApplication>
 #include <QDir>
 #include <QFontMetrics>
-#include <QApplication>
 
-// myth
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <musicmetadata.h>
-#include <mythdialogbox.h>
-#include <mythuitext.h>
-#include <mythuiimage.h>
-#include <mythuicheckbox.h>
-#include <mythuitextedit.h>
-#include <mythuibutton.h>
-#include <mythuibuttonlist.h>
-#include <mythprogressdialog.h>
-#include <mythuifilebrowser.h>
-#include <mythlogging.h>
-#include <remotefile.h>
-#include <storagegroup.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/remotefile.h>
+#include <libmythbase/storagegroup.h>
+#include <libmythmetadata/metaio.h>
+#include <libmythmetadata/musicmetadata.h>
+#include <libmythmetadata/musicutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuifilebrowser.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // mythmusic
-#include "importmusic.h"
-#include "genres.h"
 #include "editmetadata.h"
+#include "genres.h"
+#include "importmusic.h"
 #include "musicplayer.h"
-#include "metaio.h"
-#include "musicutils.h"
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -141,7 +141,7 @@ bool ImportMusicDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "LEFT")
@@ -226,7 +226,9 @@ bool ImportMusicDialog::keyPressEvent(QKeyEvent *event)
             setTrack();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -306,7 +308,9 @@ void ImportMusicDialog::locationPressed()
         popupStack->AddScreen(fb);
     }
     else
+    {
         delete fb;
+    }
 }
 
 void ImportMusicDialog::coverArtPressed()
@@ -407,7 +411,9 @@ void ImportMusicDialog::addPressed()
         fillWidgets();
     }
     else
+    {
         ShowOkPopup(tr("This track is already in the database"));
+    }
 }
 
 void ImportMusicDialog::addAllNewPressed()
@@ -888,7 +894,7 @@ bool ImportCoverArtDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "LEFT")
@@ -900,7 +906,9 @@ bool ImportCoverArtDialog::keyPressEvent(QKeyEvent *event)
             m_nextButton->Push();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -1036,7 +1044,7 @@ void ImportCoverArtDialog::scanDirectory()
     if (list.isEmpty())
         return;
 
-    for (const auto & fi : qAsConst(list))
+    for (const auto & fi : std::as_const(list))
     {
         QString filename = fi.absoluteFilePath();
         if (!fi.isDir())

@@ -4,32 +4,36 @@
  */
 #include <cstdint>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 #include "dsmccreceiver.h"
 #include "dsmccbiop.h"
 #include "dsmcccache.h"
 #include "dsmcc.h"
 
-#define DSMCC_SYNC_BYTE         0x47
-#define DSMCC_TRANSPORT_ERROR   0x80
-#define DSMCC_START_INDICATOR   0x40
+//static constexpr uint8_t DSMCC_SYNC_BYTE       { 0x47 };
+//static constexpr uint8_t DSMCC_TRANSPORT_ERROR { 0x80 };
+//static constexpr uint8_t DSMCC_START_INDICATOR { 0x40 };
 
-#define DSMCC_MESSAGE_DSI       0x1006
-#define DSMCC_MESSAGE_DII       0x1002
-#define DSMCC_MESSAGE_DDB       0x1003
+enum DSMCC_MESSAGES : std::uint16_t {
+    DSMCC_MESSAGE_DSI         = 0x1006,
+    DSMCC_MESSAGE_DII         = 0x1002,
+    DSMCC_MESSAGE_DDB         = 0x1003,
+};
 
-#define DSMCC_SECTION_INDICATION    0x3B
-#define DSMCC_SECTION_DATA      0x3C
-#define DSMCC_SECTION_DESCR     0x3D
+enum DSMCC_SECTIONS : std::uint8_t {
+    DSMCC_SECTION_INDICATION  = 0x3B,
+    DSMCC_SECTION_DATA        = 0x3C,
+    DSMCC_SECTION_DESCR       = 0x3D,
+};
 
-#define DSMCC_SECTION_OFFSET    0
-#define DSMCC_MSGHDR_OFFSET     8
-#define DSMCC_DATAHDR_OFFSET    8
-#define DSMCC_DSI_OFFSET        20
-#define DSMCC_DII_OFFSET        20
-#define DSMCC_DDB_OFFSET        20
-#define DSMCC_BIOP_OFFSET       24
+static constexpr ptrdiff_t DSMCC_SECTION_OFFSET  {  0 };
+static constexpr ptrdiff_t DSMCC_MSGHDR_OFFSET   {  8 };
+static constexpr ptrdiff_t DSMCC_DATAHDR_OFFSET  {  8 };
+static constexpr ptrdiff_t DSMCC_DSI_OFFSET      { 20 };
+static constexpr ptrdiff_t DSMCC_DII_OFFSET      { 20 };
+static constexpr ptrdiff_t DSMCC_DDB_OFFSET      { 20 };
+static constexpr ptrdiff_t DSMCC_BIOP_OFFSET     { 24 };
 
 static uint32_t crc32(const unsigned char *data, int len);
 
@@ -141,11 +145,12 @@ void Dsmcc::ProcessDownloadServerInitiate(const unsigned char *data,
     }
 
     /* 20,21 compatibilitydescriptorlength = 0x0000 */
-    if (data[off++] != 0 || data[off++] != 0)
+    if (data[off] != 0 || data[off+1] != 0)
     {
         LOG(VB_DSMCC, LOG_WARNING, "[dsmcc] DSI non zero compatibilityDescriptorLen");
         return;
     }
+    off += 2;
 
     // 22,23 privateData length
     int data_len = (data[off] << 8) | data[off+1];

@@ -1,9 +1,11 @@
 #include <cmath>
 
+#include <QtGlobal> // before taglib includes
+
 #include <apetag.h>
 #include <apeitem.h>
 
-#include <mythcontext.h>
+#include "libmyth/mythcontext.h"
 
 // libmythmetadata
 #include "metaiowavpack.h"
@@ -68,7 +70,9 @@ bool MetaIOWavPack::write(const QString &filename, MusicMetadata* mdata)
         tag->setItem(key, item);
     }
     else
+    {
         tag->removeItem("Album artist");
+    }
 
     saveTimeStamps();
     bool result = wpfile->save();

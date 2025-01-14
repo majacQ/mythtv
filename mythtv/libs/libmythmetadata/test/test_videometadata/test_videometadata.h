@@ -18,12 +18,12 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 
-#include <videometadata.h>
-#include <programinfo.h>
-#include <recordinginfo.h>
-#include <metadatafactory.h>
+#include "libmythbase/programinfo.h"
+#include "libmythmetadata/metadatafactory.h"
+#include "libmythmetadata/videometadata.h"
+#include "libmythtv/recordinginfo.h"
 
 class Testvideometadata: public QObject
 {
@@ -62,7 +62,7 @@ class Testvideometadata: public QObject
     {
         // With Spaces as separator
         TestMetadata(QString("A Movie Title (1984).mpg"),
-                     QString("A Movie Title"),
+                     QString("A Movie Title (1984)"),
                      QString(""),
                      0,
                      0);
@@ -351,13 +351,13 @@ class Testvideometadata: public QObject
         QCOMPARE (GuessLookupType (&recinfo), kProbableMovie);
 
         proginfo = ProgramInfo ("", "", "Test Series", "", "Test Episode", "",
-                                "", 1, 15, "ttvdb.py_1234", 0min, 0, "");
+                                "", 1, 15, "ttvdb4.py_1234", 0min, 0, "");
         recinfo = proginfo;
-        QCOMPARE (recinfo.GetInetRef(), QString("ttvdb.py_1234"));
+        QCOMPARE (recinfo.GetInetRef(), QString("ttvdb4.py_1234"));
         QCOMPARE (GuessLookupType (&recinfo), kProbableTelevision);
 
         //QCOMPARE (GuessLookupType (QString ("tmdb3.py_1234")), kProbableMovie);
-        //QCOMPARE (GuessLookupType (QString ("ttvdb.py_1234")), kProbableTelevision);
+        //QCOMPARE (GuessLookupType (QString ("ttvdb4.py_1234")), kProbableTelevision);
     }
 
     static void testEmbeddedFilnameToMetadata ()

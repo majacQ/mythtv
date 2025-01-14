@@ -46,9 +46,9 @@ class MHEG;
 class MHStream;
 
 // Called to create a new instance of the module.
-extern MHEG *MHCreateEngine(MHContext *context);
+extern Q_DECL_EXPORT MHEG *MHCreateEngine(MHContext *context);
 // Set the logging stream and options.
-extern void MHSetLogging(FILE *logStream, unsigned int logLevel);
+extern Q_DECL_EXPORT void MHSetLogging(FILE *logStream, unsigned int logLevel);
 
 // This abstract class is implemented by the MHEG Engine.
 class MHEG
@@ -67,7 +67,7 @@ class MHEG
 };
 
 // Logging control
-enum {
+enum MHLog : std::uint8_t {
     MHLogError = 1,         // Log errors - these are errors that need to be reported to the user.
     MHLogWarning = 2,       // Log warnings - typically bad MHEG which might be an error in this program
     MHLogNotifications = 4, // General things to log.

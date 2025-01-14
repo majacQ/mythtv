@@ -1,5 +1,5 @@
-#ifndef SATIPRECORDER_H_
-#define SATIPRECORDER_H_
+#ifndef SATIPRECORDER_H
+#define SATIPRECORDER_H
 
 // Qt includes
 #include <QString>
@@ -24,11 +24,6 @@ class SatIPRecorder : public DTVRecorder
 
     QString GetSIStandard(void) const override; // DTVRecorder
 
-    void SetOptionsFromProfile(RecordingProfile *profile,
-                               const QString &videodev,
-                               const QString &audiodev,
-                               const QString &vbidev) override; // RecorderBase
-
   private:
     bool PauseAndWait(std::chrono::milliseconds timeout = 100ms) override;  // RecorderBase
 
@@ -38,4 +33,4 @@ class SatIPRecorder : public DTVRecorder
     int                 m_inputId         {0};
 };
 
-#endif // SATIPRECORDER_H_
+#endif // SATIPRECORDER_H

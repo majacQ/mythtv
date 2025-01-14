@@ -2,9 +2,9 @@
 #define MUSICMETADATA_H_
 
 // C/C++
+#include <array>
 #include <cstdint>
 #include <utility>
-
 
 // qt
 #include <QCoreApplication>
@@ -13,19 +13,20 @@
 #include <QMap>
 #include <QMetaType>
 #include <QStringList>
+#include <QTimeZone>
 
-// mythtv
-#include "mythtypes.h"
-#include "mythmetaexp.h"
-#include "mthread.h"
-#include "mythcorecontext.h"
+// MythTV
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythmetadata/mythmetaexp.h"
 
 class AllMusic;
 class AlbumArtImages;
 class LyricsData;
 class MetaIO;
 
-enum ImageType
+enum ImageType : std::uint8_t
 {
     IT_UNKNOWN = 0,
     IT_FRONTCOVER,
@@ -55,25 +56,25 @@ class META_PUBLIC AlbumArtImage
 
 using AlbumArtList = QList<AlbumArtImage*>;
 
-enum RepoType
+enum RepoType : std::uint8_t
 {
     RT_Database = 0,
     RT_CD       = 1,
     RT_Radio    = 2
 };
 
-#define METADATA_BITS_FOR_REPO 8
-#define METADATA_REPO_SHIFT 24
-#define METADATA_REPO_MASK 0xff000000
-#define METADATA_ID_MASK 0x00ffffff
+static constexpr uint8_t  METADATA_BITS_FOR_REPO {  8 };
+static constexpr uint8_t  METADATA_REPO_SHIFT    { 24 };
+static constexpr uint32_t METADATA_REPO_MASK     { 0xff000000 };
+static constexpr uint32_t METADATA_ID_MASK       { 0x00ffffff };
 
-#define ID_TO_ID(x) x & METADATA_ID_MASK;
-#define ID_TO_REPO(x)  x >> METADATA_REPO_SHIFT
+static constexpr uint32_t ID_TO_ID(uint32_t x) { return x & METADATA_ID_MASK; };
+static constexpr uint32_t ID_TO_REPO(uint32_t x) { return x >> METADATA_REPO_SHIFT; };
 
-#define METADATA_INVALID_FILENAME "**NOT FOUND**"
+static constexpr const char* METADATA_INVALID_FILENAME { "**NOT FOUND**" };
 
-#define STREAMUPDATEURL "https://services.mythtv.org/music/data/?data=streams"
-#define STREAMURLCOUNT 5
+static constexpr const char* STREAMUPDATEURL { "https://services.mythtv.org/music/data/?data=streams" };
+static constexpr size_t STREAMURLCOUNT { 5 };
 
 using UrlList = std::array<QString,STREAMURLCOUNT>;
 
@@ -118,7 +119,6 @@ class META_PUBLIC MusicMetadata
     MusicMetadata(const MusicMetadata &other)
     {
         *this = other;
-         m_changed = false;
     }
 
     MusicMetadata& operator=(const MusicMetadata &rhs);
@@ -203,9 +203,8 @@ class META_PUBLIC MusicMetadata
     void setTrackCount(int ltrackcount) { m_trackCount = ltrackcount; }
 
     std::chrono::milliseconds Length() const { return m_length; }
-    template <typename T>
-    typename std::enable_if_t<std::chrono::__is_duration<T>::value, void>
-    setLength(T llength) { m_length = llength; }
+    template <typename T, std::enable_if_t<std::chrono::__is_duration<T>::value, bool> = true>
+    void setLength(T llength) { m_length = llength; }
 
     int DiscNumber() const {return m_discNum;}
     void setDiscNumber(int discnum) { m_discNum = discnum; }
@@ -269,8 +268,8 @@ class META_PUBLIC MusicMetadata
     void setDescription(const QString &description) { m_description = description; }
     QString Description(void) { return m_description; }
 
-    void setUrl(const QString &url, uint index = 0);
-    QString Url(uint index = 0);
+    void setUrl(const QString &url, size_t index = 0);
+    QString Url(size_t index = 0);
 
     void setLogoUrl(const QString &logourl) { m_logoUrl = logourl; }
     QString LogoUrl(void) { return m_logoUrl; }
@@ -524,6 +523,7 @@ class META_PUBLIC AlbumArtImages
 
   public:
     explicit AlbumArtImages(MusicMetadata *metadata, bool loadFromDB = true);
+    explicit AlbumArtImages(MusicMetadata *metadata, const AlbumArtImages &other);
     ~AlbumArtImages();
 
     void           scanForImages(void);

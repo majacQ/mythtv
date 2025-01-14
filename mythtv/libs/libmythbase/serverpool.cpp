@@ -8,12 +8,14 @@
 #include "mythlogging.h"
 #include "serverpool.h"
 
-#define PRETTYIP(x)      ((x)->protocol() == QAbstractSocket::IPv6Protocol ? \
-                                    "[" + (x)->toString().toLower() + "]" :  \
-                                          (x)->toString().toLower())
-#define PRETTYIP_(x)      ((x).protocol() == QAbstractSocket::IPv6Protocol ? \
-                                    "[" + (x).toString().toLower() + "]" :   \
-                                          (x).toString().toLower())
+static inline
+QString prettyip(const QHostAddress& x)
+{
+    if (x.protocol() == QAbstractSocket::IPv6Protocol)
+        return "[" + x.toString().toLower() + "]";
+    return x.toString().toLower();
+}
+
 
 #define LOC QString("ServerPool: ")
 
@@ -60,7 +62,7 @@ PrivTcpServer::PrivTcpServer(QObject *parent, PoolServerType type)
 {
 }
 
-void PrivTcpServer::incomingConnection(qt_socket_fd_t socket)
+void PrivTcpServer::incomingConnection(qintptr socket)
 {
     emit newConnection(socket);
 }
@@ -98,18 +100,18 @@ void ServerPool::SelectDefaultListen(bool force)
     QHostAddress config_v4(gCoreContext->resolveSettingAddress(
                                            "BackendServerIP",
                                            QString(),
-                                           gCoreContext->ResolveIPv4, true));
+                                           MythCoreContext::ResolveIPv4, true));
     bool v4IsSet = config_v4.isNull();
     QHostAddress config_v6(gCoreContext->resolveSettingAddress(
                                            "BackendServerIP6",
                                            QString(),
-                                           gCoreContext->ResolveIPv6, true));
+                                           MythCoreContext::ResolveIPv6, true));
     bool v6IsSet = config_v6.isNull();
     bool allowLinkLocal = gCoreContext->GetBoolSetting("AllowLinkLocal", true);
 
     // loop through all available interfaces
     QList<QNetworkInterface> IFs = QNetworkInterface::allInterfaces();
-    for (const auto & qni : qAsConst(IFs))
+    for (const auto & qni : std::as_const(IFs))
     {
         if ((qni.flags() & QNetworkInterface::IsRunning) == 0)
             continue;
@@ -154,7 +156,7 @@ void ServerPool::SelectDefaultListen(bool force)
                     // has been set
                     LOG(VB_GENERAL, LOG_DEBUG,
                             QString("Adding link-local '%1' to address list.")
-                                .arg(PRETTYIP_(ip)));
+                                .arg(prettyip(ip)));
                     naList_4.append(*qnai);
                 }
 
@@ -174,27 +176,29 @@ void ServerPool::SelectDefaultListen(bool force)
                     {
                         LOG(VB_GENERAL, LOG_DEBUG,
                                 QString("Adding '%1' to address list.")
-                                    .arg(PRETTYIP_(ip)));
+                                    .arg(prettyip(ip)));
                         naList_4.append(*qnai);
                     }
                     else if (ip.isInSubnet(kLinkLocal))
                     {
                         LOG(VB_GENERAL, LOG_DEBUG,
                             QString("Adding link-local '%1' to address list.")
-                                    .arg(PRETTYIP_(ip)));
+                                    .arg(prettyip(ip)));
                         naList_4.append(*qnai);
                     }
                     else
                     {
                         LOG(VB_GENERAL, LOG_DEBUG, QString("Skipping "
                            "non-private address during IPv4 autoselection: %1")
-                                    .arg(PRETTYIP_(ip)));
+                                    .arg(prettyip(ip)));
                     }
                 }
 
                 else
+                {
                     LOG(VB_GENERAL, LOG_DEBUG, QString("Skipping address: %1")
-                                .arg(PRETTYIP_(ip)));
+                                .arg(prettyip(ip)));
+                }
 
             }
             else
@@ -246,21 +250,23 @@ void ServerPool::SelectDefaultListen(bool force)
                     {
                         LOG(VB_GENERAL, LOG_DEBUG,
                             QString("Adding link-local '%1' to address list.")
-                                .arg(PRETTYIP_(ip)));
+                                .arg(prettyip(ip)));
                     }
                     else
                     {
                         LOG(VB_GENERAL, LOG_DEBUG,
                             QString("Adding '%1' to address list.")
-                                .arg(PRETTYIP_(ip)));
+                                .arg(prettyip(ip)));
                     }
 
                     naList_6.append(*qnai);
                 }
 
                 else
+                {
                     LOG(VB_GENERAL, LOG_DEBUG, QString("Skipping address: %1")
-                                .arg(PRETTYIP_(ip)));
+                                .arg(prettyip(ip)));
+                }
             }
         }
     }
@@ -278,7 +284,7 @@ void ServerPool::SelectDefaultListen(bool force)
     {
         LOG(VB_GENERAL, LOG_CRIT, LOC + QString("Host is configured to listen "
                 "on %1, but address is not used on any local network "
-                "interfaces.").arg(PRETTYIP_(config_v6)));
+                "interfaces.").arg(prettyip(config_v6)));
     }
 
     // NOTE: there is no warning for the case where both defined addresses
@@ -310,7 +316,7 @@ QList<QHostAddress> ServerPool::DefaultListenIPv4(void)
     QReadLocker rlock(&naLock);
 
     QList<QHostAddress> alist;
-    for (const auto & nae : qAsConst(naList_4))
+    for (const auto & nae : std::as_const(naList_4))
         if (!alist.contains(nae.ip()))
             alist << nae.ip();
 
@@ -323,7 +329,7 @@ QList<QHostAddress> ServerPool::DefaultListenIPv6(void)
     QReadLocker rlock(&naLock);
 
     QList<QHostAddress> alist;
-    for (const auto & nae : qAsConst(naList_6))
+    for (const auto & nae : std::as_const(naList_6))
         if (!alist.contains(nae.ip()))
             alist << nae.ip();
 
@@ -347,7 +353,7 @@ QList<QHostAddress> ServerPool::DefaultBroadcastIPv4(void)
     QReadLocker rlock(&naLock);
 
     QList<QHostAddress> blist;
-    for (const auto & nae : qAsConst(naList_4))
+    for (const auto & nae : std::as_const(naList_4))
     {
         if (!blist.contains(nae.broadcast()) && (nae.prefixLength() != 32) &&
                 (nae.ip() != QHostAddress::LocalHost))
@@ -390,7 +396,7 @@ bool ServerPool::listen(QList<QHostAddress> addrs, quint16 port,
                         bool requireall, PoolServerType servertype)
 {
     m_port = port;
-    for (const auto & qha : qAsConst(addrs))
+    for (const auto & qha : std::as_const(addrs))
     {
         // If IPV4 support is disabled and this is an IPV4 address,
         // bypass this address
@@ -414,7 +420,7 @@ bool ServerPool::listen(QList<QHostAddress> addrs, quint16 port,
         {
             LOG(VB_GENERAL, LOG_INFO, QString("Listening on TCP%1 %2:%3")
                 .arg(servertype == kSSLServer ? " (SSL)" : "",
-                     PRETTYIP_(qha), QString::number(port)));
+                     prettyip(qha), QString::number(port)));
             if ((servertype == kTCPServer) || (servertype == kSSLServer))
                 m_tcpServers.append(server);
             if (m_port == 0)
@@ -424,7 +430,7 @@ bool ServerPool::listen(QList<QHostAddress> addrs, quint16 port,
         {
             LOG(VB_GENERAL, LOG_ERR,
                     QString("Failed listening on TCP %1:%2 - Error %3: %4")
-                        .arg(PRETTYIP_(qha))
+                        .arg(prettyip(qha))
                         .arg(port)
                         .arg(server->serverError())
                         .arg(server->errorString()));
@@ -436,7 +442,7 @@ bool ServerPool::listen(QList<QHostAddress> addrs, quint16 port,
             {
                 LOG(VB_GENERAL, LOG_ERR,
                     QString("Address %1 no longer exists - ignoring")
-                    .arg(PRETTYIP_(qha)));
+                    .arg(prettyip(qha)));
                 continue;
             }
 
@@ -475,7 +481,7 @@ bool ServerPool::listen(QStringList addrstr, quint16 port, bool requireall,
                         PoolServerType servertype)
 {
     QList<QHostAddress> addrs;
-    for (const auto & str : qAsConst(addrstr))
+    for (const auto & str : std::as_const(addrstr))
         addrs << QHostAddress(str);
     return listen(addrs, port, requireall, servertype);
 }
@@ -490,7 +496,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
                       bool requireall)
 {
     m_port = port;
-    for (const auto & qha : qAsConst(addrs))
+    for (const auto & qha : std::as_const(addrs))
     {
         // If IPV4 support is disabled and this is an IPV4 address,
         // bypass this address
@@ -508,7 +514,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
 
         if (qha.protocol() == QAbstractSocket::IPv6Protocol)
         {
-            for (const auto& iae : qAsConst(naList_6))
+            for (const auto& iae : std::as_const(naList_6))
             {
                 if (PrivUdpSocket::contains(iae, qha))
                 {
@@ -521,7 +527,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
         }
         else
         {
-            for (const auto& iae : qAsConst(naList_4))
+            for (const auto& iae : std::as_const(naList_4))
             {
                 if (PrivUdpSocket::contains(iae, qha))
                 {
@@ -539,13 +545,13 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
             {
                 LOG(VB_GENERAL, LOG_ERR,
                     QString("Failed to find local address to use for destination %1:%2.")
-                    .arg(PRETTYIP_(qha)).arg(port));
+                    .arg(prettyip(qha)).arg(port));
                 continue;
             }
 
             LOG(VB_GENERAL, LOG_DEBUG,
                 QString("Failed to find local address to use for destination %1:%2. Using wildcard.")
-                .arg(PRETTYIP_(qha)).arg(port));
+                .arg(prettyip(qha)).arg(port));
             host = wildcard;
         }
 
@@ -554,7 +560,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
         if (socket->bind(qha, port))
         {
             LOG(VB_GENERAL, LOG_INFO, QString("Binding to UDP %1:%2")
-                    .arg(PRETTYIP_(qha)).arg(port));
+                    .arg(prettyip(qha)).arg(port));
             m_udpSockets.append(socket);
             connect(socket, &QIODevice::readyRead,
                     this,   &ServerPool::newUdpDatagram);
@@ -563,7 +569,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
         {
             LOG(VB_GENERAL, LOG_ERR,
                     QString("Failed binding to UDP %1:%2 - Error %3: %4")
-                        .arg(PRETTYIP_(qha))
+                        .arg(prettyip(qha))
                         .arg(port)
                         .arg(socket->error())
                         .arg(socket->errorString()));
@@ -574,7 +580,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
             {
                 LOG(VB_GENERAL, LOG_ERR,
                     QString("Address %1 no longer exists - ignoring")
-                    .arg(PRETTYIP_(qha)));
+                    .arg(prettyip(qha)));
                 continue;
             }
 
@@ -596,7 +602,7 @@ bool ServerPool::bind(QList<QHostAddress> addrs, quint16 port,
 bool ServerPool::bind(QStringList addrstr, quint16 port, bool requireall)
 {
     QList<QHostAddress> addrs;
-    for (const auto & str : qAsConst(addrstr))
+    for (const auto & str : std::as_const(addrstr))
         addrs << QHostAddress(str);
     return bind(addrs, port, requireall);
 }
@@ -636,8 +642,8 @@ qint64 ServerPool::writeDatagram(const char * data, qint64 size,
         // Couldn't find an exact socket. See is there is a wildcard one.
         LOG(VB_GENERAL, LOG_DEBUG,
             QString("No exact socket match for %1:%2. Searching for wildcard.")
-            .arg(PRETTYIP_(addr)).arg(port));
-        for (auto *val : qAsConst(m_udpSockets))
+            .arg(prettyip(addr)).arg(port));
+        for (auto *val : std::as_const(m_udpSockets))
         {
             if ((addr.protocol() == QAbstractSocket::IPv6Protocol &&
                  val->host().ip() == QHostAddress::AnyIPv6) ||
@@ -669,7 +675,7 @@ qint64 ServerPool::writeDatagram(const QByteArray &datagram,
     return writeDatagram(datagram.data(), datagram.size(), addr, port);
 }
 
-void ServerPool::newTcpConnection(qt_socket_fd_t socket)
+void ServerPool::newTcpConnection(qintptr socket)
 {
     // Ignore connections from an SSL server for now, these are only handled
     // by HttpServer which overrides newTcpConnection
@@ -684,7 +690,9 @@ void ServerPool::newTcpConnection(qt_socket_fd_t socket)
         emit newConnection(qsock);
     }
     else
+    {
         delete qsock;
+    }
 }
 
 void ServerPool::newUdpDatagram(void)

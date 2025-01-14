@@ -22,36 +22,35 @@
 #include <chrono>
 
 // QT headers
-#include <QObject>
-#include <QIODevice>
 #include <QFile>
+#include <QIODevice>
+#include <QObject>
 #include <QRegularExpression>
 #include <QTimer>
 
-// Myth headers
+// MythTV headers
 #include <mythconfig.h>
-#include <mythcontext.h>
-#include <audiooutput.h>
-#include <audiooutpututil.h>
-#include <mythlogging.h>
-#include <decoderhandler.h>
-#include <mythavutil.h>
+#include <libmyth/audio/audiooutput.h>
+#include <libmyth/audio/audiooutpututil.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythmetadata/metaio.h>
+#include <libmythmetadata/metaioavfcomment.h>
+#include <libmythmetadata/metaioflacvorbis.h>
+#include <libmythmetadata/metaioid3.h>
+#include <libmythmetadata/metaiomp4.h>
+#include <libmythmetadata/metaiooggvorbis.h>
+#include <libmythmetadata/metaiowavpack.h>
+#include <libmythtv/mythavutil.h>
 
 // Mythmusic Headers
 #include "avfdecoder.h"
-#include "metaio.h"
-#include "metaioavfcomment.h"
-#include "metaioid3.h"
-#include "metaioflacvorbis.h"
-#include "metaiooggvorbis.h"
-#include "metaiomp4.h"
-#include "metaiowavpack.h"
 #include "decoderhandler.h"
 #include "musicplayer.h"
 
 extern "C" {
-#include "libavformat/avio.h"
-#include "libavutil/opt.h"
+    #include <libavformat/avio.h>
+    #include <libavutil/opt.h>
 }
 
 /****************************************************************************/
@@ -150,12 +149,13 @@ ShoutCastMetaMap ShoutCastMetaParser::parseMeta(const QString &mdata)
         auto match = rx.match(title);
         if (match.hasMatch())
         {
-            LOG(VB_PLAYBACK, LOG_INFO, QString("ShoutCast: Meta     : '%1'")
+            LOG(VB_PLAYBACK, LOG_DEBUG, QString("ShoutCast: Meta     : '%1'")
                     .arg(mdata));
-            LOG(VB_PLAYBACK, LOG_INFO,
-                QString("ShoutCast: Parsed as: '%1' by '%2'")
-                    .arg(match.captured(m_metaTitlePos),
-                         match.captured(m_metaArtistPos)));
+            LOG(VB_PLAYBACK, LOG_DEBUG,
+                QString("ShoutCast: Parsed as: '%1' by '%2' on '%3'")
+                .arg(m_metaTitlePos ? match.captured(m_metaTitlePos) : "",
+                     m_metaArtistPos ? match.captured(m_metaArtistPos) : "",
+                     m_metaAlbumPos ? match.captured(m_metaAlbumPos) : ""));
 
             if (m_metaTitlePos > 0)
                 result["title"] = match.captured(m_metaTitlePos);
@@ -173,7 +173,7 @@ ShoutCastMetaMap ShoutCastMetaParser::parseMeta(const QString &mdata)
 
 static void myth_av_log(void *ptr, int level, const char* fmt, va_list vl)
 {
-    if (VERBOSE_LEVEL_NONE)
+    if (VERBOSE_LEVEL_NONE())
         return;
 
     static QString   s_fullLine("");
@@ -218,7 +218,7 @@ static void myth_av_log(void *ptr, int level, const char* fmt, va_list vl)
             .arg(reinterpret_cast<size_t>(avc),QT_POINTER_SIZE,8,QChar('0'));
     }
 
-    s_fullLine += QString::asprintf(fmt, vl);
+    s_fullLine += QString::vasprintf(fmt, vl);
     if (s_fullLine.endsWith("\n"))
     {
         LOG(verbose_mask, verbose_level, s_fullLine.trimmed());
@@ -228,13 +228,11 @@ static void myth_av_log(void *ptr, int level, const char* fmt, va_list vl)
 }
 
 avfDecoder::avfDecoder(const QString &file, DecoderFactory *d, AudioOutput *o) :
-    Decoder(d, o)
+    Decoder(d, o),
+    m_outputBuffer((uint8_t *)av_malloc(AudioOutput::kMaxSizeBuffer))
 {
     MThread::setObjectName("avfDecoder");
     setURL(file);
-
-    m_outputBuffer =
-        (uint8_t *)av_malloc(AudioOutput::kMaxSizeBuffer);
 
     bool debug = VERBOSE_LEVEL_CHECK(VB_LIBAV, LOG_ANY);
     av_log_set_level((debug) ? AV_LOG_DEBUG : AV_LOG_ERROR);
@@ -249,7 +247,7 @@ avfDecoder::~avfDecoder(void)
         deinit();
 
     if (m_outputBuffer)
-        av_freep(&m_outputBuffer);
+        av_freep(reinterpret_cast<void*>(&m_outputBuffer));
 
     delete m_inputContext;
 }
@@ -315,7 +313,7 @@ bool avfDecoder::initialize()
             mdata.setAlbum("");
             mdata.setLength(-1ms);
 
-            DecoderHandlerEvent ev(DecoderHandlerEvent::Meta, mdata);
+            DecoderHandlerEvent ev(DecoderHandlerEvent::kMeta, mdata);
             dispatch(ev);
         }
     }
@@ -331,7 +329,7 @@ bool avfDecoder::initialize()
 
     // let FFmpeg finds the best audio stream (should only be one), also catter
     // should the file/stream not be an audio one
-    AVCodec *codec = nullptr;
+    const AVCodec *codec = nullptr;
     int selTrack = av_find_best_stream(m_inputContext->getContext(), AVMEDIA_TYPE_AUDIO,
                                        -1, -1, &codec, 0);
 
@@ -358,7 +356,7 @@ bool avfDecoder::initialize()
     }
 
     m_freq = m_audioDec->sample_rate;
-    m_channels = m_audioDec->channels;
+    m_channels = m_audioDec->ch_layout.nb_channels;
 
     if (m_channels <= 0)
     {
@@ -380,7 +378,7 @@ bool avfDecoder::initialize()
         return false;
     }
 
-    const AudioSettings settings(format, m_audioDec->channels,
+    const AudioSettings settings(format, m_audioDec->ch_layout.nb_channels,
                                  m_audioDec->codec_id,
                                  m_audioDec->sample_rate, false);
 
@@ -430,12 +428,15 @@ void avfDecoder::run()
         return;
     }
 
-    AVPacket pkt;
-    AVPacket tmp_pkt;
-    memset(&pkt, 0, sizeof(AVPacket));
-    av_init_packet(&pkt);
+    AVPacket *pkt = av_packet_alloc();
+    AVPacket *tmp_pkt = av_packet_alloc();
+    if ((pkt == nullptr) || (tmp_pkt == nullptr))
+    {
+        LOG(VB_GENERAL, LOG_ERR, "packet allocation failed");
+        return;
+    }
 
-    m_stat = DecoderEvent::Decoding;
+    m_stat = DecoderEvent::kDecoding;
     {
         DecoderEvent e((DecoderEvent::Type) m_stat);
         dispatch(e);
@@ -456,12 +457,15 @@ void avfDecoder::run()
                 LOG(VB_GENERAL, LOG_ERR, "Error seeking");
 
             m_seekTime = -1.0;
+            // Play all pending and restart buffering, else REW/FFWD
+            // takes 1 second per keypress at the "buffered" wait below.
+            output()->Drain();  // (see issue #784)
         }
 
         while (!m_finish && !m_userStop && m_seekTime <= 0.0)
         {
             // Read a packet from the input context
-            int res = av_read_frame(m_inputContext->getContext(), &pkt);
+            int res = av_read_frame(m_inputContext->getContext(), pkt);
             if (res < 0)
             {
                 if (res != AVERROR_EOF)
@@ -474,11 +478,9 @@ void avfDecoder::run()
                 break;
             }
 
-            av_init_packet(&tmp_pkt);
-            tmp_pkt.data = pkt.data;
-            tmp_pkt.size = pkt.size;
+            av_packet_ref(tmp_pkt, pkt);
 
-            while (tmp_pkt.size > 0 && !m_finish &&
+            while (tmp_pkt->size > 0 && !m_finish &&
                    !m_userStop && m_seekTime <= 0.0)
             {
                 int data_size = 0;
@@ -486,14 +488,14 @@ void avfDecoder::run()
                 int ret = output()->DecodeAudio(m_audioDec,
                                                 m_outputBuffer,
                                                 data_size,
-                                                &tmp_pkt);
+                                                tmp_pkt);
 
                 if (ret < 0)
                     break;
 
                 // Increment the output pointer and count
-                tmp_pkt.size -= ret;
-                tmp_pkt.data += ret;
+                tmp_pkt->size -= ret;
+                tmp_pkt->data += ret;
 
                 if (data_size <= 0)
                     continue;
@@ -501,7 +503,7 @@ void avfDecoder::run()
                 output()->AddData(m_outputBuffer, data_size, -1ms, 0);
             }
 
-            av_packet_unref(&pkt);
+            av_packet_unref(pkt);
 
             // Wait until we need to decode or supply more samples
             while (!m_finish && !m_userStop && m_seekTime <= 0.0)
@@ -511,7 +513,8 @@ void avfDecoder::run()
                 if (buffered < 1s)
                     break;
                 // wait
-                const struct timespec ns {0, (buffered.count() - 1000) * 1000000};
+                long count = buffered.count();
+                const struct timespec ns {0, (count - 1000) * 1000000};
                 nanosleep(&ns, nullptr);
             }
         }
@@ -528,15 +531,17 @@ void avfDecoder::run()
     }
 
     if (m_finish)
-        m_stat = DecoderEvent::Finished;
+        m_stat = DecoderEvent::kFinished;
     else if (m_userStop)
-        m_stat = DecoderEvent::Stopped;
+        m_stat = DecoderEvent::kStopped;
 
     {
         DecoderEvent e((DecoderEvent::Type) m_stat);
         dispatch(e);
     }
 
+    av_packet_free(&pkt);
+    av_packet_free(&tmp_pkt);
     deinit();
     RunEpilog();
 }
@@ -547,27 +552,32 @@ void avfDecoder::checkMetatdata(void)
 
     if (av_opt_get(m_inputContext->getContext(), "icy_metadata_packet", AV_OPT_SEARCH_CHILDREN, &pdata) >= 0)
     {
-        QString s = QString::fromUtf8((const char*) pdata);
+        QString shout = QString::fromUtf8((const char*) pdata);
 
-        if (m_lastMetadata != s)
+        if (m_lastMetadata != shout)
         {
-            m_lastMetadata = s;
-
-            LOG(VB_PLAYBACK, LOG_INFO, QString("avfDecoder: shoutcast metadata changed - %1").arg(m_lastMetadata));
-
+            m_lastMetadata = shout;
             ShoutCastMetaParser parser;
             parser.setMetaFormat(gPlayer->getDecoderHandler()->getMetadata().MetadataFormat());
+            ShoutCastMetaMap meta_map = parser.parseMeta(shout);
 
-            ShoutCastMetaMap meta_map = parser.parseMeta(m_lastMetadata);
+            QString parsed =  meta_map["title"] + "\\" + meta_map["artist"] + "\\" + meta_map["album"];
+            if (m_lastMetadataParsed != parsed)
+            {
+                m_lastMetadataParsed = parsed;
 
-            MusicMetadata mdata =  gPlayer->getDecoderHandler()->getMetadata();
-            mdata.setTitle(meta_map["title"]);
-            mdata.setArtist(meta_map["artist"]);
-            mdata.setAlbum(meta_map["album"]);
-            mdata.setLength(-1ms);
+                LOG(VB_PLAYBACK, LOG_INFO, QString("avfDecoder: shoutcast metadata changed - %1").arg(shout));
+                LOG(VB_PLAYBACK, LOG_INFO, QString("avfDecoder: new metadata (%1)").arg(parsed));
 
-            DecoderHandlerEvent ev(DecoderHandlerEvent::Meta, mdata);
-            dispatch(ev);
+                MusicMetadata mdata =  gPlayer->getDecoderHandler()->getMetadata();
+                mdata.setTitle(meta_map["title"]);
+                mdata.setArtist(meta_map["artist"]);
+                mdata.setAlbum(meta_map["album"]);
+                mdata.setLength(-1ms);
+
+                DecoderHandlerEvent ev(DecoderHandlerEvent::kMeta, mdata);
+                dispatch(ev);
+            }
         }
 
         av_free(pdata);
@@ -577,18 +587,14 @@ void avfDecoder::checkMetatdata(void)
     {
         int available = (int) (m_inputContext->getContext()->pb->buf_end - m_inputContext->getContext()->pb->buffer);
         int maxSize = m_inputContext->getContext()->pb->buffer_size;
-        DecoderHandlerEvent ev(DecoderHandlerEvent::BufferStatus, available, maxSize);
+        DecoderHandlerEvent ev(DecoderHandlerEvent::kBufferStatus, available, maxSize);
         dispatch(ev);
     }
 }
 
 bool avfDecoderFactory::supports(const QString &source) const
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList list = extension().split("|", QString::SkipEmptyParts);
-#else
     QStringList list = extension().split("|", Qt::SkipEmptyParts);
-#endif
     return std::any_of(list.cbegin(), list.cend(),
                        [source](const auto& str)
                            { return str == source.right(str.length()).toLower(); } );

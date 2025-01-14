@@ -5,11 +5,7 @@
 
 // Qt headers
 #include <QList>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QObject>
 #include <QStringList>
 
@@ -18,7 +14,7 @@ class QTimer;
 // MythTV headers
 #include "mythbaseexp.h"
 
-enum CHECKED_STATE {CHECKED = 0, UNCHECKED, NOTCHECKABLE };
+enum CHECKED_STATE : std::uint8_t {CHECKED = 0, UNCHECKED, NOTCHECKABLE };
 
 class QTcpSocket;
 
@@ -58,7 +54,7 @@ class MBASE_PUBLIC LCDMenuItem
     unsigned int m_scrollPosition {0};
 };
 
-enum TEXT_ALIGNMENT {ALIGN_LEFT, ALIGN_RIGHT, ALIGN_CENTERED };
+enum TEXT_ALIGNMENT : std::uint8_t {ALIGN_LEFT, ALIGN_RIGHT, ALIGN_CENTERED };
 
 class MBASE_PUBLIC LCDTextItem
 {
@@ -96,7 +92,7 @@ class MBASE_PUBLIC LCDTextItem
 };
 
 //only one active at a time
-enum LCDSpeakerSet {
+enum LCDSpeakerSet : std::uint8_t {
     SPEAKER_MASK = 0x00000030,
     SPEAKER_LR = 1 << 4,
     SPEAKER_51 = 2 << 4,
@@ -128,7 +124,7 @@ enum LCDVideoFormatSet {
 };
 
 //only one active at a time
-enum LCDTunerSet {
+enum LCDTunerSet : std::uint16_t {
     TUNER_MASK = 0x00000080 | 0x00000800 | 0x00001000,
     TUNER_SRC  = 0x00000080,
     TUNER_SRC1 = 0x00000800,
@@ -136,7 +132,7 @@ enum LCDTunerSet {
 };
 
 //only one active at a time
-enum LCDVideoSourceSet {
+enum LCDVideoSourceSet : std::uint16_t {
     VSRC_MASK = 0x00000100 | 0x00000200,
     VSRC_FIT  = 0x00000100,
     VSRC_TV   = 0x00000200,
@@ -158,7 +154,7 @@ enum LCDVariousFlags {
 
 
 //only one active at a time
-enum LCDFunctionSet {
+enum LCDFunctionSet : std::uint8_t {
     //0=none, 1=music, 2=movie, 3=photo, 4=CD/DVD, 5=TV, 6=Web, 7=News/Weather  * 2
     FUNC_MASK = 0xE,
     FUNC_MUSIC = 1 << 1,
@@ -185,13 +181,13 @@ class MBASE_PUBLIC LCD : public QObject
   public:
    ~LCD() override;
 
-    enum {
+    enum : std::uint8_t {
         MUSIC_REPEAT_NONE  = 0,
         MUSIC_REPEAT_TRACK = 1,
         MUSIC_REPEAT_ALL   = 2,
     };
 
-    enum {
+    enum : std::uint8_t {
         MUSIC_SHUFFLE_NONE  = 0,
         MUSIC_SHUFFLE_RAND  = 1,
         MUSIC_SHUFFLE_SMART = 2,
@@ -320,11 +316,7 @@ signals:
 
   private:
     QTcpSocket *m_socket        {nullptr};
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex   m_socketLock       {QMutex::Recursive};
-#else
     QRecursiveMutex m_socketLock;
-#endif
     QString  m_hostname         {"localhost"};
     uint     m_port             {6545};
     bool     m_connected        {false};

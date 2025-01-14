@@ -18,10 +18,10 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <iostream>
-#include "musicmetadata.h"
-#include "metadatagrabber.h"
+#include "libmythmetadata/musicmetadata.h"
+#include "libmythmetadata/metadatagrabber.h"
 
 class TestMetadataGrabber : public QObject
 {

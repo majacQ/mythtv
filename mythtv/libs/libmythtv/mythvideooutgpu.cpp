@@ -1,17 +1,22 @@
 // MythTV
-#include "mythlogging.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythpaintergpu.h"
+
 #include "mythplayer.h"
-#include "mythpaintergpu.h"
 #include "mythvideogpu.h"
 #include "mythvideooutgpu.h"
 
+#ifdef _WIN32
+#include "libmythui/mythpainter_d3d9.h"
+#include "videoout_d3d.h"
+#endif
 #ifdef USING_OPENGL
-#include "opengl/mythpainteropengl.h"
+#include "libmythui/opengl/mythpainteropengl.h"
 #include "opengl/mythvideooutopengl.h"
 #endif
 #ifdef USING_VULKAN
-#include "vulkan/mythpaintervulkan.h"
+#include "libmythui/vulkan/mythpaintervulkan.h"
 #include "vulkan/mythvideooutputvulkan.h"
 #endif
 
@@ -54,8 +59,10 @@ MythVideoOutputGPU *MythVideoOutputGPU::Create(MythMainWindow* MainWindow, MythR
     QStringList renderers;
 
 #ifdef _WIN32
-    if (render->Type() == kRenderDirect3D9)
-        renderers += VideoOutputD3D::GetAllowedRenderers(CodecID, VideoDispDim);
+//    auto * d3drender = dynamic_cast<MythRenderD3D9*>(Render);
+//    auto * d3dpainter = dynamic_cast<MythD3D9Painter*>(Painter);
+//    if (Render->Type() == kRenderDirect3D9)
+//        renderers += VideoOutputD3D::GetAllowedRenderers(CodecID, VideoDispDim);
 #endif
 
 #ifdef USING_OPENGL
@@ -132,10 +139,13 @@ MythVideoOutputGPU *MythVideoOutputGPU::Create(MythMainWindow* MainWindow, MythR
         MythVideoOutputGPU* video = nullptr;
 
 #ifdef _WIN32
-        if (renderer == "direct3d")
-            video = new VideoOutputD3D();
+//        if (renderer == "direct3d")
+//            video = new VideoOutputD3D(MainWindow, d3drender,
+//                                       d3dpainter, Display,
+//                                       videoprofile, renderer);
 #endif
 #ifdef USING_OPENGL
+        // cppcheck-suppress knownConditionTrueFalse
         if (!video && renderer.contains("opengl") && openglrender)
         {
             video = new MythVideoOutputOpenGL(MainWindow, openglrender,
@@ -430,7 +440,8 @@ void MythVideoOutputGPU::SetReferenceFrames(int ReferenceFrames)
 }
 
 bool MythVideoOutputGPU::InputChanged(QSize VideoDim, QSize VideoDispDim,
-                                      float Aspect, MythCodecID CodecId, bool& AspectOnly, int ReferenceFrames,
+                                      float VideoAspect, MythCodecID CodecId,
+                                      bool& AspectOnly, int ReferenceFrames,
                                       bool ForceChange)
 {
     QSize currentvideodim     = GetVideoDim();
@@ -454,7 +465,7 @@ bool MythVideoOutputGPU::InputChanged(QSize VideoDim, QSize VideoDispDim,
         .arg(toString(currentcodec)).arg(static_cast<double>(currentaspect))
         .arg(VideoDispDim.width()).arg(VideoDispDim.height())
         .arg(VideoDim.width()).arg(VideoDim.height())
-        .arg(toString(CodecId)).arg(static_cast<double>(Aspect))
+        .arg(toString(CodecId)).arg(static_cast<double>(VideoAspect))
         .arg(m_maxReferenceFrames).arg(ReferenceFrames));
 
     bool cidchanged = (CodecId != currentcodec);
@@ -482,7 +493,7 @@ bool MythVideoOutputGPU::InputChanged(QSize VideoDim, QSize VideoDispDim,
     m_newCodecId= CodecId;
     m_newVideoDim = VideoDim;
     m_newVideoDispDim = VideoDispDim;
-    m_newAspect = Aspect;
+    m_newAspect = VideoAspect;
     return true;
 }
 
@@ -508,7 +519,7 @@ bool MythVideoOutputGPU::ProcessInputChange()
         // to be inconsistent.
         SourceChanged(m_newVideoDim, m_newVideoDispDim, m_newAspect);
         AVCodecID avCodecId = myth2av_codecid(m_newCodecId);
-        AVCodec* codec = avcodec_find_decoder(avCodecId);
+        const AVCodec* codec = avcodec_find_decoder(avCodecId);
         QString codecName;
         if (codec)
             codecName = codec->name;

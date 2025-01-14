@@ -1,13 +1,13 @@
 #ifndef MYTH_DATE_H
 #define MYTH_DATE_H
 
-#include <chrono>
-using namespace std::chrono_literals;
+#include <cstdint>
 
 #include <QDateTime>
 #include <QString>
 
 #include "mythbaseexp.h"
+#include "mythchrono.h"
 
 namespace MythDate
 {
@@ -45,7 +45,7 @@ MBASE_PUBLIC QDateTime as_utc(const QDateTime &dt);
 MBASE_PUBLIC QDateTime fromString(const QString &dtstr);
 /// Converts dy in format to QDateTime
 MBASE_PUBLIC QDateTime fromString(const QString &dt, const QString &format);
-MBASE_PUBLIC QDateTime fromSecsSinceEpoch(uint seconds);
+MBASE_PUBLIC QDateTime fromSecsSinceEpoch(int64_t seconds);
 /// Returns formatted string representing the time.
 MBASE_PUBLIC QString toString(
     const QDateTime &datetime, uint format = MythDate::kDateTimeFull);
@@ -60,6 +60,24 @@ MBASE_PUBLIC std::chrono::milliseconds currentMSecsSinceEpochAsDuration(void);
 MBASE_PUBLIC std::chrono::seconds secsInPast (const QDateTime& past);
 MBASE_PUBLIC std::chrono::seconds secsInFuture (const QDateTime& future);
 
-};
+MBASE_PUBLIC QString formatTime(std::chrono::milliseconds msecs,
+                                QString fmt = "HH:mm:ss");
+
+} // namespace MythDate
+
+/**
+\brief balanced ternary (three way) comparison
+This is equivalent to C++20's operator <=>. See also ternarycompare.h.
+
+Less than means earlier and greater than means later.
+
+Since Qt 5.14 invalid QDateTimes compare equal and are less than all valid QDateTimes.
+*/
+inline int ternary_compare(const QDateTime& a, const QDateTime& b)
+{
+    if (a < b) return -1;
+    if (a > b) return +1;
+    return 0; // a == b
+}
 
 #endif // MYTH_DATE_H

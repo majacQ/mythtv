@@ -1,7 +1,8 @@
 
+#include "libmythbase/mythlogging.h"
+
 #include "mythmainwindow.h"
 #include "mythuispinbox.h"
-#include "mythlogging.h"
 #include "mythuibutton.h"
 #include "mythuitextedit.h"
 #include "mythuitext.h"
@@ -232,7 +233,7 @@ bool MythUISpinBox::keyPressEvent(QKeyEvent *event)
     if (!isNumber)
         return MythUIButtonList::keyPressEvent(event);
 
-    for (const QString& action : qAsConst(actions))
+    for (const QString& action : std::as_const(actions))
     {
         if (action >= ACTION_0 && action <= ACTION_9)
         {
@@ -286,17 +287,11 @@ SpinBoxEntryDialog::SpinBoxEntryDialog(MythScreenStack *parent, const char *name
     : MythScreenType(parent, name, false),
         m_parentList(parentList),
         m_searchText(std::move(searchText)),
-        m_entryEdit(nullptr),
-        m_cancelButton(nullptr),
-        m_okButton(nullptr),
-        m_rulesText(nullptr),
-        m_okClicked(false),
+        m_selection(parentList->GetCurrentPos()),
         m_low(low),
         m_high(high),
         m_step(step)
-
 {
-    m_selection = parentList->GetCurrentPos();
 }
 
 

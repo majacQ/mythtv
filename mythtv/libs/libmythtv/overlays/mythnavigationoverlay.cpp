@@ -1,11 +1,11 @@
 // MythTV
-#include "mythmainwindow.h"
-#include "mythdialogbox.h"
-#include "mythuigroup.h"
-#include "mythuibutton.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuigroup.h"
 #include "mythplayerui.h"
-#include "tv_play.h"
 #include "overlays/mythnavigationoverlay.h"
+#include "tv_play.h"
 
 MythNavigationOverlay::MythNavigationOverlay(MythMainWindow *MainWindow, TV* Tv,
                                              MythPlayerUI *Player, const QString& Name, OSD* Osd)
@@ -61,7 +61,7 @@ bool MythNavigationOverlay::Create()
         if (i != m_visibleGroup)
             group->SetVisible(false);
         QList<MythUIType *> * children = group->GetAllChildren();
-        for (auto * child : qAsConst(*children))
+        for (auto * child : std::as_const(*children))
         {
             if (child != more)
             {
@@ -93,7 +93,7 @@ bool MythNavigationOverlay::keyPressEvent(QKeyEvent* Event)
 
         for (int i = 0; i < actions.size() && !handled; i++)
         {
-            QString action = actions[i];
+            const QString& action = actions[i];
             if (action == "ESCAPE" )
             {
                 SendResult(-1, action);

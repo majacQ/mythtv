@@ -1,33 +1,32 @@
 // POSIX headers
 #include <unistd.h>
 
-// Std C headers
+// C++ headers
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
-
-// C++ headers
 #include <fstream>
 
 // Qt headers
-#include <QTextStream>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QList>
 #include <QMap>
-#include <QDir>
+#include <QTextStream>
 
 // MythTV headers
-#include "mythmiscutil.h"
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "mythdbcon.h"
-#include "compat.h"
-#include "mythdate.h"
-#include "mythdirs.h"
-#include "mythdb.h"
-#include "mythsystemlegacy.h"
-#include "videosource.h" // for is_grabber..
-#include "mythcorecontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythtv/videosource.h" // for is_grabber..
 
 // filldata headers
 #include "filldata.h"
@@ -95,19 +94,29 @@ bool FillData::GrabDataFromFile(int id, const QString &filename)
         return false;
 
     m_chanData.handleChannels(id, &chanlist);
-    if (proglist.count() == 0)
+    if (m_onlyUpdateChannels)
     {
-        LOG(VB_GENERAL, LOG_INFO, "No programs found in data.");
-        m_endOfData = true;
+        if (proglist.count() != 0)
+        {
+            LOG(VB_GENERAL, LOG_INFO, "Skipping program guide updates");
+        }
     }
     else
     {
-        ProgramData::HandlePrograms(id, proglist);
+        if (proglist.count() == 0)
+        {
+            LOG(VB_GENERAL, LOG_INFO, "No programs found in data.");
+            m_endOfData = true;
+        }
+        else
+        {
+            ProgramData::HandlePrograms(id, proglist);
+        }
     }
     return true;
 }
 
-bool FillData::GrabData(const Source& source, int offset)
+bool FillData::GrabData(const DataSource& source, int offset)
 {
     QString xmltv_grabber = source.xmltvgrabber;
 
@@ -144,8 +153,11 @@ bool FillData::GrabData(const Source& source, int offset)
     QString command = QString("nice %1 --config-file '%2' --output %3")
         .arg(xmltv_grabber, configfile, filename);
 
-
-    if (source.xmltvgrabber_prefmethod != "allatonce"  || m_noAllAtOnce)
+    if (m_onlyUpdateChannels && source.xmltvgrabber_apiconfig)
+    {
+        command += " --list-channels";
+    }
+    else if (source.xmltvgrabber_prefmethod != "allatonce"  || m_noAllAtOnce || m_onlyUpdateChannels)
     {
         // XMLTV Docs don't recommend grabbing one day at a
         // time but the current MythTV code is heavily geared
@@ -226,14 +238,14 @@ bool FillData::GrabData(const Source& source, int offset)
     return succeeded;
 }
 
-/** \fn FillData::Run(SourceList &sourcelist)
+/** \fn FillData::Run(DataSourceList &sourcelist)
  *  \brief Goes through the sourcelist and updates its channels with
  *         program info grabbed with the associated grabber.
  *  \return true if there were no failures
  */
-bool FillData::Run(SourceList &sourcelist)
+bool FillData::Run(DataSourceList &sourcelist)
 {
-    SourceList::iterator it;
+    DataSourceList::iterator it;
 
     QString status;
     QString querystr;
@@ -334,7 +346,7 @@ bool FillData::Run(SourceList &sourcelist)
             else
             {
                 LOG(VB_GENERAL, LOG_INFO,
-                    QString("No channels are configured to use grabber."));
+                    QString("No channels are configured to use grabber (none have XMLTVIDs)."));
             }
         }
         else
@@ -385,6 +397,12 @@ bool FillData::Run(SourceList &sourcelist)
                     if (capability == "cache")
                         (*it).xmltvgrabber_cache = true;
 
+                    if (capability == "apiconfig")
+                        (*it).xmltvgrabber_apiconfig = true;
+
+                    if (capability == "lineups")
+                        (*it).xmltvgrabber_lineups = true;
+
                     if (capability == "preferredmethod")
                         hasprefmethod = true;
                 }
@@ -420,7 +438,7 @@ bool FillData::Run(SourceList &sourcelist)
 
         m_needPostGrabProc |= true;
 
-        if ((*it).xmltvgrabber_prefmethod == "allatonce" && !m_noAllAtOnce)
+        if ((*it).xmltvgrabber_prefmethod == "allatonce" && !m_noAllAtOnce && !m_onlyUpdateChannels)
         {
             if (!GrabData(*it, 0))
                 ++failures;
@@ -460,8 +478,7 @@ bool FillData::Run(SourceList &sourcelist)
                 {
                     QDate newDate = MythDate::current().date();
                     i += (newDate.daysTo(qCurrentDate));
-                    if (i < 0)
-                        i = 0;
+                    i = std::max(i, 0);
                     qCurrentDate = newDate;
                 }
 
@@ -688,7 +705,7 @@ bool FillData::Run(SourceList &sourcelist)
 
     if (!m_fatalErrors.empty())
     {
-        for (const QString& error : qAsConst(m_fatalErrors))
+        for (const QString& error : std::as_const(m_fatalErrors))
         {
             LOG(VB_GENERAL, LOG_CRIT, LOC + "Encountered Fatal Error: " + error);
         }

@@ -9,8 +9,8 @@
 #include "mythmainwindow.h"
 
 // MythDB headers
-#include "compat.h"
-#include "mythlogging.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythlogging.h"
 
 class MythQtImage : public MythImage
 {
@@ -106,7 +106,9 @@ void MythQtPainter::SetClipRect(const QRect clipRect)
             m_clipRegion = m_clipRegion.united(clipRect);
     }
     else
+    {
         m_painter->setClipping(false);
+    }
 }
 
 void MythQtPainter::DrawImage(const QRect r, MythImage *im,
@@ -124,7 +126,7 @@ void MythQtPainter::DrawImage(const QRect r, MythImage *im,
     if (qim->NeedsRegen())
         qim->RegeneratePixmap();
 
-    m_painter->setOpacity(static_cast<float>(alpha) / 255.0F);
+    m_painter->setOpacity(static_cast<qreal>(alpha) / 255.0);
     m_painter->drawPixmap(r.topLeft(), *(qim->GetPixmap()), src);
     m_painter->setOpacity(1.0);
 }

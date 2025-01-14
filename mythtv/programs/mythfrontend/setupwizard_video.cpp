@@ -1,19 +1,20 @@
-// qt
+// Qt
+#include <QFileInfo>
 #include <QString>
 #include <QVariant>
-#include <QFileInfo>
 
-// myth
-#include "mythcontext.h"
-#include "mythdbcon.h"
-#include "mythdirs.h"
-#include "mythprogressdialog.h"
-#include "mythcoreutil.h"
-#include "videoutils.h"
-#include "remotefile.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythui/mythprogressdialog.h"
 
-#include "setupwizard_general.h"
+// MythFrontend
 #include "setupwizard_audio.h"
+#include "setupwizard_general.h"
 #include "setupwizard_video.h"
 
 const QString VIDEO_SAMPLE_HD_LOCATION =
@@ -92,7 +93,7 @@ void VideoSetupWizard::loadData(void)
 {
     QStringList profiles = MythVideoProfile::GetProfiles(gCoreContext->GetHostName());
 
-    for (const auto & prof : qAsConst(profiles))
+    for (const auto & prof : std::as_const(profiles))
     {
         auto *item = new MythUIButtonListItem(m_playbackProfileButtonList, prof);
         item->SetData(prof);
@@ -169,7 +170,9 @@ void VideoSetupWizard::testSDVideo(void)
         DownloadSample(VIDEO_SAMPLE_SD_LOCATION, VIDEO_SAMPLE_SD_FILENAME);
     }
     else
+    {
         playVideoTest(desc, title, sdtestfile);
+    }
 }
 
 void VideoSetupWizard::testHDVideo(void)
@@ -190,7 +193,9 @@ void VideoSetupWizard::testHDVideo(void)
         DownloadSample(VIDEO_SAMPLE_HD_LOCATION, VIDEO_SAMPLE_HD_FILENAME);
     }
     else
+    {
         playVideoTest(desc, title, hdtestfile);
+    }
 }
 
 void VideoSetupWizard::playVideoTest(const QString& desc, const QString& title, const QString& file)
@@ -229,17 +234,13 @@ void VideoSetupWizard::initProgressDialog()
 
 void VideoSetupWizard::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(e);
         if (me == nullptr)
             return;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
         if (tokens.isEmpty())
             return;
 

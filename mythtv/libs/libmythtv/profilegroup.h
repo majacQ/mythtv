@@ -5,7 +5,7 @@
 #include <QCoreApplication>
 
 #include "mythtvexp.h"
-#include "standardsettings.h"
+#include "libmythui/standardsettings.h"
 
 class ProfileGroup;
 

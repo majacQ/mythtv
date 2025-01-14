@@ -1,18 +1,18 @@
 #include <iostream>
 
-// qt
-#include <QString>
+// Qt
 #include <QString>
 #include <QStringList>
 
-// myth
-#include "mythcorecontext.h"
-#include "mythsystemlegacy.h"
-#include "mythdbcon.h"
-#include "mythdirs.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythmetadata/metadatacommon.h"
+#include "libmythui/mythprogressdialog.h"
 
-#include "mythprogressdialog.h"
-#include "metadatacommon.h"
+// MythFrontend
 #include "grabbersettings.h"
 
 // ---------------------------------------------------
@@ -75,7 +75,7 @@ void GrabberSettings::Load(void)
 
 void GrabberSettings::Init(void)
 {
-    for (const auto & grabber : qAsConst(m_movieGrabberList))
+    for (const auto & grabber : std::as_const(m_movieGrabberList))
     {
         InfoMap map;
         grabber.toMap(map);
@@ -87,7 +87,7 @@ void GrabberSettings::Init(void)
 
     m_movieGrabberList.clear();
 
-    for (const auto & grabber: qAsConst(m_tvGrabberList))
+    for (const auto & grabber: std::as_const(m_tvGrabberList))
     {
         InfoMap map;
         grabber.toMap(map);
@@ -99,7 +99,7 @@ void GrabberSettings::Init(void)
 
     m_tvGrabberList.clear();
 
-    for (const auto & grabber : qAsConst(m_gameGrabberList))
+    for (const auto & grabber : std::as_const(m_gameGrabberList))
     {
         InfoMap map;
         grabber.toMap(map);
@@ -114,7 +114,7 @@ void GrabberSettings::Init(void)
     // TODO
     // pull these values from MetaGrabberScript so we're not defining them in multiple locations
     QString currentTVGrabber = gCoreContext->GetSetting("TelevisionGrabber",
-                                         "metadata/Television/ttvdb.py");
+                                         "metadata/Television/ttvdb4.py");
     QString currentMovieGrabber = gCoreContext->GetSetting("MovieGrabber",
                                          "metadata/Movie/tmdb3.py");
     QString currentGameGrabber = gCoreContext->GetSetting("mythgame.MetadataGrabber",

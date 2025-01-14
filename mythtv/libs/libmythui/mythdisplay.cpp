@@ -1,3 +1,6 @@
+// Std
+#include <algorithm>
+
 //Qt
 #include <QTimer>
 #include <QThread>
@@ -6,12 +9,12 @@
 #include <QWindow>
 
 // MythTV
-#include "mythlogging.h"
-#include "compat.h"
-#include "mythcorecontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 #include "mythuihelper.h"
 #include "mythdisplay.h"
-#include "mythegl.h"
+#include "opengl/mythegl.h"
 #include "mythmainwindow.h"
 
 #ifdef USING_DBUS
@@ -23,7 +26,7 @@
 #ifdef Q_OS_ANDROID
 #include "platforms/mythdisplayandroid.h"
 #endif
-#if defined(Q_OS_MAC)
+#ifdef Q_OS_DARWIN
 #include "platforms/mythdisplayosx.h"
 #endif
 #ifdef USING_X11
@@ -77,7 +80,7 @@
 /*! \brief Create a MythDisplay object appropriate for the current platform.
  * \note This function always returns a valid MythDisplay object.
 */
-MythDisplay* MythDisplay::Create(MythMainWindow* MainWindow)
+MythDisplay* MythDisplay::Create([[maybe_unused]] MythMainWindow* MainWindow)
 {
     MythDisplay* result = nullptr;
 #ifdef USING_X11
@@ -108,14 +111,12 @@ MythDisplay* MythDisplay::Create(MythMainWindow* MainWindow)
         }
 #endif
     }
-#else
-    (void)MainWindow;
 #endif
 #ifdef USING_MMAL
     if (!result)
         result = new MythDisplayRPI();
 #endif
-#if defined(Q_OS_MAC)
+#ifdef Q_OS_DARWIN
     if (!result)
         result = new MythDisplayOSX();
 #endif
@@ -168,16 +169,16 @@ QStringList MythDisplay::GetDescription()
     auto * current = GetCurrentScreen();
     const auto screens = QGuiApplication::screens();
     bool first = true;
-    for (auto *screen : qAsConst(screens))
+    for (auto *screen : std::as_const(screens))
     {
         if (!first)
             result.append("");
         first = false;
         auto id = QString("(%1)").arg(screen->manufacturer());
         if (screen == current && !spanall)
-            result.append(tr("Current screen %1 %2:").arg(screen->name(), id));
+            result.append(tr("Current screen\t: %1 %2").arg(screen->name(), id));
         else
-            result.append(tr("Screen %1 %2:").arg(screen->name(), id));
+            result.append(tr("Screen\t\t: %1 %2").arg(screen->name(), id));
         result.append(tr("Size") + QString("\t\t: %1mmx%2mm")
                 .arg(screen->physicalSize().width()).arg(screen->physicalSize().height()));
         if (screen == current)
@@ -206,8 +207,8 @@ QStringList MythDisplay::GetDescription()
 }
 
 MythDisplay::MythDisplay()
+  : m_screen(GetDesiredScreen())
 {
-    m_screen = GetDesiredScreen();
     DebugScreen(m_screen, "Using");
     if (m_screen)
     {
@@ -294,6 +295,10 @@ double MythDisplay::GetPixelAspectRatio()
     if (m_physicalSize.isEmpty() || m_resolution.isEmpty())
         return 1.0;
 
+    // HD-Ready or better displays always have square pixels
+    if (m_resolution.height() >= 720)
+        return 1.0;
+
     return (m_physicalSize.width() / static_cast<double>(m_resolution.width())) /
            (m_physicalSize.height() / static_cast<double>(m_resolution.height()));
 }
@@ -345,7 +350,7 @@ QScreen *MythDisplay::GetDesiredScreen()
         // the window manager rather than Qt. So could be wrong.
         QPoint point = windowed ? override.topLeft() : override.bottomRight();
         QList screens = QGuiApplication::screens();
-        for (QScreen *screen : qAsConst(screens))
+        for (QScreen *screen : std::as_const(screens))
         {
             if (screen->geometry().contains(point))
             {
@@ -369,7 +374,7 @@ QScreen *MythDisplay::GetDesiredScreen()
     if (!newscreen)
     {
         QList screens = QGuiApplication::screens();
-        for (QScreen *screen : qAsConst(screens))
+        for (QScreen *screen : std::as_const(screens))
         {
             if (!name.isEmpty() && name == screen->name())
             {
@@ -586,7 +591,7 @@ void MythDisplay::Initialise()
         GetMythDB()->GetResolutionSetting("VidMode", iw, ih, iaspect, irate, i);
         GetMythDB()->GetResolutionSetting("TVVidMode", ow, oh, oaspect, orate, i);
 
-        if (!(iw || ih || !qFuzzyIsNull(irate)) || !(ih && ow && oh))
+        if ((!iw && !ih && qFuzzyIsNull(irate)) || !(ih && ow && oh))
             break;
 
         uint64_t key = MythDisplayMode::CalcKey(QSize(iw, ih), irate);
@@ -606,7 +611,7 @@ void MythDisplay::Initialise()
 void MythDisplay::InitScreenBounds()
 {
     const auto screens = QGuiApplication::screens();
-    for (auto * screen : qAsConst(screens))
+    for (auto * screen : std::as_const(screens))
     {
         auto dim = screen->geometry();
         auto extra = MythDisplay::GetExtraScreenInfo(screen);
@@ -640,7 +645,8 @@ void MythDisplay::InitScreenBounds()
         return;
     }
 
-    if (GetMythDB()->GetBoolSetting("RunFrontendInWindow", false))
+    if (!GetMythDB()->GetBoolSetting("ForceFullScreen", false) &&
+        GetMythDB()->GetBoolSetting("RunFrontendInWindow", false))
     {
         LOG(VB_GUI, LOG_INFO, LOC + "Running in a window");
         // This doesn't include the area occupied by the
@@ -1144,7 +1150,7 @@ void MythDisplay::DebugModes() const
     }
 }
 
-/*! \brief Shared static initialistaion code for all MythTV GUI applications.
+/*! \brief Shared static initialisation code for all MythTV GUI applications.
  *
  * \note This function must be called before Qt/QPA is initialised i.e. before
  * any call to QApplication.
@@ -1166,7 +1172,7 @@ void MythDisplay::ConfigureQtGUI(int SwapInterval, const MythCommandLineParser& 
     if (qEnvironmentVariableIsSet("MYTHTV_DEPTH"))
     {
         // Note: Don't set depth and stencil to give Qt as much flexibility as possible
-        int depth = qBound(6, qEnvironmentVariableIntValue("MYTHTV_DEPTH"), 16);
+        int depth = std::clamp(qEnvironmentVariableIntValue("MYTHTV_DEPTH"), 6, 16);
         LOG(VB_GENERAL, LOG_INFO, LOC + QString("Trying to force depth to '%1'").arg(depth));
         format.setRedBufferSize(depth);
     }
@@ -1180,7 +1186,7 @@ void MythDisplay::ConfigureQtGUI(int SwapInterval, const MythCommandLineParser& 
     format.setSwapInterval(SwapInterval);
     QSurfaceFormat::setDefaultFormat(format);
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_DARWIN
     // Without this, we can't set focus to any of the CheckBoxSetting, and most
     // of the MythPushButton widgets, and they don't use the themed background.
     QApplication::setDesktopSettingsAware(false);

@@ -1,13 +1,15 @@
-
 // Own header
 #include "mythuibuttontree.h"
 
-// Qt headers
-#include <QDomDocument>
+// C++
+#include <algorithm>
 #include <utility>
 
-// Mythdb headers
-#include "mythlogging.h"
+// Qt headers
+#include <QDomDocument>
+
+// Mythbase headers
+#include "libmythbase/mythlogging.h"
 
 // Mythui Headers
 #include "mythmainwindow.h"
@@ -319,14 +321,16 @@ bool MythUIButtonTree::SetNodeByString(QStringList route)
                 }
             }
             else
+            {
                 foundit = true;
+            }
         }
     }
 
     DoSetCurrentNode(foundNode);
 
-    m_currentDepth = qMax(0, (int)(foundNode->currentDepth() - m_depthOffset - m_numLists));
-    m_activeListID = qMin(foundNode->currentDepth() - m_depthOffset - 1, (int)(m_numLists - 1));
+    m_currentDepth = std::max(0, (int)(foundNode->currentDepth() - m_depthOffset - m_numLists));
+    m_activeListID = std::min(foundNode->currentDepth() - m_depthOffset - 1, (int)(m_numLists - 1));
 
     SetTreeState(true);
 
@@ -473,7 +477,9 @@ void MythUIButtonTree::SwitchList(bool right)
             doUpdate = true;
         }
         else
+        {
             return;
+        }
     }
     else if (!right)
     {
@@ -485,7 +491,9 @@ void MythUIButtonTree::SwitchList(bool right)
             doUpdate = true;
         }
         else
+        {
             return;
+        }
     }
 
     if (doUpdate)
@@ -583,7 +591,7 @@ bool MythUIButtonTree::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (m_activeList && m_activeList->m_layout == MythUIButtonList::LayoutGrid)
@@ -597,7 +605,9 @@ bool MythUIButtonTree::keyPressEvent(QKeyEvent *event)
                 SwitchList(false);
             }
             else
+            {
                 handled = false;
+            }
         }
         else
         {
@@ -605,12 +615,14 @@ bool MythUIButtonTree::keyPressEvent(QKeyEvent *event)
             {
                 SwitchList(true);
             }
-            else if (action == "LEFT" && !(m_currentDepth == 0 && m_activeListID == 0))
+            else if (action == "LEFT" && (m_currentDepth != 0 || m_activeListID != 0))
             {
                 SwitchList(false);
             }
             else
+            {
                 handled = false;
+            }
         }
     }
 

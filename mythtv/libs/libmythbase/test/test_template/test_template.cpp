@@ -52,7 +52,7 @@ void TestTemplate::example_benchmark_test(void)
 {
     QBENCHMARK
     {
-        int sum = 0;
+        [[maybe_unused]] int sum = 0;
         for (int i = 0; i < 999; i++)
             sum += i;
     }

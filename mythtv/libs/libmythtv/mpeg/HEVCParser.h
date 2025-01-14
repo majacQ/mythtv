@@ -23,14 +23,16 @@
 #ifndef HEVCPARSER_H
 #define HEVCPARSER_H
 
-#include <H2645Parser.h>
+#include <array>
 #include <map>
+
+#include "mpeg/H2645Parser.h"
 
 class HEVCParser : public H2645Parser
 {
   public:
 
-    enum NAL_unit_type {
+    enum NAL_unit_type : std::uint8_t {
         TAIL_N = 0, // Coded slice segment of a non-TSA, non-STSA trailing picture
         TAIL_R = 1, // slice_segment_layer_rbsp() VCL
 
@@ -200,7 +202,7 @@ class HEVCParser : public H2645Parser
         std::array<std::array<uint8_t,64>,2> scaling_lists_32x32 {};
     };
 
-    enum QuantMatrixSize
+    enum QuantMatrixSize : std::uint8_t
     {
         QUANT_MATIX_4X4   = 0,
         QUANT_MATIX_8X8   = 1,
@@ -250,19 +252,19 @@ class HEVCParser : public H2645Parser
     uint pictureHeightCropped(void) const override;
 
     field_type getFieldType(void) const override { return FRAME; }
-    void getFrameRate(FrameRate &result) const override;
+    MythAVRational getFrameRate() const override;
 
   protected:
     bool newAU(void);
     void processRBSP(bool rbsp_complete);
-    bool profileTierLevel(GetBitContext *gb,
+    bool profileTierLevel(BitReader& br,
                           bool profilePresentFlag,
                           int maxNumSubLayersMinus1);
-    bool parseSliceSegmentLayer(GetBitContext *gb);
-    bool parseSliceSegmentHeader(GetBitContext *gb);
-    bool parseSPS(GetBitContext *gb);
-    bool parseVPS(GetBitContext *gb);
-    bool parsePPS(GetBitContext *gb);
+    bool parseSliceSegmentLayer(BitReader& br);
+    bool parseSliceSegmentHeader(BitReader& br);
+    bool parseSPS(BitReader& br);
+    bool parseVPS(BitReader& br);
+    bool parsePPS(BitReader& br);
 
   private:
     uint32_t m_maxPicOrderCntLsb          {0};

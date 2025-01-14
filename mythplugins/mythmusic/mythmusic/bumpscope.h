@@ -2,11 +2,8 @@
 #define BUMPSCOPE
 
 #include "mainvisual.h"
-#include "config.h"
 
 #include <vector>
-
-#define MAX_PHONGRES 1024
 
 class BumpScope : public VisualBase
 {
@@ -17,11 +14,10 @@ public:
     void resize(const QSize &size) override; // VisualBase
     bool process(VisualNode *node) override; // VisualBase
     bool draw(QPainter *p, const QColor &back) override; // VisualBase
-    void handleKeyPress(const QString &action) override // VisualBase
-        {(void) action;}
+    void handleKeyPress([[maybe_unused]] const QString &action) override {}; // VisualBase
 
 private:
-    static void blur_8(unsigned char *ptr, int w, int h, int bpl);
+    static void blur_8(unsigned char *ptr, int w, int h, ptrdiff_t bpl);
 
     void generate_cmap(unsigned int color);
     void generate_phongdat(void);
@@ -50,9 +46,9 @@ private:
     bool           m_movingLight    {true};
     //bool         m_diamond        {true};
 
-    int            m_bpl            {0};
+    ptrdiff_t      m_bpl            {0};
 
-    std::vector<std::vector<unsigned char> > m_phongDat {};
+    std::vector<std::vector<unsigned char> > m_phongDat;
     unsigned char *m_rgbBuf         {nullptr};
     std::array<double,256> m_intense1 {};
     std::array<double,256> m_intense2 {};

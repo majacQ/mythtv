@@ -42,47 +42,12 @@
 
 #include "ifs.h"
 #include "goom_core.h"
-
-#define MODE_ifs
-
-#define PROGCLASS "IFS"
-
-#define HACK_INIT init_ifs
-#define HACK_DRAW draw_ifs
-
-#define ifs_opts xlockmore_opts
-
-#define DEFAULTS "*delay: 20000 \n" \
- "*ncolors: 100 \n"
-
-#define SMOOTH_COLORS
-
-//#include "xlockmore.h"                /* in xscreensaver distribution */
-//#else /* STANDALONE */
-//#include "xlock.h"            /* in xlockmore distribution */
-//#endif /* STANDALONE */
-
-//#ifdef MODE_ifs
-
-//ModeSpecOpt ifs_opts =
-//{0, (XrmOptionDescRec *) NULL, 0, (argtype *) NULL, (OptionStruct *) NULL};
-
-//#ifdef USE_MODULES
-//ModStruct   ifs_description =
-//{"ifs", "init_ifs", "draw_ifs", "release_ifs",
-// "init_ifs", "init_ifs", (char *) NULL, &ifs_opts,
-// 1000, 1, 1, 1, 64, 1.0, "",
-// "Shows a modified iterated function system", 0, NULL};
-
-//#endif
-
 #include "goom_tools.h"
 
 
-#define LRAND()                    ((long) (RAND() & 0x7fffffff))
-#define NRAND(n)           ((int) (LRAND() % (n)))
-#define MAXRAND                    (2147483648.0)	/* unsigned 1<<31 as a * *
-																									 * * float */
+static inline long LRAND()      { return static_cast<long>( RAND() & 0x7fffffff); }
+static inline int  NRAND(int n) { return static_cast<int>( LRAND() % n ); }
+static constexpr double MAXRAND { 2147483648.0 }; /* unsigned 1<<31 as a * * * * float */
 
 /*****************************************************/
 
@@ -91,26 +56,17 @@ using F_PT = float;
 
 /*****************************************************/
 
-#define FIX 12
-#define UNIT   ( 1<<FIX )
-#define MAX_SIMI  6
+static constexpr uint8_t  FIX      { 12     };
+static constexpr uint16_t UNIT     { 1<<FIX };
+static constexpr size_t   MAX_SIMI { 6      };
 
-#define MAX_DEPTH_2  10
-#define MAX_DEPTH_3  6
-#define MAX_DEPTH_4  4
-#define MAX_DEPTH_5  2
+static constexpr int8_t   MAX_DEPTH_2  { 10 };
+static constexpr int8_t   MAX_DEPTH_3  {  6 };
+static constexpr int8_t   MAX_DEPTH_4  {  4 };
+static constexpr int8_t   MAX_DEPTH_5  {  2 };
 
-/* PREVIOUS VALUE 
-#define MAX_SIMI  6
-
-* settings for a PC 120Mhz... *
-#define MAX_DEPTH_2  10
-#define MAX_DEPTH_3  6
-#define MAX_DEPTH_4  4
-#define MAX_DEPTH_5  3
-*/
-
-#define DBL_To_F_PT(x)  (F_PT)( (DBL)(UNIT)*(x) )
+static inline F_PT DBL_To_F_PT(DBL x)
+{ return static_cast<F_PT>( static_cast<DBL>(UNIT) * x ); };
 
 using SIMI = struct Similitude_Struct;
 using FRACTAL = struct Fractal_Struct;
@@ -130,7 +86,7 @@ using SimiData = std::array<SIMI,5 * MAX_SIMI>;
 struct Fractal_Struct
 {
 
-	int     m_nbSimi;
+	size_t   m_nbSimi;
 	SimiData m_components;
 	int     m_depth, m_col;
 	int     m_count, m_speed;
@@ -188,11 +144,11 @@ static void
 free_ifs_buffers (FRACTAL * Fractal)
 {
 	if (Fractal->m_buffer1 != nullptr) {
-		(void) free ((void *) Fractal->m_buffer1);
+		free ((void *) Fractal->m_buffer1);
 		Fractal->m_buffer1 = (IFSPoint *) nullptr;
 	}
 	if (Fractal->m_buffer2 != nullptr) {
-		(void) free ((void *) Fractal->m_buffer2);
+		free ((void *) Fractal->m_buffer2);
 		Fractal->m_buffer2 = (IFSPoint *) nullptr;
 	}
 }
@@ -261,13 +217,13 @@ init_ifs (int width, int height)
 	for (i = 0; i <= Fractal->m_depth + 2; ++i)
 		Fractal->m_maxPt *= Fractal->m_nbSimi;
 
-	if ((Fractal->m_buffer1 = (IFSPoint *) calloc (Fractal->m_maxPt,
-                                                   sizeof (IFSPoint))) == nullptr) {
+	Fractal->m_buffer1 = (IFSPoint *) calloc (Fractal->m_maxPt, sizeof (IFSPoint));
+	if (Fractal->m_buffer1 == nullptr) {
 		free_ifs (Fractal);
 		return;
 	}
-	if ((Fractal->m_buffer2 = (IFSPoint *) calloc (Fractal->m_maxPt,
-                                                   sizeof (IFSPoint))) == nullptr) {
+	Fractal->m_buffer2 = (IFSPoint *) calloc (Fractal->m_maxPt, sizeof (IFSPoint));
+	if (Fractal->m_buffer2 == nullptr) {
 		free_ifs (Fractal);
 		return;
 	}
@@ -357,7 +313,7 @@ Trace (FRACTAL * F, F_PT xo, F_PT yo)
 	F_PT    x = NAN;
 	F_PT    y = NAN;
 
-	SIMI *Cur = &Cur_F->m_components[0];
+	SIMI *Cur = (Cur_F->m_components).data();
 	for (int i = Cur_F->m_nbSimi; i != 0; --i, Cur++) {
 		Transform (Cur, xo, yo, &x, &y);
 
@@ -383,7 +339,7 @@ Draw_Fractal ( void /* ModeInfo * mi */ )
 	SIMI   *Cur = nullptr;
 	SIMI   *Simi = nullptr;
 
-	for (Cur = &F->m_components[0], i = F->m_nbSimi; i; --i, Cur++) {
+	for (Cur = (F->m_components).data(), i = F->m_nbSimi; i; --i, Cur++) {
 		Cur->m_fCx = DBL_To_F_PT (Cur->m_dCx);
 		Cur->m_fCy = DBL_To_F_PT (Cur->m_dCy);
 
@@ -400,11 +356,11 @@ Draw_Fractal ( void /* ModeInfo * mi */ )
 	Cur_Pt = 0;
 	Cur_F = F;
 	Buf = F->m_buffer2;
-	for (Cur = &F->m_components[0], i = F->m_nbSimi; i; --i, Cur++) {
+	for (Cur = (F->m_components).data(), i = F->m_nbSimi; i; --i, Cur++) {
 		F_PT xo = Cur->m_fCx;
 		F_PT yo = Cur->m_fCy;
 		int j = 0;
-		for (Simi = &F->m_components[0], j = F->m_nbSimi; j; --j, Simi++) {
+		for (Simi = (F->m_components).data(), j = F->m_nbSimi; j; --j, Simi++) {
 			F_PT x = NAN;
 			F_PT y = NAN;
 			if (Simi == Cur)
@@ -469,7 +425,7 @@ draw_ifs ( /* ModeInfo * mi */ int *nbPoints)
 	DBL u2 = 3.0 * v * uu;
 	DBL u3 = u * uu;
 
-	SIMI *S  = &F->m_components[0];
+	SIMI *S  = (F->m_components).data();
 	SIMI *S1 = &F->m_components[1 * F->m_nbSimi];
 	SIMI *S2 = &F->m_components[2 * F->m_nbSimi];
 	SIMI *S3 = &F->m_components[3 * F->m_nbSimi];
@@ -489,7 +445,7 @@ draw_ifs ( /* ModeInfo * mi */ int *nbPoints)
 	Draw_Fractal ( /* mi */ );
 
 	if (F->m_count >= 1000 / F->m_speed) {
-		S  = &F->m_components[0];
+		S  = (F->m_components).data();
 		S1 = &F->m_components[1 * F->m_nbSimi];
 		S2 = &F->m_components[2 * F->m_nbSimi];
 		S3 = &F->m_components[3 * F->m_nbSimi];
@@ -512,7 +468,9 @@ draw_ifs ( /* ModeInfo * mi */ int *nbPoints)
 		F->m_count = 0;
 	}
 	else
+	{
 		F->m_count++;
+	}
 
 	F->m_col++;
 
@@ -530,9 +488,7 @@ release_ifs ()
 {
 	if (Root != nullptr) {
 		free_ifs(Root);
-		(void) free ((void *) Root);
+		free ((void *) Root);
 		Root = (FRACTAL *) nullptr;
 	}
 }
-
-//#endif /* MODE_ifs */

@@ -10,8 +10,8 @@
 #include <QTime>
 #include <utility>
 
-#include "mythlogging.h"
-#include "mythdate.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
 
 #include "mythmainwindow.h"
 #include "mythfontproperties.h"
@@ -24,7 +24,7 @@
 #include "mythuispinbox.h"
 #include "mythgesture.h"
 
-QEvent::Type DialogCompletionEvent::kEventType =
+const QEvent::Type DialogCompletionEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 // Force this class to have a vtable so that dynamic_cast works.
@@ -85,7 +85,7 @@ void MythMenu::AddItem(MythMenuItem *item, bool selected, MythMenu *subMenu)
 
 void MythMenu::SetSelectedByTitle(const QString& title)
 {
-    for (auto *item : qAsConst(m_menuItems))
+    for (auto *item : std::as_const(m_menuItems))
     {
         if (!item)
             continue;
@@ -100,7 +100,7 @@ void MythMenu::SetSelectedByTitle(const QString& title)
 
 void MythMenu::SetSelectedByData(const QVariant& data)
 {
-    for (auto *item : qAsConst(m_menuItems))
+    for (auto *item : std::as_const(m_menuItems))
     {
         if (!item)
             continue;
@@ -134,10 +134,12 @@ bool MythDialogBox::Create(void)
             return false;
     }
     else if (!CopyWindowFromBase(windowName, this))
+    {
         return false;
+    }
 
     bool err = false;
-    if (m_titlearea)
+    if (m_fullscreen)
         UIUtilW::Assign(this, m_titlearea, "title");
     UIUtilE::Assign(this, m_textarea, "messagearea", &err);
     UIUtilE::Assign(this, m_buttonList, "list", &err);
@@ -337,6 +339,11 @@ void MythDialogBox::AddButtonV(const QString &title, QVariant data, bool newMenu
     m_buttonList->GetVisibleCount();
 }
 
+bool MythDialogBox::inputMethodEvent(QInputMethodEvent *event)
+{
+    return GetFocusWidget()->inputMethodEvent(event);
+}
+
 bool MythDialogBox::keyPressEvent(QKeyEvent *event)
 {
     if (GetFocusWidget()->keyPressEvent(event))
@@ -348,7 +355,7 @@ bool MythDialogBox::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -385,7 +392,9 @@ bool MythDialogBox::keyPressEvent(QKeyEvent *event)
             Select(m_buttonList->GetItemCurrent());
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -463,14 +472,13 @@ bool MythConfirmationDialog::Create(void)
         return false;
     }
 
-    if (m_showCancel)
-    {
+    if (cancelButton && m_showCancel)
         connect(cancelButton, &MythUIButton::Clicked, this, &MythConfirmationDialog::Cancel);
-    }
-    else
+    else if (cancelButton)
         cancelButton->SetVisible(false);
 
-    connect(okButton, &MythUIButton::Clicked, this, &MythConfirmationDialog::Confirm);
+    if (okButton)
+        connect(okButton, &MythUIButton::Clicked, this, &MythConfirmationDialog::Confirm);
 
     m_messageText->SetText(m_message);
 
@@ -495,7 +503,7 @@ bool MythConfirmationDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -634,13 +642,15 @@ bool MythTextInputDialog::Create(void)
 
     if (cancelButton)
         connect(cancelButton, &MythUIButton::Clicked, this, &MythScreenType::Close);
-    connect(okButton, &MythUIButton::Clicked, this, &MythTextInputDialog::sendResult);
+    if (okButton)
+        connect(okButton, &MythUIButton::Clicked, this, &MythTextInputDialog::sendResult);
 
     m_textEdit->SetFilter(m_filter);
     m_textEdit->SetText(m_defaultValue);
     m_textEdit->SetPassword(m_isPassword);
 
-    messageText->SetText(m_message);
+    if (messageText)
+        messageText->SetText(m_message);
 
     BuildFocusList();
 
@@ -673,9 +683,7 @@ void MythTextInputDialog::sendResult()
 MythSpinBoxDialog::MythSpinBoxDialog(MythScreenStack *parent,
                                      QString message)
     : MythScreenType(parent, "mythspinboxpopup"),
-      m_spinBox(nullptr),
       m_message(std::move(message)),
-      m_retObject(nullptr),
       m_id("")
 {
 }
@@ -703,9 +711,11 @@ bool MythSpinBoxDialog::Create(void)
 
     if (cancelButton)
         connect(cancelButton, &MythUIButton::Clicked, this, &MythScreenType::Close);
-    connect(okButton, &MythUIButton::Clicked, this, &MythSpinBoxDialog::sendResult);
+    if (okButton)
+        connect(okButton, &MythUIButton::Clicked, this, &MythSpinBoxDialog::sendResult);
 
-    messageText->SetText(m_message);
+    if (messageText)
+        messageText->SetText(m_message);
     BuildFocusList();
 
     return true;
@@ -768,42 +778,6 @@ void MythSpinBoxDialog::sendResult()
 
 /////////////////////////////////////////////////////////////////////
 
-
-/** \fn MythUISearchDialog::MythUISearchDialog(MythScreenStack*,
-                                   const QString&,
-                                   const QStringList&,
-                                   bool  matchAnywhere,
-                                   const QString&)
- *  \brief the classes constructor
- *  \param parent the MythScreenStack this widget belongs to
- *  \param title  the text to show as the title
- *  \param list   the list of text strings to search
- *  \param matchAnywhere if true will match the input text anywhere in the string.
-                         if false will match only strings that start with the input text.
-                         Default is false.
- *  \param defaultValue  The initial value for the input text. Default is ""
- */
-MythUISearchDialog::MythUISearchDialog(MythScreenStack *parent,
-                                   const QString &title,
-                                   const QStringList &list,
-                                   bool  matchAnywhere,
-                                   const QString &defaultValue)
-                : MythScreenType(parent, "mythsearchdialogpopup")
-{
-    m_list = list;
-    m_matchAnywhere = matchAnywhere;
-    m_title = title;
-    m_defaultValue = defaultValue;
-
-    m_titleText = nullptr;
-    m_matchesText = nullptr;
-    m_textEdit = nullptr;
-    m_itemList = nullptr;
-
-    m_id = "";
-    m_retObject = nullptr;
-}
-
 bool MythUISearchDialog::Create(void)
 {
     if (!CopyWindowFromBase("MythSearchDialog", this))
@@ -829,7 +803,8 @@ bool MythUISearchDialog::Create(void)
     if (cancelButton)
         connect(cancelButton, &MythUIButton::Clicked, this, &MythScreenType::Close);
 
-    connect(okButton, &MythUIButton::Clicked, this, &MythUISearchDialog::slotSendResult);
+    if (okButton)
+        connect(okButton, &MythUIButton::Clicked, this, &MythUISearchDialog::slotSendResult);
 
     connect(m_itemList, &MythUIButtonList::itemClicked,
             this, &MythUISearchDialog::slotSendResult);
@@ -877,7 +852,7 @@ void MythUISearchDialog::slotUpdateList(void)
 {
     m_itemList->Reset();
 
-    for (const QString& item : qAsConst(m_list))
+    for (const QString& item : std::as_const(m_list))
     {
         if (m_matchAnywhere)
         {
@@ -909,8 +884,7 @@ MythTimeInputDialog::MythTimeInputDialog(MythScreenStack *parent,
                                          int rangeLimit)
     : MythScreenType(parent, "timepopup"),
         m_message(std::move(message)), m_startTime(std::move(startTime)),
-        m_resolution(resolutionFlags), m_rangeLimit(rangeLimit),
-        m_dateList(nullptr), m_timeList(nullptr), m_retObject(nullptr)
+        m_resolution(resolutionFlags), m_rangeLimit(rangeLimit)
 {
 }
 
@@ -1013,7 +987,12 @@ bool MythTimeInputDialog::Create()
             if (m_resolution & kMinutes)
             {
                 time = time.addSecs(60);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
                 QDateTime dt = QDateTime(startdate, time, Qt::LocalTime);
+#else
+                QDateTime dt = QDateTime(startdate, time,
+                                         QTimeZone(QTimeZone::LocalTime));
+#endif
                 text = MythDate::toString(dt, MythDate::kTime);
 
                 if (time == starttime)
@@ -1040,7 +1019,8 @@ bool MythTimeInputDialog::Create()
     if (messageText && !m_message.isEmpty())
         messageText->SetText(m_message);
 
-    connect(okButton, &MythUIButton::Clicked, this, &MythTimeInputDialog::okClicked);
+    if (okButton)
+        connect(okButton, &MythUIButton::Clicked, this, &MythTimeInputDialog::okClicked);
 
     BuildFocusList();
 
@@ -1059,7 +1039,12 @@ void MythTimeInputDialog::okClicked(void)
     QDate date = m_dateList->GetDataValue().toDate();
     QTime time = m_timeList->GetDataValue().toTime();
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime dateTime = QDateTime(date, time, Qt::LocalTime).toUTC();
+#else
+    QDateTime dateTime = QDateTime(date, time,
+                                   QTimeZone(QTimeZone::LocalTime)).toUTC();
+#endif
 
     emit haveResult(dateTime);
 

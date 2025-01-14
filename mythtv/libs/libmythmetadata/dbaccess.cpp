@@ -2,10 +2,11 @@
 #include <vector>
 #include <map>
 
-#include "mythdb.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/stringutil.h"
+
 #include "cleanup.h"
 #include "dbaccess.h"
-#include "mythmiscutil.h"
 
 namespace
 {
@@ -77,7 +78,9 @@ class SingleValueImp
                     m_dirty = true;
                 }
                 else
+                {
                     MythDB::DBError("get last id", query);
+                }
             }
         }
 
@@ -137,8 +140,7 @@ class SingleValueImp
 
             for (auto & item : m_entries)
             {
-                m_retEntries.push_back(
-                    entry_list::value_type(item.first, item.second));
+                m_retEntries.emplace_back(item.first, item.second);
             }
             std::sort(m_retEntries.begin(), m_retEntries.end(),
                       call_sort<SingleValueImp, entry>(*this));
@@ -149,7 +151,7 @@ class SingleValueImp
 
     virtual bool sort(const entry &lhs, const entry &rhs)
     {
-        return naturalCompare(lhs.second, rhs.second) < 0;
+        return StringUtil::naturalSortCompare(lhs.second, rhs.second);
     }
 
     void cleanup()
@@ -629,10 +631,14 @@ class FileAssociationsImp
                     m_fileAssociations.push_back(ret_fa);
                 }
                 else
+                {
                     return false;
+                }
             }
             else
+            {
                 *existing_fa = ret_fa;
+            }
 
             fa = ret_fa;
             return true;
@@ -688,7 +694,7 @@ class FileAssociationsImp
     void getExtensionIgnoreList(ext_ignore_list &ext_ignore) const
     {
         for (const auto & fa : m_fileAssociations)
-            ext_ignore.push_back(std::make_pair(fa.extension, fa.ignore));
+            ext_ignore.emplace_back(fa.extension, fa.ignore);
     }
 
     mutable QMutex m_mutex;
@@ -818,8 +824,8 @@ void FileAssociations::load_data()
 }
 
 FileAssociations::FileAssociations()
+  : m_imp(new FileAssociationsImp)
 {
-    m_imp = new FileAssociationsImp;
 }
 
 FileAssociations::~FileAssociations()

@@ -1,33 +1,33 @@
 // c/c++
-#include <unistd.h>
 #include <iostream>
+#include <unistd.h>
+#include <utility>
 
 // qt
 #include <QKeyEvent>
 #include <QSqlDriver>
 #include <QSqlField>
-#include <utility>
 
-// mythtv
-#include <mythcontext.h>
-#include <mythmainwindow.h>
-#include <mythdb.h>
-#include <mythuihelper.h>
-#include <mythscreentype.h>
-#include <mythuitext.h>
-#include <mythuitextedit.h>
-#include <mythuibuttonlist.h>
-#include <mythuibutton.h>
-#include <mythuispinbox.h>
-#include <mythuicheckbox.h>
-#include <mythdialogbox.h>
-#include <mythdate.h>
-#include <musicmetadata.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdb.h>
+#include <libmythmetadata/musicmetadata.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythscreentype.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuispinbox.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // mythmusic
+#include "musiccommon.h"
 #include "musicdata.h"
 #include "smartplaylist.h"
-#include "musiccommon.h"
 
 struct SmartPLField
 {
@@ -165,7 +165,7 @@ QString getCriteriaSQL(const QString& fieldName, const QString &operatorName,
     const SmartPLOperator *Operator = lookupOperator(operatorName);
     if (!Operator)
     {
-        return QString();
+        return {};
     }
 
     // convert boolean and date values
@@ -240,7 +240,7 @@ QString getCriteriaSQL(const QString& fieldName, const QString &operatorName,
 QString getOrderBySQL(const QString& orderByFields)
 {
     if (orderByFields.isEmpty())
-        return QString();
+        return {};
 
     QStringList list = orderByFields.split(",");
     QString fieldName;
@@ -265,7 +265,9 @@ QString getOrderBySQL(const QString& orderByFields)
                result = " ORDER BY " + Field->m_sqlName + order;
            }
            else
+           {
                result += ", " + Field->m_sqlName + order;
+           }
         }
     }
 
@@ -290,7 +292,7 @@ QString getSQLFieldName(const QString &fieldName)
 QString SmartPLCriteriaRow::getSQL(void) const
 {
     if (m_field.isEmpty())
-        return QString();
+        return {};
 
     QString result;
 
@@ -345,7 +347,7 @@ QString SmartPLCriteriaRow::toString(void) const
         return result;
     }
 
-    return QString();
+    return {};
 }
 
 /*
@@ -429,7 +431,7 @@ bool SmartPlaylistEditor::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -445,7 +447,9 @@ bool SmartPlaylistEditor::keyPressEvent(QKeyEvent *event)
             editCriteria();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -482,7 +486,9 @@ void SmartPlaylistEditor::customEvent(QEvent *event)
                     delete input;
             }
             else if (resulttext == tr("Delete Category"))
+            {
                 startDeleteCategory(m_categorySelector->GetValue());
+            }
             else if (resulttext == tr("Rename Category"))
             {
                 MythScreenStack *popupStack = GetMythMainWindow()->GetStack("popup stack");
@@ -779,7 +785,7 @@ void SmartPlaylistEditor::saveClicked(void)
     }
 
     // save smartplaylist items
-    for (const auto & row : qAsConst(m_criteriaRows))
+    for (const auto & row : std::as_const(m_criteriaRows))
         row->saveToDatabase(ID);
 
     emit smartPLChanged(category, name);
@@ -979,12 +985,12 @@ QString SmartPlaylistEditor::getOrderByClause(void)
 QString SmartPlaylistEditor::getWhereClause(void)
 {
     if (m_criteriaRows.empty())
-        return QString();
+        return {};
 
     bool bFirst = true;
     QString sql = "WHERE ";
 
-    for (const auto & row : qAsConst(m_criteriaRows))
+    for (const auto & row : std::as_const(m_criteriaRows))
     {
         QString criteria = row->getSQL();
         if (criteria.isEmpty())
@@ -1659,7 +1665,7 @@ bool SmartPLResultViewer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "INFO")
@@ -1691,7 +1697,9 @@ void SmartPLResultViewer::trackVisible(MythUIButtonListItem *item)
                 item->SetImage(mdata->getAlbumArtFile());
         }
         else
+        {
             item->SetImage("mm_nothumb.png");
+        }
     }
 }
 
@@ -1816,7 +1824,9 @@ QString SmartPLOrderByDialog::getFieldList(void)
             result = m_fieldList->GetItemAt(i)->GetText();
         }
         else
+        {
             result += ", " + m_fieldList->GetItemAt(i)->GetText();
+        }
     }
 
     return result;
@@ -2040,7 +2050,9 @@ QString SmartPLDateDialog::getDate(void)
         sResult = m_yearSpin->GetValue() + "-" + month + "-" + day;
     }
     else
+    {
        sResult = m_statusText->GetText();
+    }
 
     return sResult;
 }
@@ -2068,7 +2080,9 @@ void SmartPLDateDialog::setDate(QString date)
             m_addDaysSpin->SetValue(nDays);
         }
         else
+        {
             m_addDaysSpin->SetValue(0);
+        }
 
         nowCheckToggled(true);
     }

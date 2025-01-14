@@ -1,15 +1,29 @@
-#include <QFontMetrics>
+#include <algorithm>
 
-#include "mythlogging.h"
-#include "mythfontproperties.h"
-#include "mythuisimpletext.h"
-#include "mythuishape.h"
-#include "mythuiimage.h"
-#include "mythpainter.h"
+#include <QFontMetrics>
+#include <QRegularExpression>
+
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythfontproperties.h"
+#include "libmythui/mythpainter.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuishape.h"
+#include "libmythui/mythuisimpletext.h"
+
 #include "captions/subtitlescreen.h"
 
 #define LOC      QString("Subtitles: ")
 #define LOC_WARN QString("Subtitles Warning: ")
+
+#ifdef DEBUG_SUBTITLES
+static QString toString(MythVideoFrame const * const frame)
+{
+    std::chrono::milliseconds time = frame->m_timecode;
+    return QString("%1(%2)")
+        .arg(MythDate::formatTime(time,"HH:mm:ss.zzz"))
+        .arg(time.count());
+}
+#endif
 
 // Class SubWrapper is used to attach caching structures to MythUIType
 // objects in the SubtitleScreen's m_ChildrenList.  If these objects
@@ -295,9 +309,13 @@ SubtitleFormat::GetFont(const QString &family,
             offset.setX(-off);
         }
         else if (attr.m_edgeType == k708AttrEdgeRightDropShadow)
+        {
             shadow = true;
+        }
         else
+        {
             shadow = false;
+        }
     }
     else
     {
@@ -325,7 +343,9 @@ SubtitleFormat::GetFont(const QString &family,
             off = lroundf(scale * pixelSize / 20);
         }
         else
+        {
             outline = false;
+        }
     }
     else
     {
@@ -720,11 +740,7 @@ bool FormattedTextChunk::PreRender(bool isFirst, bool isLast,
     {
         ++count;
     }
-#if QT_VERSION < QT_VERSION_CHECK(5,11,0)
-    int x_adjust = count * font.width(" ");
-#else
     int x_adjust = count * font.horizontalAdvance(" ");
-#endif
     int leftPadding = 0;
     int rightPadding = 0;
     CalcPadding(isFirst, isLast, leftPadding, rightPadding);
@@ -791,7 +807,7 @@ void FormattedTextSubtitle::Layout(void)
     // Calculate dimensions of bounding rectangle
     int anchor_width = 0;
     int anchor_height = 0;
-    for (const auto & line : qAsConst(m_lines))
+    for (const auto & line : std::as_const(m_lines))
     {
         QSize sz = line.CalcSize(LINE_SPACING);
         anchor_width = std::max(anchor_width, sz.width());
@@ -811,8 +827,8 @@ void FormattedTextSubtitle::Layout(void)
         anchor_y -= anchor_height;
 
     // Shift the anchor point back into the safe area if necessary/possible.
-    anchor_y = std::max(0, std::min(anchor_y, m_safeArea.height() - anchor_height));
-    anchor_x = std::max(0, std::min(anchor_x, m_safeArea.width() - anchor_width));
+    anchor_y = std::clamp(anchor_y, 0, m_safeArea.height() - anchor_height);
+    anchor_x = std::clamp(anchor_x, 0, m_safeArea.width() - anchor_width);
 
     m_bounds = QRect(anchor_x, anchor_y, anchor_width, anchor_height);
 
@@ -931,7 +947,7 @@ void FormattedTextSubtitle::Draw(void)
 QStringList FormattedTextSubtitle::ToSRT(void) const
 {
     QStringList result;
-    for (const auto & ftl : qAsConst(m_lines))
+    for (const auto & ftl : std::as_const(m_lines))
     {
         QString line;
         if (ftl.m_origX > 0)
@@ -1007,7 +1023,7 @@ void FormattedTextSubtitleSRT::Init(const QStringList &subs)
         "</?.+>", QRegularExpression::InvertedGreedinessOption };
     QString htmlPrefix("<font color=\"");
     QString htmlSuffix("\">");
-    for (const QString& subtitle : qAsConst(subs))
+    for (const QString& subtitle : std::as_const(subs))
     {
         FormattedTextLine line;
         QString text(subtitle);
@@ -1054,15 +1070,25 @@ void FormattedTextSubtitleSRT::Init(const QStringList &subs)
                     }
                 }
                 else if (html == "</font>")
+                {
                     color = Qt::white;
+                }
                 else if (html == "<b>")
+                {
                     isBold = true;
+                }
                 else if (html == "</b>")
+                {
                     isBold = false;
+                }
                 else if (html == "<u>")
+                {
                     isUnderline = true;
+                }
                 else if (html == "</u>")
+                {
                     isUnderline = false;
+                }
                 else
                 {
                     LOG(VB_VBI, LOG_INFO,
@@ -1160,7 +1186,8 @@ static QString extract_cc608(QString &text, int &color,
 
     // Copy the string into the result, up to the next control
     // character.
-    int nextControl = text.indexOf(QRegularExpression("[\\x{7000}-\\x{7fff}]"));
+    static const QRegularExpression kControlCharsRE { "[\\x{7000}-\\x{7fff}]" };
+    int nextControl = text.indexOf(kControlCharsRE);
     if (nextControl < 0)
     {
         result = text;
@@ -1226,7 +1253,7 @@ void FormattedTextSubtitle608::Layout(void)
     FormattedTextSubtitle::Layout();
 }
 
-void FormattedTextSubtitle608::Init(const vector<CC608Text*> &buffers)
+void FormattedTextSubtitle608::Init(const std::vector<CC608Text*> &buffers)
 {
     static const std::array<const QColor,8> kClr
     {
@@ -1303,7 +1330,7 @@ void FormattedTextSubtitle608::Init(const vector<CC608Text*> &buffers)
             QString captionText =
                 extract_cc608(text, color, isItalic, isUnderline);
             CC708CharacterAttribute attr(isItalic, isBold, isUnderline,
-                                         kClr[std::min(std::max(0, color), 7)]);
+                                         kClr[std::clamp(color, 0, 7)]);
             FormattedTextChunk chunk(captionText, attr, m_subScreen);
             line.chunks += chunk;
             LOG(VB_VBI, LOG_INFO,
@@ -1332,7 +1359,7 @@ void FormattedTextSubtitle708::Draw(void)
 }
 
 void FormattedTextSubtitle708::Init(const CC708Window &win,
-                                    const vector<CC708String*> &list,
+                                    const std::vector<CC708String*> &list,
                                     float aspect)
 {
     LOG(VB_VBI, LOG_DEBUG,LOC +
@@ -1344,8 +1371,11 @@ void FormattedTextSubtitle708::Init(const CC708Window &win,
     if (m_subScreen)
         m_subScreen->SetFontSize(pixelSize);
 
-    float xrange  = win.m_relative_pos ? 100.0F :
-                    (aspect > 1.4F) ? 210.0F : 160.0F;
+    float xrange { 160.0F };
+    if (win.m_relative_pos)
+        xrange = 100.0F;
+    else if (aspect > 1.4F)
+        xrange = 210.0F;
     float yrange  = win.m_relative_pos ? 100.0F : 75.0F;
     float xmult   = (float)m_safeArea.width() / xrange;
     float ymult   = (float)m_safeArea.height() / yrange;
@@ -1377,6 +1407,12 @@ SubtitleScreen::SubtitleScreen(MythPlayer *Player, MythPainter *Painter,
     m_format(new SubtitleFormat)
 {
     m_painter = Painter;
+
+    connect(m_player, &MythPlayer::SeekingDone, this, [&]()
+    {
+        LOG(VB_PLAYBACK, LOG_INFO, LOC + "SeekingDone signal received.");
+        m_atEnd = false;
+    });
 }
 
 SubtitleScreen::~SubtitleScreen(void)
@@ -1648,11 +1684,7 @@ QSize SubtitleScreen::CalcTextSize(const QString &text,
     MythFontProperties *mythfont = GetFont(format);
     QFont *font = mythfont->GetFace();
     QFontMetrics fm(*font);
-#if QT_VERSION < QT_VERSION_CHECK(5,11,0)
-    int width = fm.width(text);
-#else
     int width = fm.horizontalAdvance(text);
-#endif
     int height = fm.height() * (1 + PAD_HEIGHT);
     if (layoutSpacing > 0 && !text.trimmed().isEmpty())
         height = std::max(height, (int)(font->pixelSize() * layoutSpacing));
@@ -1762,9 +1794,7 @@ void SubtitleScreen::Pulse(void)
 
     DisplayAVSubtitles(); // allow forced subtitles to work
 
-    if (kDisplayTextSubtitle == m_subtitleType)
-        DisplayTextSubtitles();
-    else if (kDisplayCC608 == m_subtitleType)
+    if (kDisplayCC608 == m_subtitleType)
         DisplayCC608Subtitles();
     else if (kDisplayCC708 == m_subtitleType)
         DisplayCC708Subtitles();
@@ -1838,27 +1868,139 @@ void SubtitleScreen::DisplayAVSubtitles(void)
 
     AVSubtitles* subs = m_subreader->GetAVSubtitles();
     QMutexLocker lock(&(subs->m_lock));
-    if (subs->m_buffers.empty() && (kDisplayAVSubtitle != m_subtitleType))
+    if (subs->m_buffers.empty()
+      && (kDisplayAVSubtitle != m_subtitleType)
+      && (kDisplayTextSubtitle != m_subtitleType))
         return;
 
     MythVideoOutput *videoOut = m_player->GetVideoOutput();
     MythVideoFrame *currentFrame = videoOut ? videoOut->GetLastShownFrame() : nullptr;
+    int ret {0};
 
     if (!currentFrame || !videoOut)
         return;
+
+    if (subs->m_buffers.empty() && (m_subreader->GetParser() != nullptr))
+    {
+        if (subs->m_needSync)
+        {
+            // Seeking on a subtitle stream is a pain. The internals
+            // of ff_subtitles_queue_seek() calls search_sub_ts(),
+            // which always returns the subtitle that starts on or
+            // before the current timestamp.
+            //
+            // If avformat_seek_file() has been asked to search
+            // forward, then the subsequent range check will always
+            // fail because avformat_seek_file() has set the minimum
+            // timestamp to the requested timestamp.  This call only
+            // succeeds if the timestamp matches to the millisecond.
+            //
+            // If avformat_seek_file() has been asked to search
+            // backward then a subtitle will be returned, but because
+            // that subtitle is in the past the code below this
+            // comment will always consume that subtitle, resulting in
+            // a new seek every time this function is called.
+            //
+            // The solution seems to be to seek backwards so that we
+            // get the subtitle that should have most recently been
+            // displayed, then skip that subtitle to get the one that
+            // should be displayed next.
+            lock.unlock();
+            m_subreader->SeekFrame(currentFrame->m_timecode.count()*1000,
+                                   AVSEEK_FLAG_BACKWARD);
+            ret = m_subreader->ReadNextSubtitle();
+            if (ret < 0)
+            {
+                m_atEnd = true;
+#ifdef DEBUG_SUBTITLES
+                if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
+                {
+                    LOG(VB_PLAYBACK, LOG_DEBUG,
+                        LOC + QString("time %1, no subtitle available after seek")
+                        .arg(toString(currentFrame)));
+                }
+#endif
+            }
+            lock.relock();
+            subs->m_needSync = false;
+
+            // extra check to avoid segfault
+            if (subs->m_buffers.empty())
+                return;
+            AVSubtitle subtitle = subs->m_buffers.front();
+            if (subtitle.end_display_time < currentFrame->m_timecode.count())
+            {
+                subs->m_buffers.pop_front();
+#ifdef DEBUG_SUBTITLES
+                if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
+                {
+                    LOG(VB_PLAYBACK, LOG_DEBUG,
+                        LOC + QString("time %1, drop %2")
+                        .arg(toString(currentFrame), toString(subtitle)));
+                }
+#endif
+            }
+        }
+
+        // Always add one subtitle.
+        lock.unlock();
+        if (!m_atEnd)
+        {
+            ret = m_subreader->ReadNextSubtitle();
+            if (ret < 0)
+            {
+                m_atEnd = true;
+#ifdef DEBUG_SUBTITLES
+                if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
+                {
+                    LOG(VB_PLAYBACK, LOG_DEBUG,
+                        LOC + QString("time %1, no subtitle available")
+                        .arg(toString(currentFrame)));
+                }
+#endif
+            }
+        }
+        lock.relock();
+    }
 
     float tmp = 0.0;
     QRect dummy;
     videoOut->GetOSDBounds(dummy, m_safeArea, tmp, tmp, tmp);
 
+    [[maybe_unused]] bool assForceNext {false};
     while (!subs->m_buffers.empty())
     {
         AVSubtitle subtitle = subs->m_buffers.front();
         if (subtitle.start_display_time > currentFrame->m_timecode.count())
+        {
+#ifdef DEBUG_SUBTITLES
+            if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
+            {
+                LOG(VB_PLAYBACK, LOG_DEBUG,
+                    LOC + QString("time %1, next %2")
+                    .arg(toString(currentFrame), toString(subtitle)));
+            }
+#endif
             break;
+        }
+
+        // If this is the most recently displayed subtitle and a
+        // backward jump means that it needs to be displayed again,
+        // the call to ass_render_frame will say there is no work to
+        // be done. Force RenderAssTrack to display the subtitle
+        // anyway.
+        assForceNext = true;
 
         auto displayfor = std::chrono::milliseconds(subtitle.end_display_time -
                                                     subtitle.start_display_time);
+#ifdef DEBUG_SUBTITLES
+        if (VERBOSE_LEVEL_CHECK(VB_PLAYBACK, LOG_DEBUG))
+        {
+            LOG(VB_PLAYBACK, LOG_DEBUG,
+                LOC + QString("time %1, show %2")
+                .arg(toString(currentFrame), toString(subtitle)));
+        }
+#endif
         if (displayfor == 0ms)
             displayfor = 60s;
         displayfor = (displayfor < 50ms) ? 50ms : displayfor;
@@ -1898,37 +2040,45 @@ void SubtitleScreen::DisplayAVSubtitles(void)
                     if ((m_player->GetFrameRate() > 26.0F ||
                          m_player->GetFrameRate() < 24.0F) && bottom <= 480)
                         sd_height = 480;
-                    int height = ((currentFrame->m_height <= sd_height) &&
-                                  (bottom <= sd_height)) ? sd_height :
-                                 ((currentFrame->m_height <= 720) && bottom <= 720)
-                                   ? 720 : 1080;
-                    int width  = ((currentFrame->m_width  <= 720) &&
-                                  (right <= 720)) ? 720 :
-                                 ((currentFrame->m_width  <= 1280) &&
-                                  (right <= 1280)) ? 1280 : 1920;
+
+                    int height { 1080 };
+                    if ((currentFrame->m_height <= sd_height) &&
+                        (bottom <= sd_height))
+                        height = sd_height;
+                    else if ((currentFrame->m_height <= 720) && bottom <= 720)
+                        height = 720;
+
+                    int width { 1920 };
+                    if ((currentFrame->m_width  <= 720) && (right <= 720))
+                        width = 720;
+                    else if ((currentFrame->m_width  <= 1280) &&
+                             (right <= 1280))
+                        width = 1280;
                     display = QRect(0, 0, width, height);
                 }
 
                 // split into upper/lower to allow zooming
                 QRect bbox;
-                int uh = display.height() / 2 - rect->y;
+                int uh = (display.height() / 2) - rect->y;
                 std::chrono::milliseconds displayuntil = currentFrame->m_timecode + displayfor;
                 if (uh > 0)
                 {
                     bbox = QRect(0, 0, rect->w, uh);
                     uh = DisplayScaledAVSubtitles(rect, bbox, true, display,
-                                                  subtitle.forced,
+                                                  rect->flags & AV_SUBTITLE_FLAG_FORCED,
                                                   QString("avsub%1t").arg(i),
                                                   displayuntil, late);
                 }
                 else
+                {
                     uh = 0;
+                }
                 int lh = rect->h - uh;
                 if (lh > 0)
                 {
                     bbox = QRect(0, uh, rect->w, lh);
                     DisplayScaledAVSubtitles(rect, bbox, false, display,
-                                             subtitle.forced,
+                                             rect->flags & AV_SUBTITLE_FLAG_FORCED,
                                              QString("avsub%1b").arg(i),
                                              displayuntil, late);
                 }
@@ -1937,14 +2087,14 @@ void SubtitleScreen::DisplayAVSubtitles(void)
             else if (displaysub && rect->type == SUBTITLE_ASS)
             {
                 InitialiseAssTrack(m_player->GetDecoder()->GetTrack(kTrackTypeSubtitle));
-                AddAssEvent(rect->ass);
+                AddAssEvent(rect->ass, subtitle.start_display_time, subtitle.end_display_time);
             }
 #endif
         }
         SubtitleReader::FreeAVSubtitle(subtitle);
     }
 #ifdef USING_LIBASS
-    RenderAssTrack(currentFrame->m_timecode);
+    RenderAssTrack(currentFrame->m_timecode, assForceNext);
 #endif
 }
 
@@ -1983,24 +2133,20 @@ int SubtitleScreen::DisplayScaledAVSubtitles(const AVSubtitleRect *rect,
         for (int x = bbox.left(); x <= bbox.right(); ++x)
         {
             const uint8_t color =
-                rect->data[0][y * rect->linesize[0] + x];
+                rect->data[0][(y * rect->linesize[0]) + x];
             const uint32_t pixel = *((uint32_t *)rect->data[1] + color);
             if (pixel & 0xff000000)
             {
                 empty = false;
-                if (x < xmin)
-                    xmin = x;
-                if (x > xmax)
-                    xmax = x;
+                xmin = std::min(x, xmin);
+                xmax = std::max(x, xmax);
             }
         }
 
         if (!empty)
         {
-            if (y < ymin)
-                ymin = y;
-            if (y > ymax)
-                ymax = y;
+            ymin = std::min(y, ymin);
+            ymax = std::max(y, ymax);
         }
         else if (!prev_empty)
         {
@@ -2046,7 +2192,7 @@ int SubtitleScreen::DisplayScaledAVSubtitles(const AVSubtitleRect *rect,
         {
             int xsrc = x + bbox.left();
             const uint8_t color =
-                rect->data[0][ysrc * rect->linesize[0] + xsrc];
+                rect->data[0][(ysrc * rect->linesize[0]) + xsrc];
             const uint32_t pixel = *((uint32_t *)rect->data[1] + color);
             qImage.setPixel(x, y, pixel);
         }
@@ -2106,82 +2252,6 @@ int SubtitleScreen::DisplayScaledAVSubtitles(const AVSubtitleRect *rect,
     }
 
     return (ysplit + 1);
-}
-
-void SubtitleScreen::DisplayTextSubtitles(void)
-{
-    if (!m_player || !m_subreader)
-        return;
-
-    bool changed = (m_textFontZoom != m_textFontZoomPrev);
-    changed |= (m_textFontDelayMs != m_textFontDelayMsPrev);
-    changed |= (m_textFontMinDurationMsPrev != m_textFontMinDurationMs);
-    changed |= (m_textFontDurationExtensionMsPrev != m_textFontDurationExtensionMs);
-    MythVideoOutput *vo = m_player->GetVideoOutput();
-    if (!vo)
-        return;
-    m_safeArea = vo->GetSafeRect();
-
-    MythVideoFrame *currentFrame = vo->GetLastShownFrame();
-    if (!currentFrame)
-        return;
-
-    TextSubtitles *subs = m_subreader->GetTextSubtitles();
-    subs->Lock();
-    uint64_t playPos = 0;
-    int playPosAdj = m_textFontDelayMs.count();
-    if (subs->IsFrameBasedTiming())
-    {
-        // frame based subtitles get out of synch after running mythcommflag
-        // for the file, i.e., the following number is wrong and does not
-        // match the subtitle frame numbers:
-        playPos = currentFrame->m_frameNumber;
-        playPosAdj /= m_player->GetFrameRate();
-    }
-    else
-    {
-        // Use timecodes for time based SRT subtitles. Feeding this into
-        // NormalizeVideoTimecode() should adjust for non-zero start times
-        // and wraps. For MPEG, wraps will occur just once every 26.5 hours
-        // and other formats less frequently so this should be sufficient.
-        // Note: timecodes should now always be valid even in the case
-        // when a frame doesn't have a valid timestamp. If an exception is
-        // found where this is not true then we need to use the frameNumber
-        // when timecode is not defined by uncommenting the following lines.
-        //if (currentFrame->timecode == 0)
-        //    playPos = (uint64_t)
-        //        ((currentFrame->frameNumber / video_frame_rate) * 1000);
-        //else
-        auto tc_ms = currentFrame->m_timecode;
-        playPos = m_player->GetDecoder()->NormalizeVideoTimecode(tc_ms).count();
-    }
-    playPos -= playPosAdj;
-    if (playPos != 0)
-        changed |= subs->HasSubtitleChanged(playPos);
-    if (!changed)
-    {
-        subs->Unlock();
-        return;
-    }
-
-    SetElementDeleted();
-    DeleteAllChildren();
-
-    if (playPos == 0)
-    {
-        subs->Unlock();
-        return;
-    }
-
-    QStringList rawsubs = subs->GetSubtitles(playPos);
-    if (rawsubs.empty())
-    {
-        subs->Unlock();
-        return;
-    }
-
-    subs->Unlock();
-    DrawTextSubtitles(rawsubs, 0ms, 0ms);
 }
 
 void SubtitleScreen::DisplayRawTextSubtitles(void)
@@ -2282,7 +2352,7 @@ void SubtitleScreen::DisplayCC708Subtitles(void)
             continue;
 
         QMutexLocker locker(&win.m_lock);
-        vector<CC708String*> list = win.GetStrings();
+        std::vector<CC708String*> list = win.GetStrings();
         if (!list.empty())
         {
             auto *fsub = new FormattedTextSubtitle708(win, i, list, m_family,
@@ -2464,6 +2534,12 @@ void SubtitleScreen::InitialiseAssTrack(int tracknum)
     m_assTrackNum = tracknum;
 
     QByteArray header = m_player->GetDecoder()->GetSubHeader(tracknum);
+    if (header.isNull())
+    {
+        TextSubtitleParser* parser = m_player->GetSubReader(tracknum)->GetParser();
+        if (parser)
+            header = parser->GetSubHeader();
+    }
     if (!header.isNull())
         ass_process_codec_private(m_assTrack, header.data(), header.size());
 
@@ -2478,10 +2554,10 @@ void SubtitleScreen::CleanupAssTrack(void)
     m_assTrack = nullptr;
 }
 
-void SubtitleScreen::AddAssEvent(char *event)
+void SubtitleScreen::AddAssEvent(char *event, uint32_t starttime, uint32_t endtime)
 {
     if (m_assTrack && event)
-        ass_process_data(m_assTrack, event, strlen(event));
+        ass_process_chunk(m_assTrack, event, strlen(event), starttime, endtime-starttime);
 }
 
 void SubtitleScreen::ResizeAssRenderer(void)
@@ -2492,7 +2568,7 @@ void SubtitleScreen::ResizeAssRenderer(void)
     ass_set_font_scale(m_assRenderer, 1.0);
 }
 
-void SubtitleScreen::RenderAssTrack(std::chrono::milliseconds timecode)
+void SubtitleScreen::RenderAssTrack(std::chrono::milliseconds timecode, bool force)
 {
     if (!m_player || !m_assRenderer || !m_assTrack)
         return;
@@ -2508,7 +2584,7 @@ void SubtitleScreen::RenderAssTrack(std::chrono::milliseconds timecode)
 
     int changed = 0;
     ASS_Image *images = ass_render_frame(m_assRenderer, m_assTrack, timecode.count(), &changed);
-    if (!changed)
+    if (!changed && !force)
         return;
 
     int count = 0;

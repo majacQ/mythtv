@@ -1,6 +1,6 @@
 // MythTV
-#include "mythconfig.h"
-#include "mythcorecontext.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
 #include "mythvideocolourspace.h"
 #include "opengl/mythnvdecinterop.h"
 
@@ -8,8 +8,16 @@
 #include <chrono>
 #include <thread>
 
+extern "C" {
+#include "libavutil/log.h"
+#define FFNV_LOG_FUNC(logctx, msg, ...) av_log(logctx, AV_LOG_ERROR, msg,  __VA_ARGS__)
+#define FFNV_DEBUG_LOG_FUNC(logctx, msg, ...) av_log(logctx, AV_LOG_DEBUG, msg,  __VA_ARGS__)
+#include <ffnvcodec/dynlink_loader.h>
+}
+
 #define LOC QString("NVDECInterop: ")
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define CUDA_CHECK(CUDA_FUNCS, CUDA_CALL) \
 { \
     CUresult res = (CUDA_FUNCS)->CUDA_CALL;          \
@@ -21,8 +29,7 @@
 }
 
 MythNVDECInterop::MythNVDECInterop(MythPlayerUI* Player, MythRenderOpenGL* Context)
-  : MythOpenGLInterop(Context, GL_NVDEC, Player),
-    m_cudaContext()
+  : MythOpenGLInterop(Context, GL_NVDEC, Player)
 {
     InitialiseCuda();
 }
@@ -47,7 +54,7 @@ void MythNVDECInterop::DeleteTextures()
         LOG(VB_PLAYBACK, LOG_INFO, LOC + "Deleting CUDA resources");
         for (auto it = m_openglTextures.constBegin(); it != m_openglTextures.constEnd(); ++it)
         {
-            vector<MythVideoTextureOpenGL*> textures = it.value();
+            std::vector<MythVideoTextureOpenGL*> textures = it.value();
             for (auto & texture : textures)
             {
                 auto *data = reinterpret_cast<QPair<CUarray,CUgraphicsResource>*>(texture->m_data);
@@ -84,9 +91,9 @@ MythNVDECInterop* MythNVDECInterop::CreateNVDEC(MythPlayerUI* Player, MythRender
     GetNVDECTypes(Context, types);
     if (auto nvdec = types.find(FMT_NVDEC); nvdec != types.end())
     {
-        for (auto type : nvdec->second)
-            if (type == GL_NVDEC)
-                return new MythNVDECInterop(Player, Context);
+        auto matchType = [](auto type){ return (type == GL_NVDEC); };
+        if (std::any_of(nvdec->second.cbegin(), nvdec->second.cend(), matchType))
+            return new MythNVDECInterop(Player, Context);
     }
     return nullptr;
 }
@@ -104,12 +111,13 @@ void MythNVDECInterop::GetNVDECTypes(MythRenderOpenGL* Render, MythInteropGPU::I
  * textures and maps the texture storage to a CUdeviceptr (if that is possible). Alternatively
  * EGL interopability may also be useful.
 */
-vector<MythVideoTextureOpenGL*> MythNVDECInterop::Acquire(MythRenderOpenGL* Context,
-                                                          MythVideoColourSpace* ColourSpace,
-                                                          MythVideoFrame* Frame,
-                                                          FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythNVDECInterop::Acquire(MythRenderOpenGL* Context,
+                          MythVideoColourSpace* ColourSpace,
+                          MythVideoFrame* Frame,
+                          FrameScanType Scan)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
     if (!Frame || !m_cudaContext || !m_cudaFuncs)
         return result;
 
@@ -162,11 +170,11 @@ vector<MythVideoTextureOpenGL*> MythNVDECInterop::Acquire(MythRenderOpenGL* Cont
     bool p010 = MythVideoFrame::ColorDepth(type) > 8;
     if (!m_openglTextures.contains(cudabuffer))
     {
-        vector<QSize> sizes;
-        sizes.emplace_back(QSize(Frame->m_width, Frame->m_height));
-        sizes.emplace_back(QSize(Frame->m_width, Frame->m_height >> 1));
-        vector<MythVideoTextureOpenGL*> textures =
-                MythVideoTextureOpenGL::CreateTextures(m_openglContext, FMT_NVDEC, type, sizes);
+        std::vector<QSize> sizes;
+        sizes.emplace_back(Frame->m_width, Frame->m_height);
+        sizes.emplace_back(Frame->m_width, Frame->m_height >> 1);
+        std::vector<MythVideoTextureOpenGL*> textures =
+            MythVideoTextureOpenGL::CreateTextures(m_openglContext, FMT_NVDEC, type, sizes);
         if (textures.empty())
         {
             CUDA_CHECK(m_cudaFuncs, cuCtxPopCurrent(&dummy))

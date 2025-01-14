@@ -13,9 +13,9 @@
 #include <QCoreApplication>
 
 // MythTV headers
-#include "mythmetaexp.h"
-#include "mthread.h"
-#include "mythprogressdialog.h"
+#include "libmythbase/mthread.h"
+#include "libmythmetadata/mythmetaexp.h"
+#include "libmythui/mythprogressdialog.h"
 
 class VideoMetadataListManager;
 
@@ -54,7 +54,7 @@ class META_PUBLIC VideoScanChanges : public QEvent
     QList<int> m_moved; // intids moved to new filename
     QList<int> m_deleted; // orphaned/deleted intids
 
-    static Type kEventType;
+    static const Type kEventType;
 };
 
 class META_PUBLIC VideoScannerThread : public MThread

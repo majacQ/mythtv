@@ -5,11 +5,12 @@
 #include <QReadWriteLock>
 
 // MythTV
-#include "mythconfig.h"
-#include "compat.h"
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "remotefile.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remotefile.h"
+
 #include "io/mythmediabuffer.h"
 #include "mythiowrapper.h"
 
@@ -484,9 +485,8 @@ char *MythDirRead(int DirID)
     }
     else if (s_localdirs.contains(DirID))
     {
-        struct dirent *dir = nullptr;
-        // glibc deprecated readdir_r in version 2.24,
-        if ((dir = readdir(s_localdirs[DirID])) != nullptr)
+        struct dirent *dir = readdir(s_localdirs[DirID]);
+        if (dir != nullptr)
             return strdup(dir->d_name);
     }
 

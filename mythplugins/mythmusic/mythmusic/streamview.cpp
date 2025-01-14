@@ -1,28 +1,28 @@
 // C++ headers
 #include <chrono>
-#include <iostream>
 #include <cstdlib>
+#include <iostream>
 
 // qt
+#include <QDomDocument>
 #include <QKeyEvent>
 #include <QThread>
-#include <QDomDocument>
 
-// myth
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythmainwindow.h>
-#include <mythuibuttonlist.h>
-#include <mythuibutton.h>
-#include <mythuitext.h>
-#include <mythuiprogressbar.h>
-#include <mythuiutils.h>
-#include <mythdialogbox.h>
-#include <mythuihelper.h>
-#include <mythdownloadmanager.h>
-#include <mythdirs.h>
-#include <musicutils.h>
-#include <mythcoreutil.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythcoreutil.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythmetadata/musicutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuiutils.h>
 
 // mythmusic
 #include "musiccommon.h"
@@ -77,6 +77,7 @@ bool StreamView::Create(void)
 void StreamView::ShowMenu(void)
 {
     auto *menu = new MythMenu(tr("Stream Actions"), this, "mainmenu");
+    menu->AddItemV(MusicCommon::tr("Fullscreen Visualizer"), QVariant::fromValue((int)MV_VISUALIZER));
     menu->AddItem(tr("Add Stream"));
 
     if (m_streamList->GetItemCurrent())
@@ -85,7 +86,6 @@ void StreamView::ShowMenu(void)
         menu->AddItem(tr("Remove Stream"));
     }
 
-    menu->AddItemV(MusicCommon::tr("Fullscreen Visualizer"), QVariant::fromValue((int)MV_VISUALIZER));
     menu->AddItemV(MusicCommon::tr("Lyrics"), QVariant::fromValue((int)MV_LYRICS));
 
     menu->AddItem(tr("More Options"), nullptr, createSubMenu());
@@ -104,7 +104,7 @@ void StreamView::customEvent(QEvent *event)
 {
     bool handled = true;
 
-    if (event->type() == MusicPlayerEvent::PlayedTracksChangedEvent)
+    if (event->type() == MusicPlayerEvent::kPlayedTracksChangedEvent)
     {
         if (!gPlayer->getPlayedTracksList().isEmpty())
             updateTrackInfo(gPlayer->getCurrentMetadata());
@@ -127,7 +127,7 @@ void StreamView::customEvent(QEvent *event)
             m_playedTracksList->SetItemCurrent(item);
         }
     }
-    else if (event->type() == MusicPlayerEvent::TrackChangeEvent)
+    else if (event->type() == MusicPlayerEvent::kTrackChangeEvent)
     {
         auto *mpe = dynamic_cast<MusicPlayerEvent *>(event);
 
@@ -172,7 +172,7 @@ void StreamView::customEvent(QEvent *event)
 
         updateTrackInfo(gPlayer->getCurrentMetadata());
     }
-    else if (event->type() == OutputEvent::Playing)
+    else if (event->type() == OutputEvent::kPlaying)
     {
         if (gPlayer->isPlaying())
         {
@@ -190,7 +190,7 @@ void StreamView::customEvent(QEvent *event)
         // pass it on to the default handler in MusicCommon
         handled = false;
     }
-    else if (event->type() == OutputEvent::Stopped)
+    else if (event->type() == OutputEvent::kStopped)
     {
         if (m_streamList)
         {
@@ -205,19 +205,15 @@ void StreamView::customEvent(QEvent *event)
         // pass it on to the default handler in MusicCommon
         handled = false;
     }
-    else if (event->type() == OutputEvent::Buffering)
+    else if (event->type() == OutputEvent::kBuffering)
     {
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (tokens.isEmpty())
             return;
@@ -231,10 +227,10 @@ void StreamView::customEvent(QEvent *event)
             }
             else if (tokens[1] == "FINISHED")
             {
-                QString url = args[0];
+                const QString& url = args[0];
                 int fileSize  = args[2].toInt();
                 int errorCode = args[4].toInt();
-                QString filename = args[1];
+                const QString& filename = args[1];
 
                 if ((errorCode != 0) || (fileSize == 0))
                     LOG(VB_GENERAL, LOG_ERR, QString("StreamView: failed to download radio icon from '%1'").arg(url));
@@ -251,7 +247,7 @@ void StreamView::customEvent(QEvent *event)
             }
         }
     }
-    else if (event->type() == DecoderHandlerEvent::OperationStart)
+    else if (event->type() == DecoderHandlerEvent::kOperationStart)
     {
         auto *dhe = dynamic_cast<DecoderHandlerEvent*>(event);
         if (!dhe)
@@ -261,7 +257,7 @@ void StreamView::customEvent(QEvent *event)
             m_bufferStatus->SetText(*dhe->getMessage());
         }
     }
-    else if (event->type() == DecoderHandlerEvent::BufferStatus)
+    else if (event->type() == DecoderHandlerEvent::kBufferStatus)
     {
         auto *dhe = dynamic_cast<DecoderHandlerEvent*>(event);
         if (!dhe)
@@ -283,7 +279,7 @@ void StreamView::customEvent(QEvent *event)
             m_bufferProgress->SetUsed(available);
         }
     }
-    else if (event->type() == DecoderHandlerEvent::OperationStop)
+    else if (event->type() == DecoderHandlerEvent::kOperationStop)
     {
         if (m_bufferStatus)
             m_bufferStatus->Reset();
@@ -320,13 +316,19 @@ void StreamView::customEvent(QEvent *event)
                 editStream();
             }
             else
+            {
                 handled = false;
+            }
         }
         else
+        {
             handled = false;
+        }
     }
     else
+    {
         handled = false;
+    }
 
 
     if (!handled)
@@ -343,7 +345,7 @@ bool StreamView::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "EDIT")
@@ -366,7 +368,9 @@ bool StreamView::keyPressEvent(QKeyEvent *event)
             }
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MusicCommon::keyPressEvent(event))
@@ -694,7 +698,9 @@ bool EditStreamMetadata::Create()
         m_formatEdit->SetText(m_streamMeta->MetadataFormat());
     }
     else
+    {
         m_formatEdit->SetText("%a - %t");
+    }
 
     connect(m_searchButton, &MythUIButton::Clicked, this, &EditStreamMetadata::searchClicked);
     connect(m_cancelButton, &MythUIButton::Clicked, this, &MythScreenType::Close);
@@ -1042,7 +1048,9 @@ void SearchStream::doUpdateStreams(void)
             doneWhere = true;
         }
         else
+        {
             sql += "AND genre = :GENRE ";
+        }
     }
 
     if (searchLanguage)
@@ -1053,7 +1061,9 @@ void SearchStream::doUpdateStreams(void)
             doneWhere = true;
         }
         else
+        {
             sql += "AND language = :LANGUAGE ";
+        }
     }
 
     if (searchCountry)
@@ -1064,7 +1074,9 @@ void SearchStream::doUpdateStreams(void)
             doneWhere = true;
         }
         else
+        {
             sql += "AND country = :COUNTRY ";
+        }
     }
 
     if (searchChannel)
@@ -1075,7 +1087,9 @@ void SearchStream::doUpdateStreams(void)
             // doneWhere = true;
         }
         else
+        {
             sql += "AND channel LIKE " + QString("'%%1%' ").arg(channel);
+        }
     }
 
     sql += "ORDER BY broadcaster, channel;";
@@ -1115,7 +1129,7 @@ void SearchStream::doUpdateStreams(void)
         mdata.setDescription(query.value(2).toString());
         mdata.setGenre(query.value(3).toString());
 
-        for (int x = 0; x < STREAMURLCOUNT; x++)
+        for (size_t x = 0; x < STREAMURLCOUNT; x++)
             mdata.setUrl(query.value(4 + x).toString(), x);
 
         mdata.setLogoUrl(query.value(9).toString());

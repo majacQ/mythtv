@@ -3,7 +3,11 @@
 #ifndef EXTERNALSIGNALMONITOR_H
 #define EXTERNALSIGNALMONITOR_H
 
+#include <cstdint>
+
 #include <QMap>
+
+#include "libmythbase/mythchrono.h"
 
 #include "dtvsignalmonitor.h"
 #include "ExternalChannel.h"

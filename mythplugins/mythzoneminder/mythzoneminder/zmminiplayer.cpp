@@ -7,17 +7,14 @@
 // Qt
 #include <QTimer>
 
-// mythtv
-#include <mythcontext.h>
-#include <lcddevice.h>
-#include <mythuiimage.h>
-#include <mythmainwindow.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/lcddevice.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuiimage.h>
 
 // mythzoneminder
 #include "zmclient.h"
-
-// the maximum image size we are ever likely to get from ZM
-#define MAX_IMAGE_SIZE  (2048*1536*3)
 
 static constexpr std::chrono::milliseconds FRAME_UPDATE_TIME { 100ms };  // try to update the frame 10 times a second
 
@@ -72,7 +69,7 @@ bool ZMMiniPlayer::Create(void)
 
 void ZMMiniPlayer::customEvent (QEvent* event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent*>(event);
         if (!me)
@@ -126,7 +123,7 @@ bool ZMMiniPlayer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "SELECT")
@@ -142,7 +139,9 @@ bool ZMMiniPlayer::keyPressEvent(QKeyEvent *event)
         {
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && ZMLivePlayer::keyPressEvent(event))

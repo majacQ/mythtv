@@ -1,7 +1,6 @@
 // MythTV
-#include "config.h"
-#include "mythcorecontext.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 #include "mythdisplayx11.h"
 
 // X11
@@ -138,7 +137,7 @@ const MythDisplayModes& MythDisplayX11::GetVideoModes()
             auto mode = res->modes[j];
             if (mode.id != rrmode)
                 continue;
-            if (!(mode.dotClock > 1 && mode.vTotal > 1 && mode.hTotal > 1))
+            if (mode.dotClock <= 1 || mode.vTotal <= 1 || mode.hTotal <= 1)
                 continue;
             auto width = static_cast<int>(mode.width);
             auto height = static_cast<int>(mode.height);
@@ -165,8 +164,8 @@ const MythDisplayModes& MythDisplayX11::GetVideoModes()
         }
     }
 
-    for (auto it = screenmap.begin(); screenmap.end() != it; ++it)
-        m_videoModes.push_back(it->second);
+    for (auto & it : screenmap)
+        m_videoModes.push_back(it.second);
 
     DebugModes();
     XRRFreeOutputInfo(output);

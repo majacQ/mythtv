@@ -37,23 +37,14 @@ SOURCES += metaiowavpack.cpp metaioid3.cpp metaiooggvorbis.cpp
 SOURCES += imagemetadata.cpp imagethumbs.cpp imagescanner.cpp imagemanager.cpp
 SOURCES += musicfilescanner.cpp metadatagrabber.cpp lyricsdata.cpp
 
-INCLUDEPATH += ../libmythbase ../libmythtv
-INCLUDEPATH += ../.. ../ ./ ../libmythui
-INCLUDEPATH += ../.. ../../external/FFmpeg
-INCLUDEPATH += ../libmyth
-INCLUDEPATH += ../libmythservicecontracts
+INCLUDEPATH += .. ../../external/FFmpeg
 
 # for TagLib
 INCLUDEPATH += $${CONFIG_TAGLIB_INCLUDES}
 
-DEPENDPATH += ../ ../libmythui ../libmythbase
-DEPENDPATH += ../libmythtv ../libmyth
-DEPENDPATH += ../libmythservicecontracts
-
 LIBS += -L../libmythbase           -lmythbase-$${LIBVERSION}
 LIBS += -L../libmythui           -lmythui-$${LIBVERSION}
 LIBS += -L../libmythservicecontracts -lmythservicecontracts-$${LIBVERSION}
-LIBS += -L../libmythfreesurround -lmythfreesurround-$${LIBVERSION}
 LIBS += -L../../external/FFmpeg/libswresample -lmythswresample
 LIBS += -L../../external/FFmpeg/libavutil -lmythavutil
 LIBS += -L../../external/FFmpeg/libavcodec -lmythavcodec
@@ -61,9 +52,8 @@ LIBS += -L../../external/FFmpeg/libavformat -lmythavformat
 LIBS += -L../libmyth              -lmyth-$${LIBVERSION}
 LIBS += -L../libmythtv              -lmythtv-$${LIBVERSION}
 LIBS += -L../../external/FFmpeg/libswscale -lmythswscale
-LIBS += -L../../external/libudfread -lmythudfread-$${LIBVERSION}
 
-!using_libexiv2_external {
+!using_system_libexiv2 {
     darwin {
         QMAKE_CXXFLAGS = "-I../../external/libexiv2/include" $${QMAKE_CXXFLAGS}
     } else {
@@ -73,13 +63,15 @@ LIBS += -L../../external/libudfread -lmythudfread-$${LIBVERSION}
     LIBS += -L../../external/libexiv2 -lmythexiv2-0.28
 }
 
-!using_libbluray_external {
+!using_system_libbluray {
     INCLUDEPATH += ../../external/libmythbluray/src
     DEPENDPATH += ../../external/libmythbluray
     LIBS += -L../../external/libmythbluray     -lmythbluray-$${LIBVERSION}
+} else {
+    DEFINES += HAVE_LIBBLURAY
 }
 
-using_libbluray_external:android {
+using_system_libbluray:android {
     LIBS += -lbluray -lxml2
 }
 
@@ -89,9 +81,9 @@ LIBS += $${CONFIG_TAGLIB_LIBS}
 win32-msvc*:LIBS += -ltag
 
 using_mheg:LIBS += -L../libmythfreemheg        -lmythfreemheg-$${LIBVERSION}
-using_live:LIBS += -L../libmythlivemedia        -lmythlivemedia-$${LIBVERSION}
 
 mingw:LIBS += -lws2_32
+mingw:LIBS += libbluray
 
 win32-msvc* {
 
@@ -100,7 +92,7 @@ win32-msvc* {
     INCLUDEPATH += $$SRC_PATH_BARE/../platform/win32/msvc/external/taglib/include/taglib
 }
 
-inc.path = $${PREFIX}/include/mythtv/metadata/
+inc.path = $${PREFIX}/include/mythtv/libmythmetadata/
 
 inc.files = cleanup.h  dbaccess.h  dirscan.h  globals.h  parentalcontrols.h
 inc.files += videoscan.h  videoutils.h  videometadata.h  videometadatalistmanager.h
@@ -144,7 +136,7 @@ INCLUDEPATH += $$POSTINC
 include ( ../libs-targetfix.pro )
 
 LIBS += $$EXTRA_LIBS $$LATE_LIBS
-using_libexiv2_external {
+using_system_libexiv2 {
     LIBS += -lexiv2
 }
 

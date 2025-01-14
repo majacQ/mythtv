@@ -2,26 +2,26 @@
 #ifndef GUIDEGRID_H_
 #define GUIDEGRID_H_
 
-// c++
+// C++
 #include <list>
 #include <utility>
 #include <vector>
 
-// qt
+// Qt
 #include <QString>
 #include <QDateTime>
 #include <QEvent>
 
-// myth
-#include "mythscreentype.h"
-#include "programinfo.h"
-#include "channelgroup.h"
-#include "channelutil.h"
-#include "mythuiguidegrid.h"
-#include "mthreadpool.h"
-#include "tv_play.h"
+// MythTV
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/programinfo.h"
+#include "libmythtv/channelgroup.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythscreentype.h"
+#include "libmythui/mythuiguidegrid.h"
 
-// mythfrontend
+// MythFrontend
 #include "schedulecommon.h"
 
 class ProgramInfo;
@@ -182,7 +182,7 @@ class GuideGrid : public ScheduleCommon, public JumpToChannelListener
 
     Q_DISABLE_COPY(GuideGrid);
 
-    enum MoveVector {
+    enum MoveVector : std::uint8_t {
         kScrollUp,
         kScrollDown,
         kScrollLeft,
@@ -280,12 +280,9 @@ private:
 
     int               m_changrpid {-1};
     ChannelGroupList  m_changrplist;
+    ChannelGroupList  m_channelGroupListManual;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex            m_jumpToChannelLock {QMutex::Recursive};
-#else
     QRecursiveMutex   m_jumpToChannelLock;
-#endif
     JumpToChannel    *m_jumpToChannel     {nullptr};
 
     MythUIButtonList *m_timeList          {nullptr};

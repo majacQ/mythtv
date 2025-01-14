@@ -13,7 +13,8 @@
 #include <utility>
 
 // myth
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythpainter.h"
 #include "mythimage.h"
 #include "mythmainwindow.h"
@@ -110,7 +111,9 @@ bool MythUIShape::ParseElement(
             }
         }
         else
+        {
             m_fillBrush.setStyle(Qt::NoBrush);
+        }
     }
     else if (element.tagName() == "line")
     {
@@ -129,7 +132,9 @@ bool MythUIShape::ParseElement(
             m_linePen.setStyle(Qt::SolidLine);
         }
         else
+        {
             m_linePen.setStyle(Qt::NoPen);
+        }
     }
     else if (element.tagName() == "cornerradius")
     {

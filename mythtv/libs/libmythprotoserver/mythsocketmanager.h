@@ -11,25 +11,12 @@
 #include <QWaitCondition>
 
 // MythTV
-#include "socketrequesthandler.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/serverpool.h"
+
 #include "sockethandler.h"
-#include "mythqtcompat.h"
-#include "mthreadpool.h"
-#include "mythsocket.h"
-#include "serverpool.h"
-
-class MythServer : public ServerPool
-{
-    Q_OBJECT
-  public:
-    explicit MythServer(QObject *parent=nullptr);
-
-  signals:
-    void newConnection(qt_socket_fd_t socket);
-
-  protected slots:
-    void newTcpConnection(qt_socket_fd_t socket) override; // ServerPool
-};
+#include "socketrequesthandler.h"
 
 class PROTOSERVER_PUBLIC MythSocketManager : public QObject, public MythSocketCBs
 {
@@ -40,10 +27,8 @@ class PROTOSERVER_PUBLIC MythSocketManager : public QObject, public MythSocketCB
 
     void readyRead(MythSocket *socket) override; // MythSocketCBs
     void connectionClosed(MythSocket *socket) override; // MythSocketCBs
-    void connectionFailed(MythSocket *socket) override // MythSocketCBs
-        { (void)socket; }
-    void connected(MythSocket *socket) override // MythSocketCBs
-        { (void)socket; }
+    void connectionFailed([[maybe_unused]] MythSocket *socket) override {}; // MythSocketCBs
+    void connected([[maybe_unused]] MythSocket *socket) override {}; // MythSocketCBs
 
     void SetThreadCount(uint count);
 
@@ -56,7 +41,7 @@ class PROTOSERVER_PUBLIC MythSocketManager : public QObject, public MythSocketCB
     bool Listen(int port);
 
   public slots:
-    void newConnection(qt_socket_fd_t sd);
+    void newConnection(qintptr sd);
 
   private:
     void ProcessRequestWork(MythSocket *socket);

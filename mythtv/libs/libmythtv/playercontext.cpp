@@ -3,24 +3,24 @@
 
 #include <QPainter>
 
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/storagegroup.h"
 
-#include "playercontext.h"
-#include "mythplayer.h"
-#include "remoteencoder.h"
-#include "livetvchain.h"
-#include "io/mythmediabuffer.h"
-#include "playgroup.h"
-#include "videoouttypes.h"
-#include "storagegroup.h"
-#include "mythcorecontext.h"
-#include "videometadatautil.h"
-#include "metadataimagehelper.h"
-#include "mythlogging.h"
-#include "DVD/mythdvdplayer.h"
 #include "Bluray/mythbdplayer.h"
+#include "DVD/mythdvdplayer.h"
 #include "channelutil.h"
+#include "io/mythmediabuffer.h"
+#include "livetvchain.h"
+#include "metadataimagehelper.h"
+#include "mythplayer.h"
+#include "playercontext.h"
+#include "playgroup.h"
+#include "remoteencoder.h"
 #include "tv_play.h"
+#include "videometadatautil.h"
+#include "videoouttypes.h"
 
 #define LOC QString("playCtx: ")
 
@@ -79,11 +79,17 @@ void PlayerContext::SetInitialTVState(bool islivetv)
                 kState_WatchingRecording : kState_WatchingPreRecorded;
         }
         else if (m_playingInfo->IsVideoDVD())
+        {
             newState = kState_WatchingDVD;
+        }
         else if (m_playingInfo->IsVideoBD())
+        {
             newState = kState_WatchingBD;
+        }
         else
+        {
             newState = kState_WatchingVideo;
+        }
 
         newPlaygroup = m_playingInfo->GetPlaybackGroup();
     }
@@ -199,14 +205,14 @@ void PlayerContext::PushPreviousChannel(void)
 QString PlayerContext::PopPreviousChannel(void)
 {
     if (m_prevChan.empty())
-        return QString();
+        return {};
 
     QString curChan = m_tvchain->GetChannelName(-1);
     if ((curChan == m_prevChan.back()) && !m_prevChan.empty())
         m_prevChan.pop_back();
 
     if (m_prevChan.empty())
-        return QString();
+        return {};
 
     QString chan = m_prevChan.back();
     m_prevChan.pop_back();
@@ -219,7 +225,7 @@ QString PlayerContext::PopPreviousChannel(void)
 QString PlayerContext::GetPreviousChannel(void) const
 {
     if (m_prevChan.empty())
-        return QString();
+        return {};
 
     QString curChan = m_tvchain->GetChannelName(-1);
     QString preChan;
@@ -230,26 +236,22 @@ QString PlayerContext::GetPreviousChannel(void) const
     return preChan;
 }
 
-void PlayerContext::LockPlayingInfo(const char *file, int line) const
+void PlayerContext::LockPlayingInfo([[maybe_unused]] const char *file,
+                                    [[maybe_unused]] int line) const
 {
 #if 0
     LOG(VB_GENERAL, LOG_DEBUG, QString("LockPlayingInfo(%1,%2)")
             .arg(file).arg(line));
-#else
-    Q_UNUSED(file);
-    Q_UNUSED(line);
 #endif
     m_playingInfoLock.lock();
 }
 
-void PlayerContext::UnlockPlayingInfo(const char *file, int line) const
+void PlayerContext::UnlockPlayingInfo([[maybe_unused]] const char *file,
+                                      [[maybe_unused]] int line) const
 {
 #if 0
     LOG(VB_GENERAL, LOG_DEBUG, QString("UnlockPlayingInfo(%1,%2)")
             .arg(file).arg(line));
-#else
-    Q_UNUSED(file);
-    Q_UNUSED(line);
 #endif
     m_playingInfoLock.unlock();
 }
@@ -259,14 +261,12 @@ void PlayerContext::UnlockPlayingInfo(const char *file, int line) const
  *        used to ensure player can only be deleted after
  *        osd in TV() is unlocked.
  */
-void PlayerContext::LockDeletePlayer(const char *file, int line) const
+void PlayerContext::LockDeletePlayer([[maybe_unused]] const char *file,
+                                     [[maybe_unused]] int line) const
 {
 #if 0
     LOG(VB_GENERAL, LOG_DEBUG, QString("LockDeletePlayer(%1,%2)")
             .arg(file).arg(line));
-#else
-    Q_UNUSED(file);
-    Q_UNUSED(line);
 #endif
     m_deletePlayerLock.lock();
 }
@@ -274,14 +274,12 @@ void PlayerContext::LockDeletePlayer(const char *file, int line) const
 /**
  * \brief allow player to be deleted.
  */
-void PlayerContext::UnlockDeletePlayer(const char *file, int line) const
+void PlayerContext::UnlockDeletePlayer([[maybe_unused]] const char *file,
+                                       [[maybe_unused]] int line) const
 {
 #if 0
     LOG(VB_GENERAL, LOG_DEBUG, QString("UnlockDeletePlayer(%1,%2)")
             .arg(file).arg(line));
-#else
-    Q_UNUSED(file);
-    Q_UNUSED(line);
 #endif
     m_deletePlayerLock.unlock();
 }
@@ -425,20 +423,33 @@ QString PlayerContext::GetFilters(const QString &baseFilters) const
 QString PlayerContext::GetPlayMessage(void) const
 {
     QString mesg = QObject::tr("Play");
-    if (m_tsNormal != 1.0F)
+    if (m_ffRewState < 0)
     {
-        if (m_tsNormal == 0.5F)
-            mesg += QString(" 1/2x");
-        else if (0.32F < m_tsNormal && m_tsNormal < 0.34F)
-            mesg += QString(" 1/3x");
-        else if (m_tsNormal == 0.25F)
-            mesg += QString(" 1/4x");
-        else if (m_tsNormal == 0.125F)
-            mesg += QString(" 1/8x");
-        else if (m_tsNormal == 0.0625F)
-            mesg += QString(" 1/16x");
-        else
-            mesg += QString(" %1x").arg(m_tsNormal);
+        mesg = QObject::tr("Rewind");
+        mesg += QString(" %1X").arg(-m_ffRewSpeed);
+    }
+    else if (m_ffRewState > 0)
+    {
+        mesg = QObject::tr("Forward");
+        mesg += QString(" %1X").arg(m_ffRewSpeed);
+    }
+    // Make sure these values for m_ffRewSpeed in TV::ChangeSpeed()
+    // and PlayerContext::GetPlayMessage() stay in sync.
+    else if (m_ffRewSpeed == 0)
+    {
+        mesg += QString(" %1X").arg(m_tsNormal);
+    }
+    else if (m_ffRewSpeed == -1)
+    {
+        mesg += QString(" 1/3X");
+    }
+    else if (m_ffRewSpeed == -2)
+    {
+        mesg += QString(" 1/8X");
+    }
+    else if (m_ffRewSpeed == -3)
+    {
+        mesg += QString(" 1/16X");
     }
 
     return mesg;
@@ -519,6 +530,7 @@ void PlayerContext::SetPlayingInfo(const ProgramInfo *info)
         if (!ignoreDB)
             m_playingInfo->MarkAsInUse(true, m_recUsage);
         m_playingLen = m_playingInfo->GetSecondsInRecording();
+        m_playingRecStart = m_playingInfo->GetRecordingStartTime();
     }
 }
 

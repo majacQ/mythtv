@@ -1,18 +1,19 @@
 
 #include "deletemap.h"
 
+#include <algorithm>
 #include <cstdint>
 
-#include "mythlogging.h"
-#include "osd.h"
+#include "libmythbase/mythcorecontext.h" // for MythCoreContext, etc
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtypes.h"       // for InfoMap
+#include "libmythbase/programinfo.h"
+#include "libmythui/mythuiactions.h"     // for ACTION_DOWN, ACTION_UP
 #include "mythplayer.h"
-#include "programinfo.h"
-#include "mythcorecontext.h"            // for MythCoreContext, etc
-#include "mythmiscutil.h"
-#include "mythtypes.h"                  // for InfoMap
-#include "mythuiactions.h"              // for ACTION_DOWN, ACTION_UP
-#include "playercontext.h"              // for PlayerContext
-#include "tv_actions.h"                 // for ACTION_CLEARMAP, etc
+#include "osd.h"
+#include "playercontext.h"               // for PlayerContext
+#include "tv_actions.h"                  // for ACTION_CLEARMAP, etc
 
 #define LOC     QString("DelMap: ")
 #define EDIT_CHECK do { \
@@ -113,7 +114,9 @@ bool DeleteMap::HandleAction(const QString &action, uint64_t frame)
             AddMark(m_ctx->m_player->GetTotalFrameCount() - 1, MARK_CUT_END);
     }
     else if (action == "NEWCUT")
+    {
         NewCut(frame);
+    }
     else if (action == "DELETE")
     {
         //: Delete the current cut or preserved region
@@ -137,10 +140,7 @@ bool DeleteMap::HandleAction(const QString &action, uint64_t frame)
 void DeleteMap::UpdateSeekAmount(int change)
 {
     m_seekamountpos += change;
-    if (m_seekamountpos > 9)
-        m_seekamountpos = 9;
-    if (m_seekamountpos < 0)
-        m_seekamountpos = 0;
+    m_seekamountpos = std::clamp(m_seekamountpos, 0, 9);
 
     m_seekText = "";
     switch (m_seekamountpos)
@@ -167,7 +167,7 @@ QString DeleteMap::CreateTimeString(uint64_t frame, bool use_cutlist,
     QString fmt = (ms >= 1h) ? "H:mm:ss" : "mm:ss";
     if (full_resolution)
         fmt += ".zzz";
-    return MythFormatTime(ms, fmt);
+    return MythDate::formatTime(ms, fmt);
 }
 
  /**
@@ -302,8 +302,11 @@ void DeleteMap::AddMark(uint64_t frame, MarkTypes type)
             // location
             Delete(frame, "");
         }
-        else // Don't add a mark on top of a mark
+        else
+        {
+            // Don't add a mark on top of a mark
             return;
+        }
     }
 
     int       lasttype  = MARK_UNSET;
@@ -488,7 +491,9 @@ void DeleteMap::NewCut(uint64_t frame)
         }
     }
     else
+    {
         Add(frame, MARK_PLACEHOLDER);
+    }
 
     CleanMap();
     PushDeferred(initialDeleteMap, tr("New Cut"));
@@ -703,7 +708,7 @@ void DeleteMap::CleanMap(void)
 
         // Delete the unwanted frame marks safely, and not while iterating over
         // the map which would lead to a crash
-        for (const long & dit : qAsConst(deleteList))
+        for (const int64_t & dit : std::as_const(deleteList))
         {
             Delete(dit);
         }
@@ -827,8 +832,10 @@ void DeleteMap::TrackerReset(uint64_t frame)
         }
     }
     else
+    {
         m_nextCutStart = GetNearestMark(frame, !IsInDelete(frame),
                                         &m_nextCutStartIsValid);
+    }
     LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("Tracker next CUT_START: %1")
                                    .arg(m_nextCutStart));
 }

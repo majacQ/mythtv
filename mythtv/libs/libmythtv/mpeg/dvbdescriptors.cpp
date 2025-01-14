@@ -1,3 +1,6 @@
+// For windows, force the second argument of `iconv' to non-const.
+#define WINICONV_CONST
+
 // C headers
 #include <iconv.h>
 #include <unistd.h>
@@ -11,9 +14,14 @@
 #include "dvbdescriptors.h"
 #include "iso6937tables.h"
 #include "freesat_huffman.h"
-#include "mythlogging.h"
-#include "programinfo.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
 
+// Decode a text string according to
+//   Draft ETSI EN 300 468 V1.16.1 (2019-05)
+//   Digital Video Broadcasting (DVB);
+//   Specification for Service Information (SI) in DVB systems
+//   Annex A (normative): Coding of text characters
 
 static QString decode_iso6937(const unsigned char *buf, uint length)
 {
@@ -64,7 +72,7 @@ static QString iconv_helper(int which, char *buf, size_t length)
 
     // Allocate room for the output, including space for the Byte
     // Order Mark.
-    size_t outmaxlen = length * 2 + 2;
+    size_t outmaxlen = (length * 2) + 2;
     QByteArray outbytes;
     outbytes.resize(outmaxlen);
     char *outp = outbytes.data();
@@ -134,7 +142,7 @@ QString dvb_decode_text(const unsigned char *src, uint raw_length,
         size_t length = (raw_length - 1) / 2;
         auto *to = new QChar[length];
         for (size_t i=0; i<length; i++)
-            to[i] = QChar((src[1 + i*2] << 8) + src[1 + i*2 + 1]);
+            to[i] = QChar((src[1 + (i*2)] << 8) + src[1 + (i*2) + 1]);
         QString to2(to, length);
         delete [] to;
         return to2;
@@ -147,6 +155,12 @@ QString dvb_decode_text(const unsigned char *src, uint raw_length,
         LOG(VB_SIPARSER, LOG_ERR,
             "dvb_decode_text: Multi-byte coded text is not yet supported.");
         return "";
+    }
+
+    // UTF-8 encoding of ISO/IEC 10646
+    if (src[0] == 0x15)
+    {
+        return decode_text(src, raw_length);
     }
 
     // if a override encoding is specified and the default ISO 6937 encoding
@@ -193,7 +207,7 @@ static QString decode_text(const unsigned char *buf, uint length)
     {
         return iconv_helper(4 + buf[0], (char*)(buf + 1), length - 1);
     }
-    if (buf[0] == 0x10)
+    if ((buf[0] == 0x10) && (length >= 3))
     {
         // If the first byte of the text field has a value "0x10"
         // then the following two bytes carry a 16-bit value (uimsbf) N
@@ -244,7 +258,7 @@ QString dvb_decode_short_name(const unsigned char *src, uint raw_length)
     {
         if (src[i] == 0x86)
         {
-            while ((++i < raw_length) && (src[i] != 0x87))
+            for (i = i + 1; i < raw_length && (src[i] != 0x87); i++)
             {
                 if ((src[i] < 0x80) || (src[i] > 0x9F))
                 {
@@ -377,7 +391,7 @@ void ContentDescriptor::Init(void)
     s_categoryDesc[0x15] = subCatStr
         .arg(QCoreApplication::translate("(Categories)", "Movie"),
              QCoreApplication::translate("(Categories)",
-                                         "Soap/melodrama/folkloric"));
+                                         "Soap/Melodrama/Folkloric"));
     s_categoryDesc[0x16] = subCatStr
         .arg(QCoreApplication::translate("(Categories)", "Movie"),
              QCoreApplication::translate("(Categories)", "Romance"));
@@ -392,9 +406,9 @@ void ContentDescriptor::Init(void)
 
     s_categoryDesc[0x20] = QCoreApplication::translate("(Categories)", "News");
     s_categoryDesc[0x21] = QCoreApplication::translate("(Categories)",
-                                                       "News/weather report");
+                                                       "News/Weather Report");
     s_categoryDesc[0x22] = QCoreApplication::translate("(Categories)",
-                                                       "News magazine");
+                                                       "News Magazine");
     s_categoryDesc[0x23] = QCoreApplication::translate("(Categories)",
                                                        "Documentary");
     s_categoryDesc[0x24] = QCoreApplication::translate("(Categories)",
@@ -487,7 +501,7 @@ void ContentDescriptor::Init(void)
     s_categoryDesc[0x7B] = QCoreApplication::translate("(Categories)", "Fashion");
 
     s_categoryDesc[0x80] = QCoreApplication::translate("(Categories)",
-                             "Social/Policical/Economics");
+                             "Social/Political/Economics");
     s_categoryDesc[0x81] = QCoreApplication::translate("(Categories)",
                              "Magazines/Reports/Documentary");
     s_categoryDesc[0x82] = QCoreApplication::translate("(Categories)",
@@ -498,7 +512,7 @@ void ContentDescriptor::Init(void)
     s_categoryDesc[0x90] = QCoreApplication::translate("(Categories)",
                              "Education/Science/Factual");
     s_categoryDesc[0x91] = QCoreApplication::translate("(Categories)",
-                             "Nature/animals/Environment");
+                             "Nature/Animals/Environment");
     s_categoryDesc[0x92] = QCoreApplication::translate("(Categories)",
                              "Technology/Natural Sciences");
     s_categoryDesc[0x93] = QCoreApplication::translate("(Categories)",
@@ -550,7 +564,13 @@ QString FrequencyListDescriptor::toString() const
     for (uint i = 0; i < FrequencyCount(); i++)
     {
         str += QString("%1").arg(FrequencyHz(i));
-        str += (i+1 < FrequencyCount()) ? ((i+4)%10) ? ", " : ",\n      " : "";
+        if (i+1 < FrequencyCount())
+        {
+            if ((i+4)%10)
+                str += ", ";
+            else
+                str += ",\n      ";
+        }
     }
 
     return str;
@@ -663,6 +683,25 @@ QString TerrestrialDeliverySystemDescriptor::toString() const
              GuardIntervalString(),
              TransmissionModeString()));
 
+    return str;
+}
+
+// 0x79
+QString S2SatelliteDeliverySystemDescriptor::toString() const
+{
+    QString str = QString("S2SatelliteDeliverySystemDescriptor ");
+    str += QString("tag(0x%1) ").arg(DescriptorTag(),2,16,QChar('0'));
+    str += QString("length(%1) ").arg(DescriptorLength());
+
+    str.append(QString("\n      ScramblingSequenceSelector(%1)").arg(ScramblingSequenceSelector()));
+    str.append(QString(" MultipleInputStreamFlag(%1)").arg(MultipleInputStreamFlag()));
+    str.append(QString("\n      NotTimesliceFlag(%1)").arg(NotTimesliceFlag()));
+    str.append(QString(" TSGSMode(%1)").arg(TSGSMode()));
+    //
+    // TBD
+    //
+    str.append(" Dumping\n");
+    str.append(hexdump());
     return str;
 }
 
@@ -901,7 +940,13 @@ QString DVBLogicalChannelDescriptor::toString() const
     for (uint i = 0; i < ChannelCount(); i++)
     {
         ret += QString("%1->%2").arg(ServiceID(i)).arg(ChannelNumber(i));
-        ret += (i+1 < ChannelCount()) ? ((i+4)%10) ? ", " : ",\n      " : "";
+        if (i+1 < ChannelCount())
+        {
+            if ((i+4)%10)
+                ret += ", ";
+            else
+                ret += ",\n      ";
+        }
     }
     return ret;
 }
@@ -912,7 +957,13 @@ QString DVBSimulcastChannelDescriptor::toString() const
     for (uint i = 0; i < ChannelCount(); i++)
     {
         ret += QString("%1->%2").arg(ServiceID(i)).arg(ChannelNumber(i));
-        ret += (i+1 < ChannelCount()) ? ((i+3)%10) ? ", " : ",\n      " : "";
+        if (i+1 < ChannelCount())
+        {
+            if ((i+3)%10)
+                ret += ", ";
+            else
+                ret += ",\n      ";
+        }
     }
     return ret;
 }
@@ -926,7 +977,7 @@ QString SkyLCNDescriptor::toString() const
     ret += QString("\n      RegionID (%1) (0x%2) Raw (0x%3)")
         .arg(RegionID()).arg(RegionID(),4,16,QChar('0')).arg(RegionRaw(),4,16,QChar('0'));
 
-    for (uint i=0; i<ServiceCount(); i++)
+    for (size_t i=0; i<ServiceCount(); i++)
     {
         ret += QString("\n        ServiceID (%1) (0x%2) ").arg(ServiceID(i)).arg(ServiceID(i),4,16,QChar('0'));
         ret += QString("ServiceType (0x%1) ").arg(ServiceType(i),2,16,QChar('0'));
@@ -944,7 +995,7 @@ QString FreesatLCNDescriptor::toString() const
     ret += QString("(0x%1)").arg(DescriptorTag(),2,16,QChar('0'));
     ret += QString(" length(%1)").arg(DescriptorLength());
 
-    for (uint i=0; i<ServiceCount(); i++)
+    for (size_t i=0; i<ServiceCount(); i++)
     {
         ret += QString("\n      ServiceID (%1) (0x%2) ").arg(ServiceID(i)).arg(ServiceID(i),4,16,QChar('0'));
         ret += QString("ChanID (0x%1)").arg(ChanID(i), 4, 16, QChar('0'));

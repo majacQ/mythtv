@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -20,13 +20,14 @@
 #include <QStringList>
 
 // MythTV headers
-#include "upnputil.h"
+#include "httprequest.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythlogging.h"
+
 #include "upnp.h"
 #include "upnphelpers.h"
-#include "compat.h"
-#include "mythconfig.h" // for HAVE_GETIFADDRS
-#include "mythlogging.h"
-#include "httprequest.h"
+#include "upnputil.h"
 
 // POSIX headers 2, needs to be after compat.h for OS X
 #ifndef _WIN32
@@ -44,23 +45,20 @@
 
 QString LookupUDN( const QString &sDeviceType )
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList sList = sDeviceType.split(':', QString::SkipEmptyParts);
-#else
     QStringList sList = sDeviceType.split(':', Qt::SkipEmptyParts);
-#endif
     QString     sLoc  = "LookupUDN(" + sDeviceType + ')';
 
     if (sList.size() <= 2) 
     { 
         LOG(VB_GENERAL, LOG_ERR, sLoc + "- bad device type '" +
                                  sDeviceType + "', not enough tokens"); 
-        return QString();
+        return {};
     }
 
     sList.removeLast();
+    auto config = XmlConfiguration(); // read-write
     QString sName = "UPnP/UDN/" + sList.last();
-    QString sUDN  = UPnp::GetConfiguration()->GetValue( sName, "" );
+    QString sUDN  = config.GetValue(sName, "");
 
     LOG(VB_UPNP, LOG_INFO, sLoc + " sName=" + sName + ", sUDN=" + sUDN);
 
@@ -72,10 +70,8 @@ QString LookupUDN( const QString &sDeviceType )
         // DLNA compliant, we need to remove them
         sUDN = sUDN.mid(1, 36);
 
-        Configuration *pConfig = UPnp::GetConfiguration();
-
-        pConfig->SetValue( sName, sUDN );
-        pConfig->Save();
+        config.SetValue(sName, sUDN);
+        config.Save();
     }
 
     return( sUDN );
@@ -127,7 +123,9 @@ QStringList GetSourceProtocolInfos()
             protocolList << protocolStr.arg(*it, "DLNA.ORG_PN=WMAFULL;" + flags);
         }
         else
+        {
             protocolList << protocolStr.arg(*it, "*");
+        }
     }
 
     return protocolList;

@@ -8,17 +8,18 @@
 #ifndef DVBCHANNEL_H
 #define DVBCHANNEL_H
 
+#include <QMap>
 #include <QObject>
 #include <QString>
-#include <QMap>
 
-#include "mythcontext.h"
-#include "mythdate.h"
-#include "mythdbcon.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdbcon.h"
+
+#include "diseqc.h"
 #include "dtvchannel.h"
 #include "dtvconfparserhelpers.h" // for DTVTunerType
-#include "streamlisteners.h"
-#include "diseqc.h"
+#include "mpeg/streamlisteners.h"
 
 class TVRec;
 class DVBCam;
@@ -155,11 +156,7 @@ class DVBChannel : public DTVChannel
 
     // Tuning State
     mutable QMutex    m_tuneLock;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex    m_hwLock              {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_hwLock;
-#endif
 
     DTVMultiplex      m_desiredTuning;      // Last tuning options Tune() attempted to send to hardware
     DTVMultiplex      m_prevTuning;         // Last tuning options Tune() succesfully sent to hardware

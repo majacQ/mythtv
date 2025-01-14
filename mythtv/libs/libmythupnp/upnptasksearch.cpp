@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -20,13 +20,15 @@
 #include <QNetworkInterface>
 #include <utility>
 
+#include "libmythbase/compat.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythbase/mythversion.h"
+
 #include "upnp.h"
 #include "upnptasksearch.h"
-#include "mythversion.h"
-#include "compat.h"
-#include "mythmiscutil.h"
-#include "mythdate.h"
-#include "mythlogging.h"
 
 static QPair<QHostAddress, int> kLinkLocal6 =
                             QHostAddress::parseSubnet("fe80::/10");
@@ -44,19 +46,18 @@ static QPair<QHostAddress, int> kLinkLocal6 =
 /////////////////////////////////////////////////////////////////////////////
 
 UPnpSearchTask::UPnpSearchTask( int          nServicePort, 
-                                QHostAddress peerAddress,
+                                const QHostAddress& peerAddress,
                                 int          nPeerPort,  
                                 QString      sST, 
                                 QString      sUDN ) :
-    Task("UPnpSearchTask")
+    Task("UPnpSearchTask"),
+    m_nServicePort(nServicePort),
+    m_peerAddress(peerAddress),
+    m_nPeerPort(nPeerPort),
+    m_sST(std::move(sST)),
+    m_sUDN(std::move(sUDN))
 {
-    m_peerAddress = std::move(peerAddress);
-    m_nPeerPort   = nPeerPort;
-    m_sST         = std::move(sST);
-    m_sUDN        = std::move(sUDN);
-    m_nServicePort= nServicePort;
-    m_nMaxAge     = UPnp::GetConfiguration()->GetDuration<std::chrono::seconds>( "UPnP/SSDP/MaxAge" , 1h );
-
+    m_nMaxAge     = XmlConfiguration().GetDuration<std::chrono::seconds>("UPnP/SSDP/MaxAge" , 1h);
 } 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -104,10 +105,10 @@ void UPnpSearchTask::SendMsg( MSocketDevice  *pSocket,
     //
     // loop through all available interfaces
     QList<QNetworkInterface> IFs = QNetworkInterface::allInterfaces();
-    for (const auto & qni : qAsConst(IFs))
+    for (const auto & qni : std::as_const(IFs))
     {
         QList<QNetworkAddressEntry> netAddressList = qni.addressEntries();
-        for (const auto & netAddr : qAsConst(netAddressList))
+        for (const auto & netAddr : std::as_const(netAddressList))
         {
             QString ip_subnet = QString("%1/%2").arg(netAddr.ip().toString()).arg(netAddr.prefixLength());
             QPair<QHostAddress, int> subnet = QHostAddress::parseSubnet(ip_subnet);
@@ -143,7 +144,9 @@ void UPnpSearchTask::SendMsg( MSocketDevice  *pSocket,
 
                 pSocket->writeBlock( scPacket, scPacket.length(), m_peerAddress,
                                     m_nPeerPort );
-                std::this_thread::sleep_for( std::chrono::milliseconds( MythRandom() % 250 ));
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom(0, 250)));
+
                 pSocket->writeBlock( scPacket, scPacket.length(), m_peerAddress,
                                     m_nPeerPort );
             }
@@ -220,7 +223,7 @@ void UPnpSearchTask::ProcessDevice(
     // Process any Embedded Devices
     // ----------------------------------------------------------------------
 
-    for (auto *device : qAsConst(pDevice->m_listDevices))
+    for (auto *device : std::as_const(pDevice->m_listDevices))
         ProcessDevice( pSocket, device);
 }
 

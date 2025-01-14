@@ -2,6 +2,8 @@
 #define MYTHDEINTERLACER_H
 
 // MythTV
+#include "libmyth/mythavframe.h"
+
 #include "videoouttypes.h"
 #include "mythavutil.h"
 
@@ -38,7 +40,7 @@ class MythDeinterlacer
     MythDeintType    m_deintType  { DEINT_NONE };
     bool             m_doubleRate { false };
     bool             m_topFirst   { true  };
-    MythAVFrame      m_frame      { };
+    MythAVFrame      m_frame;
     AVFilterGraph*   m_graph      { nullptr };
     AVFilterContext* m_source     { nullptr };
     AVFilterContext* m_sink       { nullptr };
@@ -47,7 +49,6 @@ class MythDeinterlacer
     uint64_t         m_discontinuityCounter { 0 };
     bool             m_autoFieldOrder  { false };
     uint64_t         m_lastFieldChange { 0 };
-    static bool      s_haveSIMD;
 };
 
 #endif

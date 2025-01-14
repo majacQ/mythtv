@@ -8,11 +8,11 @@
 // qt
 #include <QObject>
 
-// mythtv
-#include "mythmetaexp.h"
-#include "mythcorecontext.h"
-#include "musicmetadata.h"
-#include "mythmiscutil.h"
+// MythTV
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythmetadata/musicmetadata.h"
+#include "libmythmetadata/mythmetaexp.h"
 
 class LyricsData;
 class TestLyrics;
@@ -38,8 +38,7 @@ class META_PUBLIC LyricsLine
   private:
     QString formatTime(void) const
     {
-        QString timestr = MythFormatTime(m_time,"mm:ss.zzz");
-        timestr.chop(1); // Chop 1 to return hundredths
+        QString timestr = MythDate::formatTime(m_time,"mm:ss.zz");
         return QString("[%1]").arg(timestr);
     }
 };
@@ -84,7 +83,7 @@ class META_PUBLIC LyricsData : public QObject
     bool changed(void) const { return m_changed; }
     void setChanged(bool changed) { m_changed = changed; }
 
-    enum Status
+    enum Status : std::uint8_t
     {
       STATUS_NOTLOADED = 0, // not looked for any lyrics yet
       STATUS_SEARCHING,     // search is taking place

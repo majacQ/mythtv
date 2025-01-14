@@ -1,14 +1,15 @@
 #ifndef VIDEODLG_H_
 #define VIDEODLG_H_
 
+// Qt
 #include <QPointer>
 #include <QStringList>
 
-#include "mythscreentype.h"
-#include "metadatacommon.h"
-
-#include "parentalcontrols.h"
-#include "quicksp.h"
+// MythTV
+#include "libmythmetadata/metadatacommon.h"
+#include "libmythmetadata/parentalcontrols.h"
+#include "libmythmetadata/quicksp.h"
+#include "libmythui/mythscreentype.h"
 
 class MythUIText;
 class MythUIButtonList;
@@ -26,20 +27,22 @@ class MythMenu;
 
 class QUrl;
 
-enum ImageDownloadErrorState { esOK, esError, esTimeout };
+enum ImageDownloadErrorState : std::uint8_t { esOK, esError, esTimeout };
 
 class VideoDialog : public MythScreenType
 {
     Q_OBJECT
 
   public:
-    enum DialogType { DLG_DEFAULT = 0, DLG_BROWSER = 0x1, DLG_GALLERY = 0x2,
-                      DLG_TREE = 0x4, DLG_MANAGER = 0x8, dtLast };
+    enum DialogType : std::uint8_t
+                    { DLG_DEFAULT = 0, DLG_BROWSER = 0x1, DLG_GALLERY = 0x2,
+                      DLG_TREE = 0x4, DLG_MANAGER = 0x8, dtLast = 0x9 };
 
-    enum BrowseType { BRS_FOLDER = 0, BRS_GENRE = 0x1, BRS_CATEGORY = 0x2,
+    enum BrowseType : std::uint16_t
+                    { BRS_FOLDER = 0, BRS_GENRE = 0x1, BRS_CATEGORY = 0x2,
                       BRS_YEAR = 0x4, BRS_DIRECTOR = 0x8, BRS_CAST = 0x10,
                       BRS_USERRATING = 0x20, BRS_INSERTDATE = 0x40,
-                      BRS_TVMOVIE = 0x80, BRS_STUDIO = 0x100, btLast };
+                      BRS_TVMOVIE = 0x80, BRS_STUDIO = 0x100, btLast = 0x101 };
 
     using VideoListPtr = simple_ref_ptr<class VideoList>;
     using VideoListDeathDelayPtr = QPointer<class VideoListDeathDelay>;
@@ -60,6 +63,7 @@ class VideoDialog : public MythScreenType
 
   public slots:
     void searchComplete(const QString& string);
+    void playbackStateChanged(const QString &filename);
 
   protected slots:
     void Init() override; /// Called after the screen is created by MythScreenStack
@@ -67,6 +71,8 @@ class VideoDialog : public MythScreenType
 
   private slots:
     void UpdatePosition();
+    void UpdateVisible(MythUIButtonListItem *item);
+    static void UpdateWatchedState(MythUIButtonListItem *item);
     void UpdateText(MythUIButtonListItem *item);
     void handleSelect(MythUIButtonListItem *item);
     void SetCurrentNode(MythGenericTree *node);
@@ -183,6 +189,7 @@ class VideoDialog : public MythScreenType
 
     void OnVideoImageSetDone(VideoMetadata *metadata);
     void OnVideoSearchDone(MetadataLookup *lookup);
+    void OnPlaybackStopped();
 
   private:
     MythDialogBox    *m_menuPopup          {nullptr};
@@ -210,6 +217,7 @@ class VideoDialog : public MythScreenType
     MythUIStateType  *m_userRatingState    {nullptr};
     MythUIStateType  *m_watchedState       {nullptr};
     MythUIStateType  *m_studioState        {nullptr};
+    MythUIStateType  *m_bookmarkState      {nullptr};
 
     MetadataFactory *m_metadataFactory     {nullptr};
 

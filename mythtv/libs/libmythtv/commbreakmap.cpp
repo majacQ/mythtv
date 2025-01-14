@@ -1,8 +1,9 @@
 // MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/programinfo.h"
+
 #include "commbreakmap.h"
-#include "mythcontext.h"
-#include "mythmiscutil.h"
-#include "programinfo.h"
 
 #define LOC QString("CommBreakMap: ")
 
@@ -166,12 +167,12 @@ bool CommBreakMap::AutoCommercialSkip(uint64_t &jumpToFrame,
     if (m_commBreakIter == m_commBreakMap.end())
         return false;
 
-    if (!((*m_commBreakIter == MARK_COMM_START) &&
-          (((kCommSkipOn == m_autocommercialskip) &&
-            (framesPlayed >= m_commBreakIter.key())) ||
-           ((kCommSkipNotify == m_autocommercialskip) &&
-            (framesPlayed + m_commnotifyamount.count() * video_frame_rate >=
-             m_commBreakIter.key())))))
+    if ((*m_commBreakIter != MARK_COMM_START) ||
+          (((kCommSkipOn != m_autocommercialskip) ||
+            (framesPlayed < m_commBreakIter.key())) &&
+           ((kCommSkipNotify != m_autocommercialskip) ||
+            (framesPlayed + m_commnotifyamount.count() * video_frame_rate <
+             m_commBreakIter.key()))))
     {
         return false;
     }
@@ -215,7 +216,7 @@ bool CommBreakMap::AutoCommercialSkip(uint64_t &jumpToFrame,
 
     auto skipped_seconds = std::chrono::seconds((int)((m_commBreakIter.key() -
                                  framesPlayed) / video_frame_rate));
-    QString skipTime = MythFormatTime(skipped_seconds, "m:ss");
+    QString skipTime = MythDate::formatTime(skipped_seconds, "m:ss");
     if (kCommSkipOn == m_autocommercialskip)
     {
         //: %1 is the skip time
@@ -335,7 +336,7 @@ bool CommBreakMap::DoSkipCommercials(uint64_t &jumpToFrame,
         MergeShortCommercials(video_frame_rate);
     int64_t framediff = m_commBreakIter.key() - framesPlayed;
     auto skipped_seconds = std::chrono::seconds((int)(framediff / video_frame_rate));
-    QString skipTime = MythFormatTime(skipped_seconds, "m:ss");
+    QString skipTime = MythDate::formatTime(skipped_seconds, "m:ss");
 
     if ((MythDate::secsInPast(m_lastIgnoredManualSkip) > 3s) &&
         (abs(skipped_seconds) >= m_maxskip))

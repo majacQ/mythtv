@@ -4,16 +4,16 @@
 // qt
 #include <QEvent>
 
-// myth
-#include "mythlogging.h"
-#include "mythcontext.h"
-#include "mythmainwindow.h"
-#include "mythuihelper.h"
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuihelper.h>
 
 // mythbrowser
-#include "webpage.h"
 #include "bookmarkeditor.h"
 #include "mythbrowser.h"
+#include "webpage.h"
 
 MythBrowser::MythBrowser(MythScreenStack *parent, QStringList &urlList)
     : MythScreenType (parent, "mythbrowser"),
@@ -271,10 +271,8 @@ void MythBrowser::slotLoadStarted(void)
         item->SetText(tr("Loading..."));
 }
 
-void MythBrowser::slotLoadFinished(bool OK)
+void MythBrowser::slotLoadFinished([[maybe_unused]] bool OK)
 {
-    (void) OK;
-
     if (m_progressBar)
         m_progressBar->SetUsed(0);
 
@@ -330,7 +328,7 @@ bool MythBrowser::keyPressEvent(QKeyEvent *event)
     for (int i = 0; i < actions.size() && !handled; i++)
     {
 
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -393,7 +391,9 @@ bool MythBrowser::keyPressEvent(QKeyEvent *event)
             slotDeleteTab();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))

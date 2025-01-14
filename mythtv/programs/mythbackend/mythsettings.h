@@ -14,7 +14,7 @@ class MythSettingBase
   public:
     MythSettingBase() = default;
     virtual ~MythSettingBase() = default;
-    virtual QString ToHTML(uint /*depth*/) const { return QString(); }
+    virtual QString ToHTML(uint /*depth*/) const { return {}; }
 };
 using MythSettingList = QList<MythSettingBase*>;
 
@@ -39,14 +39,14 @@ class MythSettingGroup : public MythSettingBase
 class MythSetting : public MythSettingBase
 {
   public:
-    enum SettingType {
+    enum SettingType : std::uint8_t {
         kFile,
         kHost,
         kGlobal,
         kInvalidSettingType,
     };
 
-    enum DataType {
+    enum DataType : std::uint8_t {
         kInteger,
         kUnsignedInteger,
         kIntegerRange,

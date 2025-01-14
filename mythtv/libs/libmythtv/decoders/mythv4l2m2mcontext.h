@@ -13,13 +13,13 @@ class MythV4L2M2MContext : public MythDRMPRIMEContext
     MythV4L2M2MContext(DecoderBase *Parent, MythCodecID CodecID);
    ~MythV4L2M2MContext() override = default;
     static MythCodecID GetSupportedCodec (AVCodecContext **Context,
-                                          AVCodec       **Codec,
+                                          const AVCodec **Codec,
                                           const QString  &Decoder,
                                           AVStream       *Stream,
                                           uint            StreamType);
     void        InitVideoCodec           (AVCodecContext *Context, bool SelectedStream, bool &DirectRendering) override;
     bool        RetrieveFrame            (AVCodecContext *Context, MythVideoFrame *Frame, AVFrame *AvFrame) override;
-    void        SetDecoderOptions        (AVCodecContext* Context, AVCodec* Codec) override;
+    void        SetDecoderOptions        (AVCodecContext* Context, const AVCodec* Codec) override;
     int         HwDecoderInit            (AVCodecContext *Context) override;
     bool        DecoderWillResetOnFlush  () override;
     static bool GetBuffer                (AVCodecContext *Context, MythVideoFrame *Frame, AVFrame *AvFrame, int/*Flags*/);
@@ -28,7 +28,6 @@ class MythV4L2M2MContext : public MythDRMPRIMEContext
 
     static enum AVPixelFormat GetV4L2RequestFormat(AVCodecContext *Context, const AVPixelFormat *PixFmt);
     static int  InitialiseV4L2RequestContext(AVCodecContext *Context);
-    bool        GetRequestBuffer(AVCodecContext* Context, MythVideoFrame* Frame, AVFrame* AvFrame);
 
   protected:
     static const V4L2Profiles& GetStandardProfiles();

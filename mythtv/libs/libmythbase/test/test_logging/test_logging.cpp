@@ -32,9 +32,9 @@ void TestLogging::test_syslogGetFacility_data (void)
 #ifdef _WIN32
 #elif defined(Q_OS_ANDROID)
 #else
-    QTest::newRow("auth")   << "auth"   << static_cast<int>(LOG_AUTH);
-    QTest::newRow("user")   << "user"   << static_cast<int>(LOG_USER);
-    QTest::newRow("local7") << "local7" << static_cast<int>(LOG_LOCAL7);
+    QTest::newRow("auth")   << "auth"   << LOG_AUTH;
+    QTest::newRow("user")   << "user"   << LOG_USER;
+    QTest::newRow("local7") << "local7" << LOG_LOCAL7;
     QTest::newRow("random") << "random" << -1;
     QTest::newRow("empty")  << ""       << -1;
 #endif
@@ -103,12 +103,12 @@ void TestLogging::test_verboseArgParse_kwd_data (void)
     QTest::addColumn<int>("expectedExit");
     QTest::addColumn<QString>("expectedOutput");
 
-    QTest::newRow("empty")     << ""          << GENERIC_EXIT_OK << "";
-    QTest::newRow("nextarg")   << "-x"        << GENERIC_EXIT_INVALID_CMDLINE << "Invalid or missing";
-    QTest::newRow("help")      << "help"      << GENERIC_EXIT_INVALID_CMDLINE << "Verbose debug levels";
-    QTest::newRow("important") << "important" << GENERIC_EXIT_OK << R"("important" log mask)";
-    QTest::newRow("extra")     << "extra"     << GENERIC_EXIT_OK << R"("extra" log mask)";
-    QTest::newRow("random")    << "random"    << GENERIC_EXIT_INVALID_CMDLINE << "Unknown argument";
+    QTest::newRow("empty")     << ""          << (int)GENERIC_EXIT_OK << "";
+    QTest::newRow("nextarg")   << "-x"        << (int)GENERIC_EXIT_INVALID_CMDLINE << "Invalid or missing";
+    QTest::newRow("help")      << "help"      << (int)GENERIC_EXIT_INVALID_CMDLINE << "Verbose debug levels";
+    QTest::newRow("important") << "important" << (int)GENERIC_EXIT_OK << R"("important" log mask)";
+    QTest::newRow("extra")     << "extra"     << (int)GENERIC_EXIT_OK << R"("extra" log mask)";
+    QTest::newRow("random")    << "random"    << (int)GENERIC_EXIT_INVALID_CMDLINE << "Unknown argument";
 }
 
 void TestLogging::test_verboseArgParse_kwd (void)
@@ -145,8 +145,8 @@ void TestLogging::test_verboseArgParse_twice (void)
     std::cerr.rdbuf(oldCoutBuffer);
 
     // Check results
-    QCOMPARE(GENERIC_EXIT_OK, actualExit1);
-    QCOMPARE(GENERIC_EXIT_INVALID_CMDLINE, actualExit2);
+    QCOMPARE((int)GENERIC_EXIT_OK, actualExit1);
+    QCOMPARE((int)GENERIC_EXIT_INVALID_CMDLINE, actualExit2);
     QString actualOutput = QString::fromStdString(buffer.str());
     QVERIFY(actualOutput.contains("-v general,system,socket"));
 }
@@ -191,7 +191,7 @@ void TestLogging::test_verboseArgParse_class (void)
     std::cerr.rdbuf(oldCoutBuffer);
 
     // Check results
-    QCOMPARE(GENERIC_EXIT_OK, actualExit);
+    QCOMPARE((int)GENERIC_EXIT_OK, actualExit);
     QString actualOutput = QString::fromStdString(buffer.str());
     QVERIFY(actualOutput.isEmpty());
     QCOMPARE(verboseMask, expectedVMask);
@@ -213,18 +213,18 @@ void TestLogging::test_verboseArgParse_level_data (void)
     // program even though they should produce identical output.
     QTest::newRow("general")         << "general"
                                      << static_cast<uint64_t>(VB_GENERAL)
-                                     << static_cast<uint64_t>(0) << static_cast<int>(0)
-                                     << static_cast<uint64_t>(0) << static_cast<int>(0)
+                                     << static_cast<uint64_t>(0) << 0
+                                     << static_cast<uint64_t>(0) << 0
                                      << "general";
     QTest::newRow("general:info")    << "general:info"
                                      << static_cast<uint64_t>(VB_GENERAL)
                                      << static_cast<uint64_t>(VB_GENERAL) << static_cast<int>(LOG_INFO)
-                                     << static_cast<uint64_t>(0) << static_cast<int>(0)
+                                     << static_cast<uint64_t>(0) << 0
                                      << "general";
     QTest::newRow("general:notice")  << "general:notice"
                                      << static_cast<uint64_t>(VB_GENERAL)
                                      << static_cast<uint64_t>(VB_GENERAL) << static_cast<int>(LOG_NOTICE)
-                                     << static_cast<uint64_t>(0) << static_cast<int>(0)
+                                     << static_cast<uint64_t>(0) << 0
                                      << "general";
     QTest::newRow("general:notice,file:debug")
                                      << "general:notice,file:debug"
@@ -254,7 +254,7 @@ void TestLogging::test_verboseArgParse_level (void)
     std::cerr.rdbuf(oldCoutBuffer);
 
     // Check results
-    QCOMPARE(GENERIC_EXIT_OK, actualExit);
+    QCOMPARE((int)GENERIC_EXIT_OK, actualExit);
     QString actualOutput = QString::fromStdString(buffer.str());
     QVERIFY(actualOutput.isEmpty());
     QCOMPARE(verboseMask, expectedVMask);
@@ -276,52 +276,46 @@ void TestLogging::test_logPropagateCalc_data (void)
     QTest::addColumn<QString>("argument");
     QTest::addColumn<int>("quiet");
     QTest::addColumn<int>("facility");
-    QTest::addColumn<bool>("dblog");
     QTest::addColumn<bool>("propagate");
     QTest::addColumn<QString>("expectedArgs");
 
     QTest::newRow("plain")   << "general"
-                             << static_cast<int>(0) << static_cast<int>(-1)
-                             << false << false
+                             << 0 << -1
+                             << false
                              << "--verbose general --loglevel info";
     QTest::newRow("path")    << "general"
-                             << static_cast<int>(0) << static_cast<int>(-1)
-                             << false << true
+                             << 0 << -1
+                             << true
                              << "--verbose general --logpath /tmp --loglevel info";
     QTest::newRow("quiet")   << "general"
-                             << static_cast<int>(2) << static_cast<int>(-1)
-                             << false << false
+                             << 2 << -1
+                             << false
                              << "--verbose general --loglevel info --quiet --quiet";
 #if !defined(_WIN32) && !defined(Q_OS_ANDROID)
     QTest::newRow("syslog")  << "general"
-                             << static_cast<int>(0) << static_cast<int>(LOG_DAEMON)
-                             << false << false
+                             << 0 << LOG_DAEMON
+                             << false
                              << "--verbose general --loglevel info --syslog daemon";
 #if CONFIG_SYSTEMD_JOURNAL
     QTest::newRow("systemd") << "general"
-                             << static_cast<int>(0) << static_cast<int>(SYSTEMD_JOURNAL_FACILITY)
-                             << false << false
+                             << 0 << SYSTEMD_JOURNAL_FACILITY
+                             << false
                              << "--verbose general --loglevel info --systemd-journal";
 #endif
 #endif
-    QTest::newRow("dblog")   << "general"
-                             << static_cast<int>(0) << static_cast<int>(-1)
-                             << true << false
-                             << "--verbose general --loglevel info --enable-dblog";
     QTest::newRow("muddle")  << "general,schedule"
-                             << static_cast<int>(2) << static_cast<int>(LOG_LOCAL0)
-                             << true << true
-                             << "--verbose general,schedule --logpath /tmp --loglevel info --quiet --quiet --enable-dblog --syslog local0";
+                             << 2 << LOG_LOCAL0
+                             << true
+                             << "--verbose general,schedule --logpath /tmp --loglevel info --quiet --quiet --syslog local0";
     QTest::newRow("muddle2") << "schedule:debug,general:warn"
-                             << static_cast<int>(2) << static_cast<int>(LOG_LOCAL0)
-                             << true << true
-                             << "--verbose general,schedule --logpath /tmp --loglevel info --quiet --quiet --enable-dblog --syslog local0";
+                             << 2 << LOG_LOCAL0
+                             << true
+                             << "--verbose general,schedule --logpath /tmp --loglevel info --quiet --quiet --syslog local0";
 }
 
 void TestLogging::test_logPropagateCalc (void)
 {
     QFETCH(QString, argument);
-    QFETCH(bool, dblog);
     QFETCH(int, quiet);
     QFETCH(int, facility);
     QFETCH(bool, propagate);
@@ -332,17 +326,15 @@ void TestLogging::test_logPropagateCalc (void)
     std::streambuf* oldCoutBuffer = std::cerr.rdbuf(buffer.rdbuf());
     resetLogging();
     int actualExit = verboseArgParse(argument);
-    logStart("/tmp/test", false, quiet, facility, LOG_INFO, dblog, propagate, true);
+    logStart("/tmp/test", false, quiet, facility, LOG_INFO, propagate, false, true);
     std::cerr.rdbuf(oldCoutBuffer);
 
     // Check results
-    QCOMPARE(GENERIC_EXIT_OK, actualExit);
+    QCOMPARE((int)GENERIC_EXIT_OK, actualExit);
     QString actualOutput = QString::fromStdString(buffer.str());
     QVERIFY(actualOutput.isEmpty());
 
     QCOMPARE(logPropagateArgs.trimmed(), expectedArgs);
 }
-
-// logPropagateCalc
 
 QTEST_APPLESS_MAIN(TestLogging)

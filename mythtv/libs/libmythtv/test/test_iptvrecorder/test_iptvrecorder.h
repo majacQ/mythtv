@@ -18,12 +18,12 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 
-#include "iptvtuningdata.h"
-#include "channelscan/iptvchannelfetcher.h"
-#include "recorders/rtp/rtpdatapacket.h"
-#include "recorders/rtp/rtptsdatapacket.h"
+#include "libmythtv/iptvtuningdata.h"
+#include "libmythtv/channelscan/iptvchannelfetcher.h"
+#include "libmythtv/recorders/rtp/rtpdatapacket.h"
+#include "libmythtv/recorders/rtp/rtptsdatapacket.h"
 
 class TestIPTVRecorder: public QObject
 {

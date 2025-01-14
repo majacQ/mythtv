@@ -1,32 +1,34 @@
-// qt
-#include <QKeyEvent>
+// C++
 #include <utility>
 
-// mythtv
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythuihelper.h>
-#include <mythdirs.h>
-#include <mythdialogbox.h>
-#include <mythuitextedit.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuicheckbox.h>
-#include <mythuistatetype.h>
-#include <mythuibuttonlist.h>
-#include <mythuispinbox.h>
-#include <mythuiimage.h>
-#include <mythuifilebrowser.h>
-#include <musicutils.h>
-#include <mythprogressdialog.h>
-#include <remotefile.h>
-#include <mthreadpool.h>
+// qt
+#include <QKeyEvent>
+
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mthreadpool.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/remotefile.h>
+#include <libmythmetadata/metaio.h>
+#include <libmythmetadata/musicutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuifilebrowser.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuispinbox.h>
+#include <libmythui/mythuistatetype.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // mythmusic
-#include "musicdata.h"
 #include "decoder.h"
 #include "genres.h"
-#include "metaio.h"
+#include "musicdata.h"
 #include "musicplayer.h"
 
 
@@ -91,7 +93,7 @@ bool EditMetadataCommon::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -446,7 +448,7 @@ bool EditMetadataDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "THMBUP")
@@ -558,18 +560,18 @@ void EditMetadataDialog::updateArtistImage(void)
 {
     QString artist =  m_artistEdit->GetText();
 
-    QString file;
-
     if (m_artistIcon)
     {
-        file = findIcon("artist", artist.toLower(), true);
+        QString file = findIcon("artist", artist.toLower(), true);
         if (!file.isEmpty())
         {
             m_artistIcon->SetFilename(file);
             m_artistIcon->Load();
         }
         else
+        {
             m_artistIcon->Reset();
+        }
     }
 }
 
@@ -626,18 +628,18 @@ void EditMetadataDialog::setAlbum(const QString& album)
 
 void EditMetadataDialog::updateAlbumImage(void)
 {
-    QString file;
-
     if (m_albumIcon)
     {
-        file = s_metadata->getAlbumArtFile();
+        QString file = s_metadata->getAlbumArtFile();
         if (!file.isEmpty())
         {
             m_albumIcon->SetFilename(file);
             m_albumIcon->Load();
         }
         else
+        {
             m_albumIcon->Reset();
+        }
     }
 }
 
@@ -678,18 +680,19 @@ void EditMetadataDialog::setGenre(const QString& genre)
 void EditMetadataDialog::updateGenreImage(void)
 {
     QString genre = m_genreEdit->GetText();
-    QString file;
 
     if (m_genreIcon)
     {
-        file = findIcon("genre", genre.toLower(), true);
+        QString file = findIcon("genre", genre.toLower(), true);
         if (!file.isEmpty())
         {
             m_genreIcon->SetFilename(file);
             m_genreIcon->Load();
         }
         else
+        {
             m_genreIcon->Reset();
+        }
     }
 }
 
@@ -778,23 +781,19 @@ void EditMetadataDialog::customEvent(QEvent *event)
             }
         }
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (!tokens.isEmpty())
         {
             if (tokens[0] == "BROWSER_DOWNLOAD_FINISHED")
             {
                 QStringList args = me->ExtraDataList();
-                QString oldFilename = args[1];
+                const QString& oldFilename = args[1];
                 int fileSize  = args[2].toInt();
                 int errorCode = args[4].toInt();
 
@@ -936,7 +935,7 @@ void EditAlbumartDialog::updateImageGrid(void)
 
     m_coverartList->Reset();
 
-    for (auto *art : qAsConst(*albumArtList))
+    for (auto *art : std::as_const(*albumArtList))
     {
         auto *item = new MythUIButtonListItem(m_coverartList,
                                      AlbumArtImages::getTypeName(art->m_imageType),
@@ -957,7 +956,7 @@ bool EditAlbumartDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -1170,16 +1169,12 @@ void EditAlbumartDialog::customEvent(QEvent *event)
             showTypeMenu(false);
         }
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (!tokens.isEmpty())
         {
@@ -1237,7 +1232,9 @@ void EditAlbumartDialog::startCopyImageToTag(void)
         popupStack->AddScreen(fb);
     }
     else
+    {
         delete fb;
+    }
 }
 
 void EditAlbumartDialog::copyImageToTag(ImageType imageType)

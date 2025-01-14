@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2006 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -16,7 +16,7 @@
 #include "httpserver.h"
 #include "eventing.h"
               
-enum UPnpCMGRMethod
+enum UPnpCMGRMethod : std::uint8_t
 {
     CMGRM_Unknown                  = 0,
     CMGRM_GetServiceDescription    = 1,
@@ -28,7 +28,7 @@ enum UPnpCMGRMethod
 
 //////////////////////////////////////////////////////////////////////////////
 
-enum UPnpCMGRConnectionStatus
+enum UPnpCMGRConnectionStatus : std::uint8_t
 {
     CMGRSTATUS_Unknown               = 0,
     CMGRSTATUS_OK                    = 1,

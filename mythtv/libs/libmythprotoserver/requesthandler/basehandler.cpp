@@ -1,15 +1,16 @@
 #include <QString>
 #include <QStringList>
 
-#include "mythsystemevent.h"
-#include "mythsocket.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/mythtimezone.h"
+#include "libmythtv/mythsystemevent.h"
+
 #include "mythsocketmanager.h"
-#include "socketrequesthandler.h"
 #include "sockethandler.h"
-#include "mythmiscutil.h"
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythtimezone.h"
+#include "socketrequesthandler.h"
 
 #include "requesthandler/basehandler.h"
 
@@ -27,7 +28,7 @@ bool BaseRequestHandler::HandleAnnounce(MythSocket *socket,
     else
         return false;
 
-    QString hostname = commands[2];
+    const QString& hostname = commands[2];
 
     int eventlevel = commands[3].toInt();
     bool systemevents = ( (eventlevel == 1) || (eventlevel == 3));
@@ -72,7 +73,7 @@ bool BaseRequestHandler::HandleQuery(SocketHandler *sock,
                                      QStringList &commands,
                                      QStringList &/*slist*/)
 {
-    QString command = commands[0];
+    const QString& command = commands[0];
     bool res = false;
 
     if (command == "QUERY_LOAD")

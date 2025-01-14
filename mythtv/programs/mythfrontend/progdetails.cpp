@@ -1,21 +1,20 @@
 
-// qt
-#include <QKeyEvent>
+// Qt
 #include <QFile>
+#include <QKeyEvent>
 #include <QTextStream>
 
-// myth
-#include "mythcorecontext.h"
-#include "mythdialogbox.h"
-#include "recordingrule.h"
-#include "mythdb.h"
-#include "mythuihelper.h"
-#include "mythmainwindow.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuihelper.h"
 
+//  MythFrontend
 #include "progdetails.h"
-#include "mythdate.h"
-
-#define LASTPAGE 2
 
 bool ProgDetails::Create(void)
 {
@@ -124,7 +123,7 @@ bool ProgDetails::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; ++i)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "INFO" || action == "SELECT")
@@ -141,7 +140,9 @@ bool ProgDetails::keyPressEvent(QKeyEvent *event)
             m_infoList.PageUp();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -271,7 +272,7 @@ void ProgDetails::PowerPriorities(const QString & ptable)
                        "      ON ( record.recordid = %1 ) ")
         .arg(recordid);
 
-    for (const auto & [label, csqlStart] : qAsConst(tests))
+    for (const auto & [label, csqlStart] : std::as_const(tests))
     {
         QString sqlStart = csqlStart;
         query.prepare("SELECT " + sqlStart.replace("program.", "p.")
@@ -300,10 +301,14 @@ void ProgDetails::PowerPriorities(const QString & ptable)
                 total += adj;
             }
             else
+            {
                 adjustmsg += tr(" not matched");
+            }
         }
         else
+        {
             adjustmsg += tr(" Query FAILED");
+        }
 
         addItem(tr("Recording Priority Adjustment"), adjustmsg,
                 ProgInfoList::kLevel2);
@@ -374,7 +379,9 @@ void ProgDetails::loadPage(void)
             title_pronounce = query.value(12).toString();
         }
         else if (!query.isActive())
+        {
             MythDB::DBError("ProgDetails", query);
+        }
 
         rating = getRatings(
             recorded, m_progInfo.GetChanID(),
@@ -503,6 +510,7 @@ void ProgDetails::loadPage(void)
     using string_pair = QPair<QString, QString>;
     QVector<string_pair> actor_list;
     QVector<string_pair> guest_star_list;
+    QVector<string_pair> guest_list;
 
     if (m_progInfo.GetScheduledEndTime() != m_progInfo.GetScheduledStartTime())
     {
@@ -562,6 +570,8 @@ void ProgDetails::loadPage(void)
                         actor_list.append(qMakePair(pname, character));
                     else if (role == "guest_star")
                         guest_star_list.append(qMakePair(pname, character));
+                    else if (role == "guest")
+                        guest_list.append(qMakePair(pname, character));
                 }
 
                 if (rstr != role)
@@ -627,13 +637,19 @@ void ProgDetails::loadPage(void)
 
     if (!actor_list.isEmpty())
     {
-        for (const auto & [actor, role] : qAsConst(actor_list))
+        for (const auto & [actor, role] : std::as_const(actor_list))
             addItem(role, actor, ProgInfoList::kLevel2);
     }
     if (!guest_star_list.isEmpty())
     {
-        for (const auto & [actor, role] : qAsConst(guest_star_list))
+        for (const auto & [actor, role] : std::as_const(guest_star_list))
             addItem(role, actor, ProgInfoList::kLevel2);
+    }
+    if (!guest_list.isEmpty())
+    {
+        for (const auto & [actor, role] : std::as_const(guest_list))
+            if (!role.isEmpty())
+                addItem(role, actor, ProgInfoList::kLevel2);
     }
 
     addItem(tr("Host"), hosts, ProgInfoList::kLevel1);
@@ -865,6 +881,8 @@ void ProgDetails::loadPage(void)
 
     QString recordingHost;
     QString recordingInput;
+    QString recordedID;
+    QString recordedPathname;
     QString recordedFilename;
     QString recordedFileSize;
     QString recordingGroup;
@@ -877,6 +895,8 @@ void ProgDetails::loadPage(void)
 
     if (recorded)
     {
+        recordedID = QString::number(m_progInfo.GetRecordingID());
+        recordedPathname = m_progInfo.GetPathname();
         recordedFilename = m_progInfo.GetBasename();
         recordedFileSize = QString("%1 ")
             .arg(m_progInfo.GetFilesize()/((double)(1<<30)),0,'f',2);
@@ -902,6 +922,8 @@ void ProgDetails::loadPage(void)
     }
     addItem(tr("Recording Host"), recordingHost, ProgInfoList::kLevel2);
     addItem(tr("Recording Input"), recordingInput, ProgInfoList::kLevel2);
+    addItem(tr("Recorded ID"), recordedID, ProgInfoList::kLevel2);
+    addItem(tr("Recorded Pathname"), recordedPathname, ProgInfoList::kLevel2);
     addItem(tr("Recorded File Name"), recordedFilename, ProgInfoList::kLevel1);
     addItem(tr("Recorded File Size"), recordedFileSize, ProgInfoList::kLevel1);
     addItem(tr("Recording Profile"), recordingProfile, ProgInfoList::kLevel2);

@@ -6,11 +6,12 @@
 #include <QString>
 
 // MythTV includes
-#include "mythlogging.h"
-#include "mpegtables.h"
-#include "tv_rec.h"
-#include "satiputils.h"
+#include "libmythbase/mythlogging.h"
+
+#include "mpeg/mpegtables.h"
 #include "satipchannel.h"
+#include "satiputils.h"
+#include "tv_rec.h"
 
 #define LOC QString("SatIPChan[%1]: ").arg(m_inputId)
 
@@ -39,7 +40,9 @@ bool SatIPChannel::Open(void)
     LOG(VB_CHANNEL, LOG_INFO, LOC + QString("Open(%1)").arg(m_device));
 
     if (IsOpen())
+    {
         return true;
+    }
 
     QMutexLocker locker(&m_tuneLock);
 
@@ -71,7 +74,7 @@ void SatIPChannel::Close(void)
         {
             m_streamHandler->RemoveListener(m_streamData);
         }
-        SatIPStreamHandler::Return(m_streamHandler, m_inputId);
+        SatIPStreamHandler::Return(m_streamHandler, GetInputID());
     }
 }
 
@@ -86,15 +89,31 @@ bool SatIPChannel::Tune(const QString &channum)
     return false;
 }
 
-bool SatIPChannel::Tune(const DTVMultiplex &tuning)
+bool SatIPChannel::EnterPowerSavingMode(void)
 {
-    LOG(VB_CHANNEL, LOG_INFO, LOC + QString("Tune(frequency=%1)").arg(tuning.m_frequency));
-    m_streamHandler->Tune(tuning);
     return true;
 }
 
 bool SatIPChannel::IsOpen(void) const
 {
     QMutexLocker locker(&m_streamLock);
-    return m_streamHandler != nullptr;
+    bool result = m_streamHandler != nullptr;
+    LOG(VB_CHANNEL, LOG_DEBUG, LOC + QString("IsOpen:%1").arg(result));
+    return result;
+}
+
+bool SatIPChannel::Tune(const DTVMultiplex &tuning)
+{
+    uint satipsrc = CardUtil::GetDiSEqCPosition(GetInputID()).toUInt();
+    satipsrc = std::clamp(satipsrc, 1U, 255U);
+    LOG(VB_CHANNEL, LOG_INFO, LOC + QString("Tune freq=%1,src=%2").arg(tuning.m_frequency).arg(satipsrc));
+
+    m_streamHandler->m_satipsrc = satipsrc;
+    if (m_streamHandler->Tune(tuning))
+    {
+        SetSIStandard(tuning.m_sistandard);
+        return true;
+    }
+    LOG(VB_GENERAL, LOG_ERR, LOC + QString("Tune failed"));
+    return false;
 }

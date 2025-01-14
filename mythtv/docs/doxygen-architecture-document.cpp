@@ -97,8 +97,7 @@ There are also a few simple \ref testing "testing shortcuts".
       and some old UI widgets are implemented by libmyth.
 
       This library depends on libav*, \ref libmythbase "libmythbase",
-      \ref libmythui "libmythui", \ref libmythupnp "libmythupnp",
-      libmythsoundtouch and libmythfreesurround.
+      \ref libmythui "libmythui", and \ref libmythupnp "libmythupnp".
 
       Any changes to this library's ABI may trigger a %MythTV binary version
       change because the plugins depend on it.
@@ -141,13 +140,6 @@ There are also a few simple \ref testing "testing shortcuts".
 
       This library does not depend on any of our libraries.
 
-  <dt>libmythsoundtouch
-      <dd>Pitch preserving audio resampling library.
-      <a href="http://www.surina.net/soundtouch/">External Website</a>.
-      We use this for the time-stretch feature.
-
-      This library does not depend on any of our libraries.
-
   <dt>libmythbluray/libmythdvdnav
       <dd>Used for navigating Blu Ray and DVD menus
       when using the internal player.
@@ -159,16 +151,6 @@ There are also a few simple \ref testing "testing shortcuts".
 
   <dt>libmythfreemheg
       <dd>UK interactive %TV viewer.
-
-      This library does not depend on any of our libraries.
-
-  <dt>libmythfreesurround
-      <dd>Support for some multi-channel audio transforms.
-
-      This library does not depend on any of our libraries.
-
-  <dt>libmythnvctrl
-      <dd>Interface between X-windows and NVidia drivers.
 
       This library does not depend on any of our libraries.
 
@@ -405,11 +387,13 @@ state changing commands should not be issued.
 
 \ingroup libmyth
 
-MythPlugins are shared object files (_i.e._libraries) which are loaded
-from a specific directory (_%e.g._ /usr/local/lib/mythtv/plugins).
+<p>
+MythPlugins are shared object files (_i.e._ libraries) which are loaded
+from a specific directory (_e.g._ /usr/local/lib/mythtv/plugins).
 Currently, all plugins are written in the C++ language, but there is nothing
 preventing other languages being used (the functions are in the C name space).
-c
+</p>
+
 int mythplugin_init(const char *libversion); is invoked whenever mythfrontend
 is started. This typically handles upgrading any database records - it will be
 the first method called after a new version of the plugin has been installed.
@@ -634,7 +618,7 @@ See mythplugins/mythweb/modules/_shared/lang/translations.txt for more info.
 
  */
 
-/** \defgroup qobject_dangers QObject is dangerous for your health
+/** \page qobject_dangers QObject is dangerous for your health
 
 QObject derived classes can be quite useful, they can send and receive
 signals, get keyboard events, translate strings into another language
@@ -751,7 +735,7 @@ wrong slots.
 
 */
 
-/** \defgroup profiling_mythtv    Profiling MythTV
+/** \page profiling_mythtv    Profiling MythTV
 
 You can use any sampling profiler to profile %MythTV, the most
 popular GPL one is OProfile and this section tells you how to
@@ -905,7 +889,7 @@ an annotated versions of the code, and saving results.
 
 */
 
-/** \defgroup testing    Testing hints and shortcuts
+/** \page testing    Testing hints and shortcuts
 
 The internal video playback can be tested by the programs/mythavtest tool:
 

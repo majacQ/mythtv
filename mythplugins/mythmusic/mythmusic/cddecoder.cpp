@@ -4,12 +4,11 @@
 // C
 #include <cstdlib>
 #include <cstring>
-
 #include <unistd.h>
 
 // Qt
-#include <QIODevice>
 #include <QFile>
+#include <QIODevice>
 #include <QObject>
 #include <QString>
 
@@ -18,9 +17,9 @@
 #include <cdio/logging.h>
 
 // MythTV
-#include <audiooutput.h>
-#include <mythcontext.h>
-#include <musicmetadata.h>
+#include <libmyth/audio/audiooutput.h>
+#include <libmyth/mythcontext.h>
+#include <libmythmetadata/musicmetadata.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -28,9 +27,8 @@ extern "C" {
 
 // MythMusic
 #include "constants.h"
-
-#define CDEXT ".cda"
-const unsigned kSamplesPerSec = 44100;
+static constexpr const char* CDEXT { ".cda" };
+static constexpr long kSamplesPerSec { 44100 };
 
 // Handle cdio log output
 static void logger(cdio_log_level_t level, const char *message)
@@ -138,19 +136,11 @@ void CdDecoder::writeBlock()
 }
 
 //static
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-QMutex& CdDecoder::getCdioMutex()
-{
-    static QMutex s_mtx(QMutex::Recursive);
-    return s_mtx;
-}
-#else
 QRecursiveMutex& CdDecoder::getCdioMutex()
 {
     static QRecursiveMutex s_mtx;
     return s_mtx;
 }
-#endif
 
 // pure virtual
 bool CdDecoder::initialize()
@@ -160,7 +150,7 @@ bool CdDecoder::initialize()
 
     m_inited = m_userStop = m_finish = false;
     m_freq = m_bitrate = 0L;
-    m_stat = DecoderEvent::Error;
+    m_stat = DecoderEvent::kError;
     m_chan = 0;
     m_seekTime = -1.;
 
@@ -293,7 +283,7 @@ void CdDecoder::deinit()
 
     m_inited = m_userStop = m_finish = false;
     m_freq = m_bitrate = 0L;
-    m_stat = DecoderEvent::Finished;
+    m_stat = DecoderEvent::kFinished;
     m_chan = 0;
     setOutput(nullptr);
 }
@@ -309,7 +299,7 @@ void CdDecoder::run()
         return;
     }
 
-    m_stat = DecoderEvent::Decoding;
+    m_stat = DecoderEvent::kDecoding;
     // NB block scope required to prevent re-entrancy
     {
         DecoderEvent e(m_stat);
@@ -417,11 +407,11 @@ void CdDecoder::run()
     }
 
     if (m_finish)
-        m_stat = DecoderEvent::Finished;
+        m_stat = DecoderEvent::kFinished;
     else if (m_userStop)
-        m_stat = DecoderEvent::Stopped;
+        m_stat = DecoderEvent::kStopped;
     else
-        m_stat = DecoderEvent::Error;
+        m_stat = DecoderEvent::kError;
 
     // NB block scope required to step onto next track
     {
@@ -522,7 +512,7 @@ MusicMetadata *CdDecoder::getMetadata()
     else
     {
         tracknum = m_setTrackNum;
-        setURL(QString("%1" CDEXT).arg(tracknum));
+        setURL(QString("%1%2").arg(tracknum).arg(CDEXT));
     }
 
     QMutexLocker lock(&getCdioMutex());
@@ -586,7 +576,8 @@ MusicMetadata *CdDecoder::getMetadata()
 
     bool isCompilation = false;
 
-#define CDTEXT 0 // Disabled - cd-text access on discs without it is S L O W
+// Disabled - cd-text access on discs without it is S L O W
+#define CDTEXT 0 // NOLINT(cppcoreguidelines-macro-usage)
 #if CDTEXT
     static int s_iCdtext;
     if (isDiscChanged)
@@ -661,7 +652,22 @@ MusicMetadata *CdDecoder::getMetadata()
     if (title.isEmpty() || artist.isEmpty() || album.isEmpty())
 #endif // CDTEXT
     {
-        //TODO: add MusicBrainz lookup
+#ifdef HAVE_MUSICBRAINZ
+        if (isDiscChanged)
+        {
+            // lazy load whole CD metadata
+            getMusicBrainz().queryForDevice(m_deviceName);
+        }
+        if (getMusicBrainz().hasMetadata(m_setTrackNum))
+        {
+            auto *metadata = getMusicBrainz().getMetadata(m_setTrackNum);
+            if (metadata)
+            {
+                metadata->setFilename(getURL());
+                return metadata;
+            }
+        }
+#endif // HAVE_MUSICBRAINZ
     }
 
     if (compilation_artist.toLower().left(7) == "various")
@@ -683,6 +689,17 @@ MusicMetadata *CdDecoder::getMetadata()
 
     return m;
 }
+
+#ifdef HAVE_MUSICBRAINZ
+
+MusicBrainz & CdDecoder::getMusicBrainz()
+{
+    static MusicBrainz s_musicBrainz;
+    return s_musicBrainz;
+}
+
+#endif // HAVE_MUSICBRAINZ
+
 
 // pure virtual
 bool CdDecoderFactory::supports(const QString &source) const

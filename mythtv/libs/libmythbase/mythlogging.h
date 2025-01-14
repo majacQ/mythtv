@@ -9,27 +9,6 @@
 #include "mythbaseexp.h"  //  MBASE_PUBLIC , etc.
 #include "verbosedefs.h"
 
-// Helper for checking verbose mask & level outside of LOG macro
-#define VERBOSE_LEVEL_NONE        (verboseMask == 0)
-#define VERBOSE_LEVEL_CHECK(_MASK_, _LEVEL_) \
-    (componentLogLevel.contains(_MASK_) ?                               \
-     (*(componentLogLevel.find(_MASK_)) >= (_LEVEL_)) :                   \
-     (((verboseMask & (_MASK_)) == (_MASK_)) && logLevel >= (_LEVEL_)))
-
-#define VERBOSE please_use_LOG_instead_of_VERBOSE
-
-// This doesn't lock the calling thread other than momentarily to put
-// the log message onto a queue.
-#define LOG(_MASK_, _LEVEL_, _QSTRING_)                                 \
-    do {                                                                \
-        if (VERBOSE_LEVEL_CHECK((_MASK_), (_LEVEL_)) && ((_LEVEL_)>=0)) \
-        {                                                               \
-            LogPrintLine(_MASK_, _LEVEL_,                               \
-                         __FILE__, __LINE__, __FUNCTION__,              \
-                         _QSTRING_);                                    \
-        }                                                               \
-    } while (false)
-
 /* Define the external prototype */
 MBASE_PUBLIC void LogPrintLine( uint64_t mask, LogLevel_t level,
                                 const char *file, int line,
@@ -45,12 +24,35 @@ extern MBASE_PUBLIC QStringList logPropagateArgList;
 extern MBASE_PUBLIC QString     logPropagateArgs;
 extern MBASE_PUBLIC QString     verboseString;
 
+// Helper for checking verbose mask & level outside of LOG macro
+static inline bool VERBOSE_LEVEL_NONE() { return verboseMask == 0; };
+static inline bool VERBOSE_LEVEL_CHECK(uint64_t mask, LogLevel_t level)
+{
+    if (componentLogLevel.contains(mask))
+        return *(componentLogLevel.find(mask)) >= level;
+    return (((verboseMask & mask) == mask) && (logLevel >= level));
+}
+
+// This doesn't lock the calling thread other than momentarily to put
+// the log message onto a queue.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define LOG(_MASK_, _LEVEL_, _QSTRING_)                                 \
+    do {                                                                \
+        if (VERBOSE_LEVEL_CHECK((_MASK_), (_LEVEL_)) && ((_LEVEL_)>=0)) \
+        {                                                               \
+            LogPrintLine(_MASK_, _LEVEL_,                               \
+                         __FILE__, __LINE__, __FUNCTION__,              \
+                         _QSTRING_);                                    \
+        }                                                               \
+    } while (false)
+
 MBASE_PUBLIC void resetLogging(void);
 
 MBASE_PUBLIC void logStart(const QString& logfile, bool progress = false,
                            int quiet = 0,
                            int facility = 0, LogLevel_t level = LOG_INFO,
-                           bool dblog = true, bool propagate = false,
+                           bool propagate = false,
+                           bool loglong = false,
                            bool testHarness = false);
 MBASE_PUBLIC void logStop(void);
 MBASE_PUBLIC void logPropagateCalc(void);
@@ -71,6 +73,12 @@ MBASE_PUBLIC QString logStrerror(int errnum);
 /// next line in the verbose output.
 #define ENO (QString("\n\t\t\teno: ") + logStrerror(errno))
 #define ENO_STR ENO.toLocal8Bit().constData()
+
+inline QString pointerToQString(const void *p)
+{
+    return QStringLiteral("0x%1").arg(reinterpret_cast<quintptr>(p),
+                    sizeof(void*) * 2, 16, QChar('0'));
+}
 
 #endif
 

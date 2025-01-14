@@ -1,0 +1,52 @@
+.programBox {
+    float: left;
+    height: 120px;
+    padding: 0px 0px 0px 2px;
+    color: var(--primary-color-text);
+    background: var(--surface-200);
+    border-radius: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.programTitle {
+    padding: 5px 8px 4px 7px;
+    width: 100%;
+    height: 28px;
+    color: var(--primary-color-text);
+    background: linear-gradient(to bottom, var(--surface-800) 1%, var(--surface-500) 90%, var(--surface-200) 99%);
+    border-radius: inherit;
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
+    z-index: 4;
+    position: relative;
+    float: left;
+    font-size: 1.1em;
+    white-space: nowrap;
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.programBody {
+    margin: 3px 5px 4px 5px;
+    padding: 0px 0px 0px 2px;
+    height: 45px;
+    z-index: 5;
+    /*font-size: 0.8em;*/
+}
+
+.programCatType {
+    position: relative;
+    font-weight: bold;
+    margin-right: 5px;
+    line-height: 15px;
+    padding-top: 2px;
+    padding-bottom: 3px;
+}
+
+.programSubtitle {
+    position: relative;
+    z-index: 1;
+    line-height: 15px;
+}

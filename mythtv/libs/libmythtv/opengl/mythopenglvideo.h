@@ -6,18 +6,16 @@
 #include <QObject>
 
 // MythTV
+#include "libmythui/opengl/mythrenderopengl.h"
 #include "mythvideoout.h"
 #include "mythvideogpu.h"
 #include "videoouttypes.h"
-#include "opengl/mythrenderopengl.h"
 #include "mythavutil.h"
 #include "opengl/mythopenglinterop.h"
 
 // Std
 #include <vector>
 #include <map>
-using std::vector;
-using std::map;
 
 class MythOpenGLTonemap;
 
@@ -26,7 +24,7 @@ class MythOpenGLVideo : public MythVideoGPU
     Q_OBJECT
 
   public:
-    enum VideoShaderType
+    enum VideoShaderType : std::uint8_t
     {
         Default       = 0, // Plain blit
         Progressive   = 1, // Progressive video frame
@@ -61,8 +59,8 @@ class MythOpenGLVideo : public MythVideoGPU
     bool    SetupFrameFormat (VideoFrameType InputType, VideoFrameType OutputType,
                               QSize Size, GLenum TextureTarget);
     bool    CreateVideoShader(VideoShaderType Type, MythDeintType Deint = DEINT_NONE);
-    void    BindTextures     (bool Deinterlacing, vector<MythVideoTextureOpenGL*>& Current,
-                              vector<MythGLTexture*>& Textures);
+    void    BindTextures     (bool Deinterlacing, std::vector<MythVideoTextureOpenGL*>& Current,
+                              std::vector<MythGLTexture*>& Textures);
     bool    AddDeinterlacer  (const MythVideoFrame* Frame,  FrameScanType Scan,
                               MythDeintType Filter = DEINT_SHADER, bool CreateReferences = true);
     void    CleanupDeinterlacers();
@@ -73,9 +71,9 @@ class MythOpenGLVideo : public MythVideoGPU
     MythDeintType  m_fallbackDeinterlacer          { MythDeintType::DEINT_NONE };
     std::array<QOpenGLShaderProgram*,ShaderCount> m_shaders { nullptr };
     std::array<int,ShaderCount> m_shaderCost       { 1 };
-    vector<MythVideoTextureOpenGL*> m_inputTextures;
-    vector<MythVideoTextureOpenGL*> m_prevTextures;
-    vector<MythVideoTextureOpenGL*> m_nextTextures;
+    std::vector<MythVideoTextureOpenGL*> m_inputTextures;
+    std::vector<MythVideoTextureOpenGL*> m_prevTextures;
+    std::vector<MythVideoTextureOpenGL*> m_nextTextures;
     QOpenGLFramebufferObject* m_frameBuffer        { nullptr };
     MythVideoTextureOpenGL*   m_frameBufferTexture { nullptr };
     QOpenGLFunctions::OpenGLFeatures m_features;

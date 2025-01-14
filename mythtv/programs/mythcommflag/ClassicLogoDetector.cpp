@@ -1,15 +1,20 @@
-// ANSI C headers
+// C++ headers
+#include <algorithm>
 #include <cstdlib>
 #include <thread> // for sleep_for
 
-// MythTV headers
-#include "mythcorecontext.h"
-#include "mythcommflagplayer.h"
+// FFmpeg headers
+extern "C" {
 #include "libavutil/frame.h"
+}
+
+// MythTV headers
+#include "libmythbase/mythcorecontext.h"
+#include "libmythtv/mythcommflagplayer.h"
 
 // Commercial Flagging headers
-#include "ClassicLogoDetector.h"
 #include "ClassicCommDetector.h"
+#include "ClassicLogoDetector.h"
 
 struct EdgeMaskEntry
 {
@@ -27,6 +32,8 @@ ClassicLogoDetector::ClassicLogoDetector(ClassicCommDetector* commdetector,
     : LogoDetectorBase(w,h),
       m_commDetector(commdetector),
       m_commDetectBorder(commdetectborder_in),
+      m_commDetectLogoSecondsNeeded((int)(1.3 * m_commDetectLogoSamplesNeeded *
+                                          m_commDetectLogoSampleSpacing)),
       m_edgeMask(new EdgeMaskEntry[m_width * m_height]),
       // cppcheck doesn't understand deleteLater
       m_logoMaxValues(new unsigned char[m_width * m_height]),
@@ -39,14 +46,20 @@ ClassicLogoDetector::ClassicLogoDetector(ClassicCommDetector* commdetector,
         gCoreContext->GetNumSetting("CommDetectLogoSamplesNeeded", 240);
     m_commDetectLogoSampleSpacing =
         gCoreContext->GetNumSetting("CommDetectLogoSampleSpacing", 2);
-    m_commDetectLogoSecondsNeeded = (int)(1.3 * m_commDetectLogoSamplesNeeded *
-                                              m_commDetectLogoSampleSpacing);
     m_commDetectLogoGoodEdgeThreshold =
         gCoreContext->GetSetting("CommDetectLogoGoodEdgeThreshold", "0.75")
         .toDouble();
     m_commDetectLogoBadEdgeThreshold =
         gCoreContext->GetSetting("CommDetectLogoBadEdgeThreshold", "0.85")
         .toDouble();
+    m_commDetectLogoLocation =
+        gCoreContext->GetSetting("CommDetectLogoLocation", "");
+    m_commDetectLogoWidthRatio =
+        gCoreContext->GetNumSetting("CommDetectLogoWidthRatio", 4);
+    m_commDetectLogoHeightRatio =
+        gCoreContext->GetNumSetting("CommDetectLogoHeightRatio", 4);
+    m_commDetectLogoMinPixels =
+        gCoreContext->GetNumSetting("CommDetectLogoMinPixels", 50);
 }
 
 ClassicLogoDetector::~ClassicLogoDetector()
@@ -92,7 +105,8 @@ bool ClassicLogoDetector::searchForLogo(MythCommFlagPlayer *player)
     // I believe the minimum threshold should vary with the video's area.
     // I am using 1280x720 (for 720p) video as the baseline.
     // This should improve logo detection for SD video.
-    int minPixelsInMask = 50 * (m_width*m_height) / (1280*720 / 16);
+    int minPixelsInMask =
+        m_commDetectLogoMinPixels * (m_width*m_height) / (1280*720 / 16);
 
     for (uint edgediff : edgeDiffs)
     {
@@ -152,7 +166,7 @@ bool ClassicLogoDetector::searchForLogo(MythCommFlagPlayer *player)
                 if ((x > (m_width/4)) && (x < (m_width * 3 / 4)))
                     continue;
 
-                uint pos = y * m_width + x;
+                uint pos = (y * m_width) + x;
 
                 if (edgeCounts[pos].m_isEdge > (maxLoops * 0.66))
                 {
@@ -185,20 +199,20 @@ bool ClassicLogoDetector::searchForLogo(MythCommFlagPlayer *player)
             {
                 int neighbors = 0;
 
-                if (!m_edgeMask[y * m_width + x].m_isEdge)
+                if (!m_edgeMask[(y * m_width) + x].m_isEdge)
                     continue;
 
                 for (uint dy = y - 2; dy <= (y + 2); dy++ )
                 {
                     for (uint dx = x - 2; dx <= (x + 2); dx++ )
                     {
-                        if (m_edgeMask[dy * m_width + dx].m_isEdge)
+                        if (m_edgeMask[(dy * m_width) + dx].m_isEdge)
                             neighbors++;
                     }
                 }
 
                 if (neighbors < 5)
-                    m_edgeMask[y * m_width + x].m_isEdge = 0;
+                    m_edgeMask[(y * m_width) + x].m_isEdge = 0;
             }
         }
 
@@ -230,8 +244,8 @@ bool ClassicLogoDetector::searchForLogo(MythCommFlagPlayer *player)
         cerr << "Hit ENTER to continue" << endl;
         getchar();
 #endif
-        if (((m_logoMaxX - m_logoMinX) < (m_width / 4)) &&
-            ((m_logoMaxY - m_logoMinY) < (m_height / 4)) &&
+        if (((m_logoMaxX - m_logoMinX) < (m_width  / m_commDetectLogoWidthRatio)) &&
+            ((m_logoMaxY - m_logoMinY) < (m_height / m_commDetectLogoHeightRatio)) &&
             (pixelsInMask > minPixelsInMask))
         {
             m_logoInfoAvailable = true;
@@ -278,16 +292,12 @@ void ClassicLogoDetector::SetLogoMaskArea()
     {
         for (unsigned int x = 0; x < m_width; x++)
         {
-            if (m_edgeMask[y * m_width + x].m_isEdge)
+            if (m_edgeMask[(y * m_width) + x].m_isEdge)
             {
-                if (x < m_logoMinX)
-                    m_logoMinX = x;
-                if (y < m_logoMinY)
-                    m_logoMinY = y;
-                if (x > m_logoMaxX)
-                    m_logoMaxX = x;
-                if (y > m_logoMaxY)
-                    m_logoMaxY = y;
+                m_logoMinX = std::min(x, m_logoMinX);
+                m_logoMinY = std::min(y, m_logoMinY);
+                m_logoMaxX = std::max(x, m_logoMaxX);
+                m_logoMaxY = std::max(y, m_logoMaxY);
             }
         }
     }
@@ -297,14 +307,10 @@ void ClassicLogoDetector::SetLogoMaskArea()
     m_logoMinY -= 5;
     m_logoMaxY += 5;
 
-    if (m_logoMinX < 4)
-        m_logoMinX = 4;
-    if (m_logoMaxX > (m_width-5))
-        m_logoMaxX = (m_width-5);
-    if (m_logoMinY < 4)
-        m_logoMinY = 4;
-    if (m_logoMaxY > (m_height-5))
-        m_logoMaxY = (m_height-5);
+    m_logoMinX = std::max<unsigned int>(m_logoMinX, 4);
+    m_logoMaxX = std::min<size_t>(m_logoMaxX, m_width-5);
+    m_logoMinY = std::max<unsigned int>(m_logoMinY, 4);
+    m_logoMaxY = std::min<size_t>(m_logoMaxY, m_height-5);
 }
 
 
@@ -335,11 +341,11 @@ void ClassicLogoDetector::DumpLogo(bool fromCurrentFrame,
         {
             if (fromCurrentFrame)
             {
-                std::cerr << scrPixels[framePtr[y * m_width + x] / 50];
+                std::cerr << scrPixels[framePtr[(y * m_width) + x] / 50];
             }
             else
             {
-                switch (m_logoMask[y * m_width + x])
+                switch (m_logoMask[(y * m_width) + x])
                 {
                         case 0:
                         case 2: std::cerr << " ";
@@ -376,10 +382,10 @@ bool ClassicLogoDetector::doesThisFrameContainTheFoundLogo(
     {
         for (uint x = m_logoMinX; x <= m_logoMaxX; x++ )
         {
-            int pos1 = y * bytesPerLine + x;
-            int edgePos = y * m_width + x;
-            int pos2 = (y - radius) * bytesPerLine + x;
-            int pos3 = (y + radius) * bytesPerLine + x;
+            int pos1 = (y * bytesPerLine) + x;
+            int edgePos = (y * m_width) + x;
+            int pos2 = ((y - radius) * bytesPerLine) + x;
+            int pos3 = ((y + radius) * bytesPerLine) + x;
 
             int pixel = framePtr[pos1];
 
@@ -442,41 +448,49 @@ void ClassicLogoDetector::DetectEdges(MythVideoFrame *frame, EdgeMaskEntry *edge
 
     for (uint y = m_commDetectBorder + r; y < (m_height - m_commDetectBorder - r); y++)
     {
-        if ((y > (m_height/4)) && (y < (m_height * 3 / 4)))
+        if (
+            (m_commDetectLogoLocation.contains("N") && (y > (m_height/4))) ||
+            (m_commDetectLogoLocation.contains("S") && (y < (m_height * 3 / 4))) ||
+            ((y > (m_height/4)) && (y < (m_height * 3 / 4)))
+            )
             continue;
 
         for (uint x = m_commDetectBorder + r; x < (m_width - m_commDetectBorder - r); x++)
         {
             int edgeCount = 0;
 
-            if ((x > (m_width/4)) && (x < (m_width * 3 / 4)))
+            if (
+                (m_commDetectLogoLocation.contains("W") && (x > (m_width/4))) ||
+                (m_commDetectLogoLocation.contains("E") && (x < (m_width * 3 / 4))) ||
+                ((x > (m_width/4)) && (x < (m_width * 3 / 4)))
+                )
                 continue;
 
-            uint pos = y * m_width + x;
-            uchar p = buf[y * bytesPerLine + x];
+            uint pos = (y * m_width) + x;
+            uchar p = buf[(y * bytesPerLine) + x];
 
-            if (( abs(buf[y * bytesPerLine + (x - r)] - p) >= edgeDiff) ||
-                ( abs(buf[y * bytesPerLine + (x + r)] - p) >= edgeDiff))
+            if (( abs(buf[(y * bytesPerLine) + (x - r)] - p) >= edgeDiff) ||
+                ( abs(buf[(y * bytesPerLine) + (x + r)] - p) >= edgeDiff))
             {
                 edges[pos].m_horiz++;
                 edgeCount++;
             }
-            if (( abs(buf[(y - r) * bytesPerLine + x] - p) >= edgeDiff) ||
-                ( abs(buf[(y + r) * bytesPerLine + x] - p) >= edgeDiff))
+            if (( abs(buf[((y - r) * bytesPerLine) + x] - p) >= edgeDiff) ||
+                ( abs(buf[((y + r) * bytesPerLine) + x] - p) >= edgeDiff))
             {
                 edges[pos].m_vert++;
                 edgeCount++;
             }
 
-            if (( abs(buf[(y - r) * bytesPerLine + (x - r)] - p) >= edgeDiff) ||
-                ( abs(buf[(y + r) * bytesPerLine + (x + r)] - p) >= edgeDiff))
+            if (( abs(buf[((y - r) * bytesPerLine) + (x - r)] - p) >= edgeDiff) ||
+                ( abs(buf[((y + r) * bytesPerLine) + (x + r)] - p) >= edgeDiff))
             {
                 edges[pos].m_ldiag++;
                 edgeCount++;
             }
 
-            if (( abs(buf[(y - r) * bytesPerLine + (x + r)] - p) >= edgeDiff) ||
-                ( abs(buf[(y + r) * bytesPerLine + (x - r)] - p) >= edgeDiff))
+            if (( abs(buf[((y - r) * bytesPerLine) + (x + r)] - p) >= edgeDiff) ||
+                ( abs(buf[((y + r) * bytesPerLine) + (x - r)] - p) >= edgeDiff))
             {
                 edges[pos].m_rdiag++;
                 edgeCount++;

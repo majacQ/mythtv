@@ -1,16 +1,17 @@
 #ifndef MYTHSETTINGS_H
 #define MYTHSETTINGS_H
 
-#include <QStringList>
-#include <QObject>
+// Qt
+#include <QtGlobal>
 #include <QCoreApplication>
-
-#include "mythconfig.h"
-#include "standardsettings.h"
-#include "mythcontext.h"
-#include "mythvideoprofile.h"
-
 #include <QMutex>
+#include <QObject>
+#include <QStringList>
+
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythui/standardsettings.h"
+#include "libmythtv/mythvideoprofile.h"
 
 class QFileInfo;
 
@@ -71,18 +72,25 @@ class ChannelGroupSettings
     Q_DECLARE_TR_FUNCTIONS(ChannelGroupSettings)
 };
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 class MacMainSettings : public GroupSetting
 {
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     Q_OBJECT
-
+#else
+    Q_DECLARE_TR_FUNCTIONS(MacMainSettings);
+#endif
   public:
     MacMainSettings();
 };
 
 class MacFloatSettings : public GroupSetting
 {
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     Q_OBJECT
+#else
+    Q_DECLARE_TR_FUNCTIONS(MacFloatSettings);
+#endif
 
   public:
     MacFloatSettings();
@@ -91,7 +99,11 @@ class MacFloatSettings : public GroupSetting
 
 class MacDockSettings : public GroupSetting
 {
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     Q_OBJECT
+#else
+    Q_DECLARE_TR_FUNCTIONS(MacDockSettings);
+#endif
 
   public:
     MacDockSettings();
@@ -100,12 +112,16 @@ class MacDockSettings : public GroupSetting
 
 class MacDesktopSettings : public GroupSetting
 {
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     Q_OBJECT
+#else
+    Q_DECLARE_TR_FUNCTIONS(MacDesktopSettings);
+#endif
 
   public:
     MacDesktopSettings();
 };
-#endif
+#endif // Q_OS_DARWIN
 
 class OSDSettings: public GroupSetting
 {
@@ -262,7 +278,8 @@ class PlaybackProfileConfig : public GroupSetting
 
     void DeleteProfileItem(PlaybackProfileItemConfig *profile);
 
-    void swap(int indexA, int indexB);
+    // This function doesn't guarantee that no exceptions will be thrown.
+    void swap(int indexA, int indexB); // NOLINT(performance-noexcept-swap)
 
   private slots:
     void AddNewEntry(void);
@@ -295,9 +312,15 @@ class ChannelGroupSetting : public GroupSetting
     bool canDelete(void) override; // GroupSetting
     void deleteEntry(void) override; // GroupSetting
 
+ public slots:
+    void LoadChannelGroup(void);
+    void LoadChannelGroupChannels(void);
+
   private:
     int                   m_groupId   {-1};
     TransTextEditSetting *m_groupName {nullptr};
+    HostComboBoxSetting  *m_groupSelection {nullptr};
+    std::map<std::pair<int,uint>, TransMythUICheckBoxSetting *> m_boxMap;
 };
 
 class ChannelGroupsSetting : public GroupSetting

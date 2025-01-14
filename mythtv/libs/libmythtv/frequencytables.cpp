@@ -2,10 +2,11 @@
 
 #include <QMutex>
 
+#include "libmythbase/compat.h"
+
 #include "frequencies.h"
 #include "frequencytables.h"
 #include "channelutil.h"
-#include "compat.h"
 
 static bool             frequencies_initialized = false;
 static QMutex           frequencies_lock;
@@ -46,9 +47,9 @@ TransportScanItem::TransportScanItem(uint           _sourceid,
     : m_mplexid(0),
       m_friendlyName(std::move(_name)),
       m_sourceID(_sourceid),
-      m_timeoutTune(_timeoutTune)
+      m_timeoutTune(_timeoutTune),
+      m_tuning(_tuning)
 {
-    m_tuning = _tuning;
 }
 
 TransportScanItem::TransportScanItem(uint                _sourceid,
@@ -59,10 +60,9 @@ TransportScanItem::TransportScanItem(uint                _sourceid,
     : m_mplexid(0),
       m_friendlyName(std::move(_name)),
       m_sourceID(_sourceid),
-      m_timeoutTune(_timeoutTune)
+      m_timeoutTune(_timeoutTune),
+      m_expectedChannels(_tuning.channels)
 {
-    m_expectedChannels = _tuning.channels;
-
     m_tuning.Clear();
 
     m_tuning.ParseTuningParams(
@@ -277,7 +277,7 @@ long long get_center_frequency(
 
         if ((min_freqid <= freqid) && (freqid <= max_freqid))
             return ft->m_frequencyStart +
-                ft->m_frequencyStep * (freqid - min_freqid);
+                (ft->m_frequencyStep * (freqid - min_freqid));
     }
     return -1;
 }
@@ -313,11 +313,26 @@ int get_closest_freqid(
 }
 
 
+//NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FREQ(A,B, C,D, E,F,G, H, I)               \
+    fmap[QString("atsc_%1_us%2").arg(A,B)] =      \
+        new FrequencyTable((C)+(D), E, F, G, H, I);
+
+// The maximum channel defined in the US frequency tables (standard, HRC, IRC)
+static constexpr uint8_t US_MAX_CHAN { 158 };
+// Equation for computing EIA-542 frequency of channels > 99
+static constexpr uint64_t EIA_542_FREQUENCY(uint64_t bandwidth,
+                                            uint64_t offset,
+                                            uint64_t channel)
+{ return (bandwidth * (8 + channel)) + offset;}
+static_assert(EIA_542_FREQUENCY(6000000, 3000000, US_MAX_CHAN) == 999000000);
+static_assert(EIA_542_FREQUENCY(6000300, 1750000, US_MAX_CHAN) == 997799800);
+
 static void init_freq_tables(freq_table_map_t &fmap)
 {
     // United Kingdom
     fmap["dvbt_ofdm_gb0"] = new FrequencyTable(
-        474000000, 850000000, 8000000, "Channel %1", 21,
+        474000000, 698000000, 8000000, "Channel %1", 21,
         DTVInversion::kInversionOff,
         DTVBandwidth::kBandwidth8MHz, DTVCodeRate::kFECAuto,
         DTVCodeRate::kFECAuto, DTVModulation::kModulationQAMAuto,
@@ -549,7 +564,7 @@ static void init_freq_tables(freq_table_map_t &fmap)
         DTVCodeRate::kFECAuto, DTVModulation::kModulationQAMAuto,
         6900000, 0, 0);
     fmap["dvbc_qam_bf1"] = new FrequencyTable(
-        194750000, 794750000, 100000, "BF Channel %1", 1 + (795000-203000) / 100,
+        194750000, 794750000, 100000, "BF Channel %1", 1 + ((795000-203000) / 100),
         DTVCodeRate::kFECAuto, DTVModulation::kModulationQAMAuto,
         6900000, 0, 0);
 
@@ -594,39 +609,29 @@ static void init_freq_tables(freq_table_map_t &fmap)
     const std::array<const QString,4> desc {
         "ATSC ", "QAM-256 ", "QAM-128 ", "QAM-64 ", };
 
-#define FREQ(A,B, C,D, E,F,G, H, I) \
-    fmap[QString("atsc_%1_us%2").arg(A,B)] =      \
-        new FrequencyTable((C)+(D), E, F, G, H, I);
-
-// The maximum channel defined in the US frequency tables (standard, HRC, IRC)
-#define US_MAX_CHAN 158
-// Equation for computing EIA-542 frequency of channels > 99
-// A = bandwidth, B = offset, C = channel designation (number)
-#define EIA_542_FREQUENCY(A,B,C) ( ( (A) * ( 8 + (C) ) ) + (B) )
-
     for (uint i = 0; i < 4; i++)
     {
-        // USA Cable, ch 2 to US_MAX_CHAN and T.7 to T.14
-        FREQ(modStr[i], "cable0", desc[i], "Channel %1",
-             2,    57000000,   69000000, 6000000, mod[i]); // 2-4
+        // USA Cable, T13 to T14 and ch 2 to US_MAX_CHAN
+        FREQ(modStr[i], "cable0", desc[i], "Channel T-%1",
+             13,   44750000,   50750000, 6000000, mod[i]); // T13-T14
         FREQ(modStr[i], "cable1", desc[i], "Channel %1",
-             5,    79000000,   85000000, 6000000, mod[i]); // 5-6
+             2,    57000000,   69000000, 6000000, mod[i]); // 2-4
         FREQ(modStr[i], "cable2", desc[i], "Channel %1",
-             7,   177000000,  213000000, 6000000, mod[i]); // 7-13
+             5,    79000000,   85000000, 6000000, mod[i]); // 5-6
         FREQ(modStr[i], "cable3", desc[i], "Channel %1",
-             14,  123000000,  171000000, 6000000, mod[i]); // 14-22
+             7,   177000000,  213000000, 6000000, mod[i]); // 7-13
         FREQ(modStr[i], "cable4", desc[i], "Channel %1",
-             23,  219000000,  645000000, 6000000, mod[i]); // 23-94
+             14,  123000000,  171000000, 6000000, mod[i]); // 14-22
         FREQ(modStr[i], "cable5", desc[i], "Channel %1",
+             23,  219000000,  645000000, 6000000, mod[i]); // 23-94
+        FREQ(modStr[i], "cable6", desc[i], "Channel %1",
              95,   93000000,  117000000, 6000000, mod[i]); // 95-99
         // The center frequency of any EIA-542 std cable channel over 99 is
         // Frequency_MHz = ( 6 * ( 8 + channel_designation ) ) + 3
-        FREQ(modStr[i], "cable6", desc[i], "Channel %1",
-             100, 651000000,
-             EIA_542_FREQUENCY(6000000, 3000000, US_MAX_CHAN),
-             6000000, mod[i]);                             // 100-US_MAX_CHAN
-        FREQ(modStr[i], "cable7", desc[i], "Channel T-%1",
-             7,    8750000,   50750000, 6000000, mod[i]); // T7-14
+        FREQ(modStr[i], "cable7", desc[i], "Channel %1",
+            100, 651000000,
+            EIA_542_FREQUENCY(6000000, 3000000, US_MAX_CHAN),
+            6000000, mod[i]);                             // 100-US_MAX_CHAN
 
         // USA Cable, QAM 256 ch 78 to US_MAX_CHAN
         FREQ(modStr[i], "cablehigh0", desc[i], "Channel %1",

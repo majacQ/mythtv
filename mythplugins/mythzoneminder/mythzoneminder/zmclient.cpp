@@ -2,26 +2,25 @@
     zmclient.cpp
 */
 
+// C++
 #include <unistd.h>
 
 // qt
 #include <QTimer>
 
-//myth
-#include "mythcontext.h"
-#include "mythdialogbox.h"
-#include <mythdate.h>
-#include "mythmainwindow.h"
-#include "mythlogging.h"
+//MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
 
 //zoneminder
 #include "zmclient.h"
 #include "zmminiplayer.h"
 
 // the protocol version we understand
-#define ZM_PROTOCOL_VERSION "11"
-
-#define BUFFER_SIZE  (2048*1536*3)
+static constexpr const char* ZM_PROTOCOL_VERSION { "11" };
 
 ZMClient::ZMClient()
     : QObject(nullptr),
@@ -302,17 +301,17 @@ void ZMClient::updateMonitorStatus(void)
 
     for (int x = 0; x < monitorCount; x++)
     {
-        int monID = strList[x * 7 + 2].toInt();
+        int monID = strList[(x * 7) + 2].toInt();
 
         if (m_monitorMap.contains(monID))
         {
             Monitor *mon = m_monitorMap.find(monID).value();
-            mon->name = strList[x * 7 + 3];
-            mon->zmcStatus = strList[x * 7 + 4];
-            mon->zmaStatus = strList[x * 7 + 5];
-            mon->events = strList[x * 7 + 6].toInt();
-            mon->function = strList[x * 7 + 7];
-            mon->enabled = (strList[x * 7 + 8].toInt() != 0);
+            mon->name = strList[(x * 7) + 3];
+            mon->zmcStatus = strList[(x * 7) + 4];
+            mon->zmaStatus = strList[(x * 7) + 5];
+            mon->events = strList[(x * 7) + 6].toInt();
+            mon->function = strList[(x * 7) + 7];
+            mon->enabled = (strList[(x * 7) + 8].toInt() != 0);
         }
     }
 }
@@ -374,8 +373,8 @@ bool ZMClient::updateAlarmStates(void)
     bool changed = false;
     for (int x = 0; x < monitorCount; x++)
     {
-        int monID = strList[x * 2 + 2].toInt();
-        auto state = (State)strList[x * 2 + 3].toInt();
+        int monID = strList[(x * 2) + 2].toInt();
+        auto state = (State)strList[(x * 2) + 3].toInt();
 
         if (m_monitorMap.contains(monID))
         {
@@ -651,7 +650,12 @@ void ZMClient::getEventFrame(Event *event, int frameNo, MythImage **image)
     strList << QString::number(event->monitorID());
     strList << QString::number(event->eventID());
     strList << QString::number(frameNo);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     strList << event->startTime(Qt::LocalTime).toString("yy/MM/dd/hh/mm/ss");
+#else
+    static const QTimeZone localtime(QTimeZone::LocalTime);
+    strList << event->startTime(localtime).toString("yy/MM/dd/hh/mm/ss");
+#endif
     if (!sendReceiveStringList(strList))
         return;
 
@@ -696,7 +700,12 @@ void ZMClient::getAnalyseFrame(Event *event, int frameNo, QImage &image)
     strList << QString::number(event->monitorID());
     strList << QString::number(event->eventID());
     strList << QString::number(frameNo);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     strList << event->startTime(Qt::LocalTime).toString("yy/MM/dd/hh/mm/ss");
+#else
+    static const QTimeZone localtime(QTimeZone::LocalTime);
+    strList << event->startTime(localtime).toString("yy/MM/dd/hh/mm/ss");
+#endif
     if (!sendReceiveStringList(strList))
     {
         image = QImage();
@@ -908,11 +917,11 @@ void ZMClient::doGetMonitorList(void)
     for (int x = 0; x < monitorCount; x++)
     {
         auto *item = new Monitor;
-        item->id = strList[x * 5 + 2].toInt();
-        item->name = strList[x * 5 + 3];
-        item->width = strList[x * 5 + 4].toInt();
-        item->height = strList[x * 5 + 5].toInt();
-        item->bytes_per_pixel = strList[x * 5 + 6].toInt();
+        item->id = strList[(x * 5) + 2].toInt();
+        item->name = strList[(x * 5) + 3];
+        item->width = strList[(x * 5) + 4].toInt();
+        item->height = strList[(x * 5) + 5].toInt();
+        item->bytes_per_pixel = strList[(x * 5) + 6].toInt();
         item->zmcStatus = "";
         item->zmaStatus = "";
         item->events = 0;
@@ -962,7 +971,7 @@ void ZMClient::saveNotificationMonitors(void)
 
 void ZMClient::customEvent (QEvent* event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent*>(event);
         if (!me)

@@ -43,7 +43,9 @@ void MythLocale::Init(const QString &localeName)
             m_localeCode = "en_US";
         }
         else
+        {
             m_localeCode = locale.name();
+        }
     }
 
     m_qtLocale = QLocale(m_localeCode);
@@ -206,7 +208,7 @@ QString MythLocale::GetLocaleSetting(const QString &key)
 {
     if (!m_defaultsLoaded &&
         !LoadDefaultsFromXML())
-        return QString();
+        return {};
 
     QString value = m_globalSettings.value(key);
     if (m_hostSettings.contains(key))

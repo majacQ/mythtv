@@ -1,21 +1,21 @@
 // Qt
 #include <utility>
 
-// libmyth
-#include "mythlogging.h"
+// libmythbase
+#include "libmythbase/mythlogging.h"
 
 // libmythui
-#include "mythmainwindow.h"
-#include "mythuihelper.h"
-#include "mythpainter.h"
-#include "mythuiimage.h"
-#include "mythuiprogressbar.h"
-#include "mythdialogbox.h"
-#include "mythuitext.h"
-#include "mythuibutton.h"
-#include "mythuieditbar.h"
-#include "mythuistatetype.h"
-#include "mythuigroup.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythpainter.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuieditbar.h"
+#include "libmythui/mythuigroup.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuiprogressbar.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
 
 // libmythtv
 #include "overlays/mythnavigationoverlay.h"
@@ -366,7 +366,9 @@ void OSD::SetText(const QString &Window, const InfoMap &Map, OSDTimeout Timeout)
             win->SetTextFromMap(Map);
     }
     else
+    {
         win->SetTextFromMap(Map);
+    }
 
     SetExpiry(Window, Timeout);
 }
@@ -461,7 +463,7 @@ void OSD::Draw()
     QTime now = MythDate::current().time();
 
     CheckExpiry();
-    for (auto * screen : qAsConst(m_children))
+    for (auto * screen : std::as_const(m_children))
     {
         if (screen->IsVisible())
         {
@@ -521,7 +523,7 @@ void OSD::Draw()
     if (visible)
     {
         m_painter->Begin(nullptr);
-        for (auto * screen : qAsConst(m_children))
+        for (auto * screen : std::as_const(m_children))
         {
             if (screen->IsVisible())
             {
@@ -530,7 +532,7 @@ void OSD::Draw()
                 screen->ResetNeedsRedraw();
             }
         }
-        for (auto * notif : qAsConst(notifications))
+        for (auto * notif : std::as_const(notifications))
         {
             if (notif->IsVisible())
             {
@@ -601,12 +603,15 @@ void OSD::SetExpiry(const QString &Window, enum OSDTimeout Timeout,
 void OSD::SetExpiryPriv(const QString &Window, enum OSDTimeout Timeout,
                         std::chrono::milliseconds CustomTimeout)
 {
-    if (Timeout == kOSDTimeout_Ignore && CustomTimeout == 0ms)
+    std::chrono::milliseconds time { 0ms };
+    if (CustomTimeout != 0ms)
+        time = CustomTimeout;
+    else if ((Timeout > kOSDTimeout_Ignore) && (Timeout <= kOSDTimeout_Long))
+        time = m_timeouts[static_cast<size_t>(Timeout)];
+    else
         return;
 
     MythScreenType *win = GetWindow(Window);
-    std::chrono::milliseconds time = (CustomTimeout != 0ms)
-        ? CustomTimeout : m_timeouts[static_cast<size_t>(Timeout)];
     if ((time > 0ms) && win)
     {
         QDateTime expires = MythDate::current().addMSecs(time.count());

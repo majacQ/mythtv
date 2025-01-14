@@ -5,23 +5,19 @@
 
 // Qt headers
 #include <QDomDocument>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QTimer>
 
 // MythTV headers
-#include "upnpsubscription.h"
-#include "mthread.h"
-#include "upnpexp.h"
-#include "videometadatalistmanager.h"
+#include "libmythbase/mthread.h"
+#include "libmythmetadata/videometadatalistmanager.h"
+#include "libmythupnp/upnpexp.h"
+#include "libmythupnp/upnpsubscription.h"
 
-class MediaServer;
+class UpnpMediaServer;
 class UPNPSubscription;
 class meta_dir_node;
 
@@ -112,19 +108,11 @@ class UPNPScanner : public QObject
     static  UPNPScanner* gUPNPScanner;
     static  bool         gUPNPScannerEnabled;
     static  MThread*     gUPNPScannerThread;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static  QMutex*      gUPNPScannerLock;
-#else
     static  QRecursiveMutex* gUPNPScannerLock;
-#endif
 
     UPNPSubscription *m_subscription {nullptr};
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex  m_lock {QMutex::Recursive};
-#else
     QRecursiveMutex  m_lock;
-#endif
-    QHash<QString,MediaServer*> m_servers;
+    QHash<QString,UpnpMediaServer*> m_servers;
     QNetworkAccessManager *m_network {nullptr};
     // TODO Move to QMultiHash when we move to Qt >=4.7
     // QHash(QUrl) unsupported on < 4.7

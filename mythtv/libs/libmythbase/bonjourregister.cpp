@@ -1,11 +1,13 @@
+#include "bonjourregister.h"
+
 #include <cstdlib>
+#include <limits> // workaround QTBUG-90395
 
 #include <QSocketNotifier>
 #include <QtEndian>
 
-#include "mythmiscutil.h"
+#include "mythrandom.h"
 #include "mythlogging.h"
-#include "bonjourregister.h"
 
 #define LOC QString("Bonjour: ")
 
@@ -91,14 +93,12 @@ void BonjourRegister::socketReadyRead()
 }
 
 
-void BonjourRegister::BonjourCallback(DNSServiceRef ref, DNSServiceFlags flags,
+void BonjourRegister::BonjourCallback([[maybe_unused]] DNSServiceRef ref,
+                                      [[maybe_unused]] DNSServiceFlags flags,
                                       DNSServiceErrorType errorcode,
                                       const char *name, const char *type,
                                       const char *domain, void *object)
 {
-    (void)ref;
-    (void)flags;
-
     auto *bonjour = static_cast<BonjourRegister *>(object);
     if (bonjour)
     {
@@ -134,7 +134,7 @@ QByteArray BonjourRegister::RandomizeData(void)
 
     data.append(7);
     data.append("_rnd=");
-    rnd.append((MythRandom() % 80) + 33);
+    rnd.append(MythRandom(33, 33 + 80 - 1));
     data.append(rnd.toHex());
 
     return data;

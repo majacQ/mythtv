@@ -1,8 +1,9 @@
 // MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythui/opengl/mythrenderopengl.h"
+
 #include "mythplayerui.h"
-#include "mythcorecontext.h"
 #include "mythvideocolourspace.h"
-#include "opengl/mythrenderopengl.h"
 #include "opengl/mythopenglinterop.h"
 
 #ifdef USING_VAAPI
@@ -12,7 +13,7 @@
 #include "mythvtbinterop.h"
 #endif
 #ifdef USING_MEDIACODEC
-#include "mythmediacodeccontext.h"
+#include "decoders/mythmediacodeccontext.h"
 #endif
 #ifdef USING_VDPAU
 #include "mythvdpauinterop.h"
@@ -64,17 +65,18 @@ void MythOpenGLInterop::GetTypes(MythRender* Render, InteropMap& Types)
 #endif
 }
 
-vector<MythVideoTextureOpenGL*> MythOpenGLInterop::Retrieve(MythRenderOpenGL *Context,
-                                                            MythVideoColourSpace *ColourSpace,
-                                                            MythVideoFrame *Frame,
-                                                            FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythOpenGLInterop::Retrieve(MythRenderOpenGL *Context,
+                            MythVideoColourSpace *ColourSpace,
+                            MythVideoFrame *Frame,
+                            FrameScanType Scan)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
     if (!(Context && Frame))
         return result;
 
-    if (!(Frame->m_priv[1] && MythVideoFrame::HardwareFormat(Frame->m_type) &&
-         (Frame->m_type == MythAVUtil::PixelFormatToFrameType(static_cast<AVPixelFormat>(Frame->m_pixFmt)))))
+    if (!Frame->m_priv[1] || !MythVideoFrame::HardwareFormat(Frame->m_type) ||
+         (Frame->m_type != MythAVUtil::PixelFormatToFrameType(static_cast<AVPixelFormat>(Frame->m_pixFmt))))
     {
         LOG(VB_GENERAL, LOG_WARNING, LOC + "Not a valid hardware frame");
         return result;
@@ -125,11 +127,12 @@ MythOpenGLInterop::~MythOpenGLInterop()
     MythOpenGLInterop::DeleteTextures();
 }
 
-vector<MythVideoTextureOpenGL*> MythOpenGLInterop::Acquire(MythRenderOpenGL* /*Context*/,
-                                                           MythVideoColourSpace* /*ColourSpace*/,
-                                                           MythVideoFrame* /*Frame*/, FrameScanType /*Scan*/)
+std::vector<MythVideoTextureOpenGL*>
+MythOpenGLInterop::Acquire(MythRenderOpenGL* /*Context*/,
+                           MythVideoColourSpace* /*ColourSpace*/,
+                           MythVideoFrame* /*Frame*/, FrameScanType /*Scan*/)
 {
-    return vector<MythVideoTextureOpenGL*>();
+    return {};
 }
 
 void MythOpenGLInterop::DeleteTextures()
@@ -140,7 +143,7 @@ void MythOpenGLInterop::DeleteTextures()
         int count = 0;
         for (auto it = m_openglTextures.constBegin(); it != m_openglTextures.constEnd(); ++it)
         {
-            vector<MythVideoTextureOpenGL*> textures = it.value();
+            std::vector<MythVideoTextureOpenGL*> textures = it.value();
             for (auto & texture : textures)
             {
                 if (texture->m_textureId)

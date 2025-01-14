@@ -6,10 +6,12 @@
 #ifndef RTP_DATA_PACKET_H
 #define RTP_DATA_PACKET_H
 
-#include <arpa/inet.h> // for ntohs()/ntohl()
+#include <limits> // workaround QTBUG-90395
 
+#include <QtEndian>
+
+#include "libmythbase/mythlogging.h"
 #include "udppacket.h"
-#include "mythlogging.h"
 
 #ifdef _MSC_VER
 #  include <WinSock2.h>
@@ -94,24 +96,24 @@ class RTPDataPacket : public UDPPacket
 
     uint GetSequenceNumber(void) const
     {
-        return ntohs(*reinterpret_cast<const uint16_t*>(m_data.data()+2));
+        return qFromBigEndian(*reinterpret_cast<const uint16_t*>(m_data.data()+2));
     }
 
     uint GetTimeStamp(void) const
     {
-        return ntohl(*reinterpret_cast<const uint32_t*>(m_data.data()+4));
+        return qFromBigEndian(*reinterpret_cast<const uint32_t*>(m_data.data()+4));
     }
 
     uint GetSynchronizationSource(void) const
     {
-        return ntohl(*reinterpret_cast<const uint32_t*>(m_data.data()+8));
+        return qFromBigEndian(*reinterpret_cast<const uint32_t*>(m_data.data()+8));
     }
 
     uint GetContributingSource(uint i) const
     {
         const uint32_t tmp =
             *reinterpret_cast<const uint32_t*>(m_data.data() + 12 + 4 * i);
-        return ntohl(tmp);
+        return qFromBigEndian(tmp);
     }
 
     uint GetPayloadOffset(void) const { return m_off; }

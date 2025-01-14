@@ -93,9 +93,9 @@ class MHTokenGroup : public MHPresentable
 // which only work on visibles.
 class MHListItem {
   public:
-    explicit MHListItem(MHRoot *pVis): m_pVisible(pVis), m_fSelected(false) {}
-    MHRoot *m_pVisible;
-    bool   m_fSelected;
+    explicit MHListItem(MHRoot *pVis): m_pVisible(pVis) {}
+    MHRoot *m_pVisible { nullptr };
+    bool   m_fSelected { false   };
 };
 
 class MHListGroup : public MHTokenGroup  
@@ -126,7 +126,11 @@ class MHListGroup : public MHTokenGroup
     void GetFirstItem(MHRoot *pResult, MHEngine */*engine*/) override // MHRoot
         { pResult->SetVariableValue(m_nFirstItem); }
     void GetListSize(MHRoot *pResult, MHEngine */*engine*/) override // MHRoot
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        { pResult->SetVariableValue(m_itemList.size()); }
+#else
         { pResult->SetVariableValue(static_cast<int>(m_itemList.size())); }
+#endif
 
   protected:
     // MHEG Internal attributes.

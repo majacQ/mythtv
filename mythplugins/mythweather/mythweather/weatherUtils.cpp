@@ -1,11 +1,12 @@
 // QT headers
+#include <QCoreApplication>
 #include <QString>
 #include <QStringList>
-#include <QCoreApplication>
 
-#include <mythdirs.h>
-#include "mythmainwindow.h"
-#include "mythuihelper.h"
+// MythTV
+#include <libmythbase/mythdirs.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuihelper.h>
 
 // MythWeather headers
 #include "weatherUtils.h"
@@ -102,10 +103,8 @@ bool doLoadScreens(const QString &filename, ScreenListMap &screens)
                 screens[e.attribute("name")].m_title =
                                             getScreenTitle(e.attribute("name"));
                 QString hasUnits = e.attribute("hasunits");
-                if (hasUnits.toLower() == "no")
-                    screens[e.attribute("name")].m_hasUnits = false;
-                else
-                    screens[e.attribute("name")].m_hasUnits = true;
+                screens[e.attribute("name")].m_hasUnits =
+                    hasUnits.toLower() != "no";
                 screens[e.attribute("name")].m_dataTypes = loadScreen(e);
             }
         }

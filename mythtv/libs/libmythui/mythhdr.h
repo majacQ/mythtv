@@ -33,7 +33,7 @@ class MUI_PUBLIC MythHDR
     Q_GADGET
 
   public:
-    enum HDRType
+    enum HDRType : std::uint8_t
     {
         SDR   = 0x00,
         HDR10 = 0x01,
@@ -43,7 +43,7 @@ class MUI_PUBLIC MythHDR
     Q_FLAG(HDRTypes)
 
     using MythHDRDesc = std::tuple<HDRTypes,double,double,double>;
-    static MythHDRPtr  Create(class MythDisplay* _Display, const MythHDRDesc& Desc);
+    static MythHDRPtr  Create(class MythDisplay* MDisplay, const MythHDRDesc& Desc);
     virtual ~MythHDR() = default;
     virtual void SetHDRMetadata(HDRType /*Type*/, const MythHDRMetaPtr& /*Metadata*/) {}
 

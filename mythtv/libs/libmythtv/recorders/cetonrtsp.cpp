@@ -11,9 +11,10 @@
 #include <QVector>
 
 // MythTV includes
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsocket.h"
+
 #include "cetonrtsp.h"
-#include "mythlogging.h"
-#include "mythsocket.h"
 
 
 #define LOC QString("CetonRTSP(%1): ").arg(m_requestUrl.toString())
@@ -93,10 +94,14 @@ bool CetonRTSP::ProcessRequest(
     }
 
     QStringList requestHeaders;
-    requestHeaders.append(QString("%1 %2 RTSP/1.0")
-        .arg(method,
-             !alternative.isEmpty() ? alternative :
-             (use_control ? m_controlUrl.toString() : m_requestUrl.toString())));
+    QString uri;
+    if (!alternative.isEmpty())
+        uri = alternative;
+    else if (use_control)
+        uri = m_controlUrl.toString();
+    else
+        uri = m_requestUrl.toString();
+    requestHeaders.append(QString("%1 %2 RTSP/1.0").arg(method, uri));
     requestHeaders.append(QString("User-Agent: MythTV Ceton Recorder"));
     requestHeaders.append(QString("CSeq: %1").arg(++m_sequenceNumber));
     if (m_sessionId != "0")
@@ -122,9 +127,9 @@ bool CetonRTSP::ProcessRequest(
     if (!waitforanswer)
         return true;
 
-    QRegularExpression firstLineRE {  "^RTSP/1.0 (\\d+) ([^\r\n]+)" };
-    QRegularExpression headerRE    { R"(^([^:]+):\s*([^\r\n]+))"    };
-    QRegularExpression blankLineRE { R"(^[\r\n]*$)"                 };
+    static const QRegularExpression kFirstLineRE {  "^RTSP/1.0 (\\d+) ([^\r\n]+)" };
+    static const QRegularExpression kHeaderRE    { R"(^([^:]+):\s*([^\r\n]+))"    };
+    static const QRegularExpression kBlankLineRE { R"(^[\r\n]*$)"                 };
 
     bool firstLine = true;
     while (true)
@@ -146,7 +151,7 @@ bool CetonRTSP::ProcessRequest(
         QRegularExpressionMatch match;
         if (firstLine)
         {
-            match = firstLineRE.match(line);
+            match = kFirstLineRE.match(line);
             if (!match.hasMatch())
             {
                 m_responseCode = -1;
@@ -171,10 +176,10 @@ bool CetonRTSP::ProcessRequest(
             continue;
         }
 
-        match = blankLineRE.match(line);
+        match = kBlankLineRE.match(line);
         if (match.hasMatch()) break;
 
-        match = headerRE.match(line);
+        match = kHeaderRE.match(line);
         if (!match.hasMatch())
         {
             m_responseCode = -1;
@@ -240,7 +245,8 @@ bool CetonRTSP::GetOptions(QStringList &options)
 {
     if (ProcessRequest("OPTIONS"))
     {
-        options = m_responseHeaders.value("Public").split(QRegularExpression(",\\s*"));
+        static const QRegularExpression kSeparatorRE { ",\\s*" };
+        options = m_responseHeaders.value("Public").split(kSeparatorRE);
         m_canGetParameter = options.contains("GET_PARAMETER");
 
         return true;
@@ -332,7 +338,7 @@ bool CetonRTSP::Describe(void)
     bool found = false;
     QUrl base = m_controlUrl = GetBaseUrl();
 
-    for (const QString& line : qAsConst(lines))
+    for (const QString& line : std::as_const(lines))
     {
         if (line.startsWith("m="))
         {
@@ -426,8 +432,7 @@ bool CetonRTSP::Setup(ushort clientPort1, ushort clientPort2,
         m_timeout = std::chrono::seconds(params["timeout"].toInt());
     }
 
-    QString transport = readParameters("Transport", params);
-    Q_UNUSED(transport);
+    // QString transport = readParameters("Transport", params);
     if (params.contains("ssrc"))
     {
         bool ok = false;

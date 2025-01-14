@@ -14,9 +14,9 @@
 #include <QObject>
 #include <QMutex>
 
-#include "upnp.h"
-#include "upnpcmgr.h"
-#include "mythxmlclient.h"
+#include "libmythupnp/mythxmlclient.h"
+#include "libmythupnp/upnp.h"
+#include "libmythupnp/upnpcmgr.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -36,10 +36,6 @@ class MediaRenderer : public UPnp
     public:
                  MediaRenderer();
         ~MediaRenderer() override;
-
-        DeviceLocation *GetDefaultMaster();
-        void            SetDefaultMaster( DeviceLocation *pDeviceLoc,
-                                          const QString  &sPin );
 };
 
 #endif // MEDIARENDERER_H

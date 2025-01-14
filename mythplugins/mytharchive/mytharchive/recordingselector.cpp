@@ -4,31 +4,32 @@
 #include <unistd.h>
 
 // qt
+#include <QApplication>
 #include <QDir>
 #include <QKeyEvent>
 #include <QTimer>
-#include <QApplication>
 
 // mythtv
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <mthread.h>
-#include <programinfo.h>
-#include <remoteutil.h>
-#include <mythtimer.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuiimage.h>
-#include <mythuibuttonlist.h>
-#include <mythmainwindow.h>
-#include <mythprogressdialog.h>
-#include <mythdialogbox.h>
-#include <mythlogging.h>
-#include <mythdate.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mthread.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/mythtimer.h>
+#include <libmythbase/programinfo.h>
+#include <libmythbase/remoteutil.h>
+#include <libmythbase/stringutil.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
-#include "recordingselector.h"
 #include "archiveutil.h"
+#include "recordingselector.h"
 
 class GetRecordingListThread : public MThread
 {
@@ -157,7 +158,7 @@ bool RecordingSelector::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -165,7 +166,9 @@ bool RecordingSelector::keyPressEvent(QKeyEvent *event)
             ShowMenu();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -252,7 +255,7 @@ void RecordingSelector::titleChanged(MythUIButtonListItem *item)
 
     if (m_filesizeText)
     {
-        m_filesizeText->SetText(formatSize(p->GetFilesize() / 1024));
+        m_filesizeText->SetText(StringUtil::formatKBytes(p->GetFilesize() / 1024));
     }
 
     if (m_cutlistImage)
@@ -284,11 +287,11 @@ void RecordingSelector::OKPressed()
     // loop though selected recordings and add them to the list
     // remove any items that have been removed from the list
     QList<ArchiveItem *> tempAList;
-    for (auto *a : qAsConst(*m_archiveList))
+    for (auto *a : std::as_const(*m_archiveList))
     {
         bool found = false;
 
-        for (auto *p : qAsConst(m_selectedList))
+        for (auto *p : std::as_const(m_selectedList))
         {
             if (a->type != "Recording" || a->filename == p->GetPlaybackURL(false, true))
             {
@@ -301,14 +304,14 @@ void RecordingSelector::OKPressed()
             tempAList.append(a);
     }
 
-    for (auto *x : qAsConst(tempAList))
+    for (auto *x : std::as_const(tempAList))
         m_archiveList->removeAll(x);
 
     // remove any items that are already in the list
     QList<ProgramInfo *> tempSList;
-    for (auto *p : qAsConst(m_selectedList))
+    for (auto *p : std::as_const(m_selectedList))
     {
-        for (const auto *a : qAsConst(*m_archiveList))
+        for (const auto *a : std::as_const(*m_archiveList))
         {
             if (a->filename == p->GetPlaybackURL(false, true))
             {
@@ -318,11 +321,11 @@ void RecordingSelector::OKPressed()
         }
     }
 
-    for (auto *x : qAsConst(tempSList))
+    for (auto *x : std::as_const(tempSList))
         m_selectedList.removeAll(x);
 
     // add all that are left
-    for (auto *p : qAsConst(m_selectedList))
+    for (auto *p : std::as_const(m_selectedList))
     {
         auto *a = new ArchiveItem;
         a->type = "Recording";
@@ -405,11 +408,11 @@ void RecordingSelector::updateRecordingList(void)
                 if (season && episode)
                 {
                     seasone = QString("s%1e%2")
-                        .arg(format_season_and_episode(season, 2),
-                             format_season_and_episode(episode, 2));
+                        .arg(StringUtil::intToPaddedString(season, 2),
+                             StringUtil::intToPaddedString(episode, 2));
                     seasonx = QString("%1x%2")
-                        .arg(format_season_and_episode(season, 1),
-                             format_season_and_episode(episode, 2));
+                        .arg(StringUtil::intToPaddedString(season, 1),
+                             StringUtil::intToPaddedString(episode, 2));
                 }
 
                 item->SetText(title, "title");
@@ -422,7 +425,7 @@ void RecordingSelector::updateRecordingList(void)
 
                 item->SetText(timedate, "timedate");
                 item->SetText(p->GetDescription(), "description");
-                item->SetText(formatSize(p->GetFilesize() / 1024),
+                item->SetText(StringUtil::formatKBytes(p->GetFilesize() / 1024),
                               "filesize_str");
 
                 item->SetText(QString::number(season), "season");
@@ -485,9 +488,8 @@ void RecordingSelector::updateCategorySelector(void)
     }
 }
 
-void RecordingSelector::setCategory(MythUIButtonListItem *item)
+void RecordingSelector::setCategory([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void)item;
     updateRecordingList();
 }
 
@@ -498,7 +500,7 @@ void RecordingSelector::updateSelectedList()
 
     m_selectedList.clear();
 
-    for (const auto *a : qAsConst(*m_archiveList))
+    for (const auto *a : std::as_const(*m_archiveList))
     {
         for (auto *p : *m_recordingList)
         {

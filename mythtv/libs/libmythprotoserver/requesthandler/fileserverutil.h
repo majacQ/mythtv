@@ -8,9 +8,9 @@
 #include <QDateTime>
 #include <QString>
 
-#include "mythprotoserverexp.h"
-#include "programinfo.h"
-#include "referencecounter.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/referencecounter.h"
+#include "libmythprotoserver/mythprotoserverexp.h"
 
 class DeleteThread;
 
@@ -43,6 +43,6 @@ class PROTOSERVER_PUBLIC DeleteHandler : public ReferenceCounter
 
 };
 
-QString GetPlaybackURL(ProgramInfo *pginfo, bool storePath = true);
+PROTOSERVER_PUBLIC QString GetPlaybackURL(ProgramInfo *pginfo, bool storePath = true);
 
 #endif

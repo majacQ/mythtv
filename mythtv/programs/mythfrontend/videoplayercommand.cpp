@@ -1,16 +1,18 @@
+// Qt
 #include <QDir>
 
-#include "mythcontext.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/lcddevice.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythmetadata/dbaccess.h"
+#include "libmythmetadata/videometadata.h"
+#include "libmythmetadata/videoutils.h"
+#include "libmythui/mythmainwindow.h"
 
-#include "mythmainwindow.h"
-#include "mythsystemlegacy.h"
-#include "remoteutil.h"
-#include "lcddevice.h"
-#include "mythmiscutil.h"
-#include "dbaccess.h"
-#include "videometadata.h"
-#include "videoutils.h"
-
+// MythFrontend
 #include "videoplayercommand.h"
 
 namespace
@@ -235,7 +237,7 @@ class VideoPlayerCommandPrivate
     {
         if (item)
         {
-            QString play_command = item->GetPlayCommand();
+            const QString& play_command = item->GetPlayCommand();
             QString filename;
 
             if (item->IsHostSet())
@@ -335,7 +337,7 @@ class VideoPlayerCommandPrivate
     {
         if (!m_playerProcs.empty())
             return m_playerProcs.front()->GetCommandDisplayName();
-        return QString();
+        return {};
     }
 
   private:
@@ -379,8 +381,8 @@ VideoPlayerCommand VideoPlayerCommand::PlayerFor(const QString &filename)
 }
 
 VideoPlayerCommand::VideoPlayerCommand()
+  : m_d(new VideoPlayerCommandPrivate)
 {
-    m_d = new VideoPlayerCommandPrivate;
 }
 
 VideoPlayerCommand::~VideoPlayerCommand()
@@ -390,8 +392,8 @@ VideoPlayerCommand::~VideoPlayerCommand()
 }
 
 VideoPlayerCommand::VideoPlayerCommand(const VideoPlayerCommand &other)
+  : m_d(new VideoPlayerCommandPrivate(*other.m_d))
 {
-    m_d = new VideoPlayerCommandPrivate(*other.m_d);
 }
 
 VideoPlayerCommand &VideoPlayerCommand::operator=(const VideoPlayerCommand &rhs)

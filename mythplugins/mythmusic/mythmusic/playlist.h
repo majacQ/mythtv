@@ -8,18 +8,18 @@
 #include <QList>
 #include <QMap>
 
-// libmythmetadata
-#include <musicmetadata.h>
+// MythTV
+#include <libmythmetadata/musicmetadata.h>
 
 // mythmusic
-#include "playlistcontainer.h"
 #include "musicplayer.h"
+#include "playlistcontainer.h"
 
 class PlaylistContainer;
 class Playlist;
 class MythSystemLegacy;
 
-enum InsertPLOption
+enum InsertPLOption : std::uint8_t
 {
     PL_REPLACE = 1,
     PL_INSERTATBEGINNING,
@@ -27,7 +27,7 @@ enum InsertPLOption
     PL_INSERTAFTERCURRENT
 };
 
-enum PlayPLOption
+enum PlayPLOption : std::uint8_t
 {
     PL_FIRST = 1,
     PL_FIRSTNEW,
@@ -62,18 +62,18 @@ class Playlist : public QObject
     void describeYourself(void) const; //  debugging
 
     void fillSongsFromSonglist(const QString& songList);
-    void fillSonglistFromQuery(const QString& whereClause, 
-                               bool removeDuplicates = false,
-                               InsertPLOption insertOption = PL_REPLACE,
-                               int currentTrackID = 0);
-    void fillSonglistFromSmartPlaylist(const QString& category, const QString& name,
-                                       bool removeDuplicates = false,
-                                       InsertPLOption insertOption = PL_REPLACE,
-                                       int currentTrackID = 0);
-    void fillSonglistFromList(const QList<int> &songList,
-                              bool removeDuplicates,
-                              InsertPLOption insertOption,
-                              int currentTrackID);
+    int fillSonglistFromQuery(const QString& whereClause,
+                              bool removeDuplicates = false,
+                              InsertPLOption insertOption = PL_REPLACE,
+                              int currentTrackID = 0);
+    int fillSonglistFromSmartPlaylist(const QString& category, const QString& name,
+                                      bool removeDuplicates = false,
+                                      InsertPLOption insertOption = PL_REPLACE,
+                                      int currentTrackID = 0);
+    int fillSonglistFromList(const QList<int> &songList,
+                             bool removeDuplicates,
+                             InsertPLOption insertOption,
+                             int currentTrackID);
     QString toRawSonglist(bool shuffled = false, bool tracksOnly = false);
 
 
@@ -104,7 +104,7 @@ class Playlist : public QObject
     bool doSaves(void) const { return m_doSave; }
 
     QString getName(void) { return m_name; } 
-    void    setName(QString a_name) { m_name = std::move(a_name); }
+    void    setName(const QString& a_name) { m_name = a_name; }
 
     bool isActivePlaylist(void) { return m_name == DEFAULT_PLAYLIST_NAME; }
 
@@ -130,7 +130,7 @@ class Playlist : public QObject
 
   private:
     MusicMetadata* getRawSongAt(int pos) const;
-    static QString removeDuplicateTracks(const QString &orig_songlist, const QString &new_songlist);
+    static QString removeItemsFromList(const QString &remove_list, const QString &source_list);
 
     int                   m_playlistid  {0};
     QString               m_name;

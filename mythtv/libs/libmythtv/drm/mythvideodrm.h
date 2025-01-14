@@ -5,7 +5,7 @@
 #include <QObject>
 
 // MythTV
-#include "platforms/drm/mythdrmplane.h"
+#include "libmythui/platforms/drm/mythdrmplane.h"
 #include "drm/mythvideodrmbuffer.h"
 
 class MythVideoFrame;
@@ -19,7 +19,7 @@ class MythVideoDRM : public QObject
     explicit MythVideoDRM(MythVideoColourSpace* ColourSpace);
    ~MythVideoDRM() override;
 
-    bool IsValid();
+    bool IsValid() const { return m_valid; };
     bool RenderFrame(AVDRMFrameDescriptor* DRMDesc, MythVideoFrame* Frame);
 
   public slots:

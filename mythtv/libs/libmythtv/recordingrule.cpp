@@ -3,18 +3,18 @@
 
 #include <utility>
 
-// libmythbase
-#include "mythdb.h"
+#include <QTimeZone>
 
-// libmyth
-#include "mythcorecontext.h"
+// libmythbase
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythsorthelper.h"
 
 // libmythtv
 #include "scheduledrecording.h" // For RescheduleMatch()
 #include "playgroup.h" // For GetInitialName()
 #include "recordingprofile.h" // For constants
-#include "mythdate.h"
-#include "mythsorthelper.h"
 
 static inline QString null_to_empty(const QString &str)
 {
@@ -61,15 +61,16 @@ bool RecordingRule::Load(bool asTemplate)
         return false;
 
     MSqlQuery query(MSqlQuery::InitCon());
-    query.prepare("SELECT type, search, "
-    "recpriority, prefinput, startoffset, endoffset, dupmethod, dupin, "
-    "inactive, profile, recgroup, storagegroup, playgroup, autoexpire, "
-    "maxepisodes, maxnewest, autocommflag, autotranscode, transcoder, "
-    "autouserjob1, autouserjob2, autouserjob3, autouserjob4, "
-    "autometadata, parentid, title, subtitle, description, season, episode, "
-    "category, starttime, startdate, endtime, enddate, seriesid, programid, "
-    "inetref, chanid, station, findday, findtime, findid, "
-    "next_record, last_record, last_delete, avg_delay, filter, recgroupid "
+    query.prepare("SELECT type, search, " // 00-01
+    "recpriority, prefinput, startoffset, endoffset, dupmethod, dupin, " // 02-07
+    "inactive, profile, recgroup, storagegroup, playgroup, autoexpire, " // 08-13
+    "maxepisodes, maxnewest, autocommflag, autotranscode, transcoder, " // 14-18
+    "autouserjob1, autouserjob2, autouserjob3, autouserjob4, " // 19-22
+    "autometadata, parentid, title, subtitle, description, season, episode, " // 23-29
+    "category, starttime, startdate, endtime, enddate, seriesid, programid, " // 30-36
+    "inetref, chanid, station, findday, findtime, findid, " // 37-42
+    "next_record, last_record, last_delete, avg_delay, filter, recgroupid, " // 43-48
+    "autoextend " // 49
     "FROM record WHERE recordid = :RECORDID ;");
 
     query.bindValue(":RECORDID", m_recordID);
@@ -98,6 +99,7 @@ bool RecordingRule::Load(bool asTemplate)
     m_dupIn = static_cast<RecordingDupInType>(query.value(7).toInt());
     m_filter = query.value(47).toUInt();
     m_isInactive = query.value(8).toBool();
+    m_autoExtend = static_cast<AutoExtendType>(query.value(49).toUInt());
 
     // Storage
     m_recProfile = query.value(9).toString();
@@ -179,7 +181,10 @@ bool RecordingRule::LoadByProgram(const ProgramInfo* proginfo)
             return false;
     }
     else
-        LoadTemplate(proginfo->GetCategory(), proginfo->GetCategoryTypeString());
+    {
+        LoadTemplate(proginfo->GetTitle(), proginfo->GetCategory(),
+                     proginfo->GetCategoryTypeString());
+    }
 
     if (m_type != kTemplateRecord &&
         (m_searchType == kNoSearch || m_searchType == kManualSearch))
@@ -270,22 +275,27 @@ bool RecordingRule::LoadBySearch(RecSearchType lsearch, const QString& textname,
     return true;
 }
 
-bool RecordingRule::LoadTemplate(const QString& category, const QString& categoryType)
+bool RecordingRule::LoadTemplate(const QString& title,
+                                 const QString& category,
+                                 const QString& categoryType)
 {
     QString lcategory = category.isEmpty() ? "Default" : category;
     QString lcategoryType = categoryType.isEmpty() ? "Default" : categoryType;
 
     MSqlQuery query(MSqlQuery::InitCon());
     query.prepare("SELECT recordid, category, "
+                  "       (category = :TITLE1) AS titlematch, "
                   "       (category = :CAT1) AS catmatch, "
                   "       (category = :CATTYPE1) AS typematch "
                   "FROM record "
                   "WHERE type = :TEMPLATE AND "
-                  "      (category = :CAT2 OR category = :CATTYPE2 "
+                  "      (category IN (:TITLE2, :CAT2, :CATTYPE2) "
                   "       OR category = 'Default') "
-                  "ORDER BY catmatch DESC, typematch DESC"
+                  "ORDER BY titlematch DESC, catmatch DESC, typematch DESC"
                   );
     query.bindValue(":TEMPLATE", kTemplateRecord);
+    query.bindValue(":TITLE1", title);
+    query.bindValue(":TITLE2", title);
     query.bindValue(":CAT1", lcategory);
     query.bindValue(":CAT2", lcategory);
     query.bindValue(":CATTYPE1", lcategoryType);
@@ -385,7 +395,7 @@ bool RecordingRule::Save(bool sendSig)
                     "recpriority = :RECPRIORITY, prefinput = :INPUT, "
                     "startoffset = :STARTOFFSET, endoffset = :ENDOFFSET, "
                     "dupmethod = :DUPMETHOD, dupin = :DUPIN, "
-                    "filter = :FILTER, "
+                    "filter = :FILTER, autoextend = :AUTOEXTEND, "
                     "inactive = :INACTIVE, profile = :RECPROFILE, "
                     "recgroup = :RECGROUP, "
                     "recgroupid = :RECGROUPID, "
@@ -432,6 +442,7 @@ bool RecordingRule::Save(bool sendSig)
     query.bindValue(":DUPMETHOD", m_dupMethod);
     query.bindValue(":DUPIN", m_dupIn);
     query.bindValue(":FILTER", m_filter);
+    query.bindValue(":AUTOEXTEND", static_cast<int>(m_autoExtend));
     query.bindValue(":INACTIVE", m_isInactive);
     query.bindValue(":RECPROFILE", null_to_empty(m_recProfile));
     // Temporary, remove once transition to recgroupid is complete
@@ -564,12 +575,20 @@ void RecordingRule::ToMap(InfoMap &infoMap, uint date_format) const
         infoMap["category"] = m_category;
     infoMap["callsign"] = m_station;
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime starttm(m_startdate, m_starttime, Qt::UTC);
+#else
+    QDateTime starttm(m_startdate, m_starttime, QTimeZone(QTimeZone::UTC));
+#endif
     infoMap["starttime"] = MythDate::toString(starttm, date_format | MythDate::kTime);
     infoMap["startdate"] = MythDate::toString(
         starttm, date_format | MythDate::kDateFull | MythDate::kSimplify);
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime endtm(m_enddate, m_endtime, Qt::UTC);
+#else
+    QDateTime endtm(m_enddate, m_endtime, QTimeZone(QTimeZone::UTC));
+#endif
     infoMap["endtime"] = MythDate::toString(endtm, date_format | MythDate::kTime);
     infoMap["enddate"] = MythDate::toString(
         endtm, date_format | MythDate::kDateFull | MythDate::kSimplify);
@@ -578,8 +597,14 @@ void RecordingRule::ToMap(InfoMap &infoMap, uint date_format) const
     infoMap["chanid"] = QString::number(m_channelid);
     infoMap["channel"] = m_station;
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime startts(m_startdate, m_starttime, Qt::UTC);
     QDateTime endts(m_enddate, m_endtime, Qt::UTC);
+#else
+    static const QTimeZone utc(QTimeZone::UTC);
+    QDateTime startts(m_startdate, m_starttime, utc);
+    QDateTime endts(m_enddate, m_endtime, utc);
+#endif
 
     int seconds = startts.secsTo(endts);
     int minutes = seconds / 60;
@@ -602,7 +627,9 @@ void RecordingRule::ToMap(InfoMap &infoMap, uint date_format) const
             "Hours and minutes").arg(hourstring, minstring);
     }
     else
+    {
         infoMap["lentime"] = minstring;
+    }
 
 
     infoMap["timedate"] = MythDate::toString(
@@ -616,13 +643,18 @@ void RecordingRule::ToMap(InfoMap &infoMap, uint date_format) const
 
     if (m_type == kDailyRecord || m_type == kWeeklyRecord)
     {
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         QDateTime ldt =
             QDateTime(MythDate::current().toLocalTime().date(), m_findtime,
                       Qt::LocalTime);
+#else
+        QDateTime ldt =
+            QDateTime(MythDate::current().toLocalTime().date(), m_findtime, utc);
+#endif
         QString findfrom = MythDate::toString(ldt, date_format | MythDate::kTime);
         if (m_type == kWeeklyRecord)
         {
-            int daynum = (m_findday + 5) % 7 + 1;
+            int daynum = ((m_findday + 5) % 7) + 1;
             findfrom = QString("%1, %2")
 		 .arg(gCoreContext->GetQLocale().dayName(daynum, QLocale::ShortFormat),
                       findfrom);
@@ -655,6 +687,7 @@ void RecordingRule::ToMap(InfoMap &infoMap, uint date_format) const
 
     infoMap["ruletype"] = toString(m_type);
     infoMap["rectype"] = toString(m_type);
+    infoMap["autoextend"] = toString(m_autoExtend);
 
     if (m_template == "Default")
         infoMap["template"] = tr("Default", "Default template");
@@ -905,6 +938,13 @@ bool RecordingRule::IsValid(QString &msg) const
         return false;
     }
 
+    // Inactive overrides cause errors so are disallowed.
+    if (isOverride && m_isInactive)
+    {
+        msg = QString("Invalid Inactive Override.");
+        return false;
+    }
+
     if (m_title.isEmpty())
     {
         msg = QString("Invalid title.");
@@ -913,13 +953,18 @@ bool RecordingRule::IsValid(QString &msg) const
 
     if (m_searchType == kPowerSearch)
     {
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare(QString("SELECT NULL FROM (program, channel) "
-                              "%1 WHERE %2")
-                      .arg(m_subtitle, m_description));
-        if (m_description.contains(';') || !query.exec())
+        if (m_description.contains(';') || m_subtitle.contains(';'))
         {
-            msg = QString("Invalid custom search values.");
+            msg = QString("Invalid SQL, contains semicolon");
+            return false;
+        }
+        MSqlQuery query(MSqlQuery::InitCon());
+        query.prepare(QString("SELECT NULL FROM (program, channel, oldrecorded AS oldrecstatus) "
+                              "%1 WHERE %2 LIMIT 5")
+                      .arg(m_subtitle, m_description));
+        if (!query.exec())
+        {
+            msg = QString("Invalid SQL Where clause." + query.lastError().databaseText());
             return false;
         }
     }
@@ -932,7 +977,7 @@ bool RecordingRule::IsValid(QString &msg) const
         }
     }
 
-    if (!isSearch)
+    if (m_type != kTemplateRecord && !isSearch)
     {
         if (!m_startdate.isValid() || !m_starttime.isValid() ||
             !m_enddate.isValid() || !m_endtime.isValid())
@@ -940,8 +985,14 @@ bool RecordingRule::IsValid(QString &msg) const
             msg = QString("Invalid start/end date/time.");
             return false;
         }
-        int secsto = QDateTime(m_startdate, m_starttime)
-            .secsTo(QDateTime(m_enddate, m_endtime));
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+        qint64 secsto = QDateTime(m_startdate, m_starttime, Qt::UTC)
+            .secsTo(QDateTime(m_enddate, m_endtime, Qt::UTC));
+#else
+        static const QTimeZone utc(QTimeZone::UTC);
+        qint64 secsto = QDateTime(m_startdate, m_starttime, utc)
+            .secsTo(QDateTime(m_enddate, m_endtime, utc));
+#endif
         if (secsto <= 0 || secsto > (8 * 3600))
         {
             msg = QString("Invalid duration.");
@@ -955,7 +1006,8 @@ bool RecordingRule::IsValid(QString &msg) const
         }
     }
 
-    if (m_findday < 0 || m_findday > 6 || !m_findtime.isValid())
+    if (m_type != kTemplateRecord
+        && (m_findday < 0 || m_findday > 6 || !m_findtime.isValid()) )
     {
         msg = QString("Invalid find values.");
         return false;
@@ -1016,6 +1068,12 @@ bool RecordingRule::IsValid(QString &msg) const
     if (m_transcoder < 0)
     {
         msg = QString("Invalid transcoder value.");
+        return false;
+    }
+
+    if (m_autoExtend >= AutoExtendType::Last)
+    {
+        msg = QString("Invalid auto extend value.");
         return false;
     }
 

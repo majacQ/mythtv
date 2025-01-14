@@ -25,10 +25,12 @@
 #define AVCODEC_V4L2_BUFFERS_H
 
 #include <stdatomic.h>
+#include <stddef.h>
 #include <linux/videodev2.h>
 
 #include "libavutil/hwcontext_drm.h"
-#include "avcodec.h"
+#include "libavutil/frame.h"
+#include "packet.h"
 
 enum V4L2Buffer_status {
     V4L2BUF_AVAILABLE,
@@ -47,8 +49,9 @@ typedef struct V4L2Buffer {
     AVDRMFrameDescriptor drm_frame;
 
     /* This object is refcounted per-plane, so we need to keep track
-     * of how many context-refs we are holding. */
-    AVBufferRef *context_ref;
+     * of how many context-refs we are holding.
+     * This pointer is a RefStruct reference. */
+    const struct V4L2m2mContext *context_ref;
     atomic_uint context_refcount;
 
     /* keep track of the mmap address and mmap length */

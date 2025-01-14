@@ -12,6 +12,7 @@
  *
  * ============================================================ */
 
+// C++
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -20,12 +21,12 @@
 // qt
 #include <QTimer>
 
-// myth
-#include <mythmainwindow.h>
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdate.h>
-#include <mythuitext.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuitext.h>
 
 // zoneminder
 #include "zmclient.h"
@@ -119,10 +120,10 @@ void FunctionDialog::setMonitorFunction(void)
 ZMConsole::ZMConsole(MythScreenStack *parent)
           :MythScreenType(parent, "zmconsole"),
            m_popupStack(GetMythMainWindow()->GetStack("popup stack")),
-           m_timeTimer(new QTimer(this)), m_updateTimer(new QTimer(this))
+           m_timeTimer(new QTimer(this)),
+           m_timeFormat(gCoreContext->GetSetting("TimeFormat", "h:mm AP")),
+           m_updateTimer(new QTimer(this))
 {
-    m_timeFormat = gCoreContext->GetSetting("TimeFormat", "h:mm AP");
-
     connect(m_timeTimer, &QTimer::timeout, this,
             &ZMConsole::updateTime);
 
@@ -223,7 +224,7 @@ bool ZMConsole::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -231,7 +232,9 @@ bool ZMConsole::keyPressEvent(QKeyEvent *event)
             showEditFunctionPopup();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))

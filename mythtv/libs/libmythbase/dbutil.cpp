@@ -25,10 +25,6 @@
 
 #define LOC QString("DBUtil: ")
 
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
-
 const int DBUtil::kUnknownVersionNumber = INT_MIN;
 
 /** \fn DBUtil::GetDBMSVersion(void)
@@ -187,7 +183,8 @@ bool DBUtil::IsBackupInProgress(void)
  *  \param disableRotation Disable backup rotation
  *  \return                MythDBBackupStatus indicating the result
  */
-MythDBBackupStatus DBUtil::BackupDB(QString &filename, bool disableRotation)
+MythDBBackupStatus DBUtil::BackupDB(QString &filename,
+                                    [[maybe_unused]] bool disableRotation)
 {
     filename = QString();
 
@@ -566,7 +563,7 @@ bool DBUtil::CreateTemporaryDBConf(
 bool DBUtil::DoBackup(const QString &backupScript, QString &filename,
                       bool disableRotation)
 {
-    DatabaseParams dbParams = gCoreContext->GetDatabaseParams();
+    DatabaseParams dbParams = GetMythDB()->GetDatabaseParams();
     QString     dbSchemaVer = gCoreContext->GetSetting("DBSchemaVer");
     QString backupDirectory = GetBackupDirectory();
     QString  backupFilename = CreateBackupFilename(dbParams.m_dbName + "-" +
@@ -662,7 +659,7 @@ bool DBUtil::DoBackup(const QString &backupScript, QString &filename,
  */
 bool DBUtil::DoBackup(QString &filename)
 {
-    DatabaseParams dbParams = gCoreContext->GetDatabaseParams();
+    DatabaseParams dbParams = GetMythDB()->GetDatabaseParams();
     QString     dbSchemaVer = gCoreContext->GetSetting("DBSchemaVer");
     QString backupDirectory = GetBackupDirectory();
 
@@ -768,7 +765,9 @@ bool DBUtil::QueryDBMSVersion(void)
             dbmsVersion.clear();
         }
         else
+        {
             dbmsVersion = query.value(0).toString();
+        }
     }
     m_versionString = dbmsVersion;
 
@@ -821,7 +820,7 @@ int DBUtil::CountClients(void)
 
     QSqlRecord record = query.record();
     int db_index = record.indexOf("db");
-    QString dbName = gCoreContext->GetDatabaseParams().m_dbName;
+    QString dbName = GetMythDB()->GetDatabaseName();
     QString inUseDB;
 
     while (query.next())
@@ -874,6 +873,54 @@ bool DBUtil::CheckTimeZoneSupport(void)
     }
 
     return !query.value(0).isNull();
+}
+
+/** \fn DBUtil::CheckTableColumnExists(const QString &tableName, const QString &columnName)
+ *  \brief Checks for the presence of a column in a table in the current database
+ *
+ *   This function will check a table in the current database for the presence
+ *   of a named column.
+ *
+ *  \param tableName Name of table to check
+ *  \param columnName Name of column to look for
+ *  \return true if column exists in the table; false if it does not
+ *  \sa CheckTableColumnExists(const QString &tableName, const QString &columnName)
+ */
+bool DBUtil::CheckTableColumnExists(const QString &tableName, const QString &columnName)
+{
+    MSqlQuery query(MSqlQuery::InitCon());
+    if (!query.isConnected())
+        return false;
+
+    QString sql = QString("SELECT COUNT(*) FROM information_schema.columns "
+                          "WHERE table_schema = DATABASE() AND "
+                                "table_name = '%1' AND column_name = '%2';")
+                          .arg(tableName, columnName);
+    LOG(VB_GENERAL, LOG_DEBUG,
+            QString("DBUtil::CheckTableColumnExists() SQL: %1").arg(sql));
+
+    if (!query.exec(sql))
+    {
+        MythDB::DBError("DBUtil Check Table Column Exists", query);
+        return false;
+    }
+
+    bool result = false;
+    if (query.next())
+    {
+        result = (query.value(0).toInt() > 0);
+    }
+    else
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+                            QString("DBUtil::CheckTableColumnExists() - Empty result set"));
+    }
+
+    LOG(VB_GENERAL, LOG_DEBUG,
+            QString("DBUtil::CheckTableColumnExists('%1', '%2') result: %3").arg(tableName,
+                    columnName, QVariant(result).toString()));
+
+    return result;
 }
 
 /* vim: set expandtab tabstop=4 shiftwidth=4: */

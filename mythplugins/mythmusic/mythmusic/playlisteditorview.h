@@ -8,10 +8,11 @@
 #include <QEvent>
 #include <QVector>
 
-// mythui
-#include <mythscreentype.h>
-#include <mythgenerictree.h>
-#include <mythuibuttonlist.h>
+// MythTV
+#include <libmythbase/mythpluginexport.h>
+#include <libmythui/mythgenerictree.h>
+#include <libmythui/mythscreentype.h>
+#include <libmythui/mythuibuttonlist.h>
 
 // mythmusic
 #include "musiccommon.h"
@@ -21,7 +22,7 @@ class MythUIText;
 class MythMenu;
 
 // This is just so we can use the guarded pointers provided by QPointer in the MusicGenericTree
-class MPUBLIC MusicButtonItem : public MythUIButtonListItem, public QObject
+class MPLUGIN_PUBLIC MusicButtonItem : public MythUIButtonListItem, public QObject
 {
   public:
     MusicButtonItem(MythUIButtonList *lbtype, const QString& text,
@@ -34,7 +35,7 @@ class MPUBLIC MusicButtonItem : public MythUIButtonListItem, public QObject
         MythUIButtonListItem(lbtype, text, std::move(data), listPosition) {}
 };
 
-class MPUBLIC MusicGenericTree : public MythGenericTree
+class MPLUGIN_PUBLIC MusicGenericTree : public MythGenericTree
 {
   public:
     MusicGenericTree(MusicGenericTree *parent, const QString &name,

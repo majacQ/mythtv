@@ -5,18 +5,17 @@
 #include <iostream>
 
 // qt
-#include <QObject>
-#include <QIODevice>
 #include <QFile>
-#include <QUrl>
+#include <QIODevice>
 #include <QMutex>
+#include <QObject>
+#include <QUrl>
 
-// mythtv
-#include <mythobservable.h>
-#include <musicmetadata.h>
+// MythTV
+#include <libmythbase/mythobservable.h>
+#include <libmythmetadata/musicmetadata.h>
 
 // mythmusic
-
 #include "pls.h"
 
 class Decoder;
@@ -44,12 +43,12 @@ class DecoderHandlerEvent : public MythEvent
 
     MythEvent *clone(void) const override; // MythEvent
 
-    static Type Ready;
-    static Type Meta;
-    static Type BufferStatus;
-    static Type OperationStart;
-    static Type OperationStop;
-    static Type Error;
+    static const Type kReady;
+    static const Type kMeta;
+    static const Type kBufferStatus;
+    static const Type kOperationStart;
+    static const Type kOperationStop;
+    static const Type kError;
 
   // No implicit copying.
   protected:
@@ -80,7 +79,7 @@ class DecoderHandler : public QObject, public MythObservable
   Q_OBJECT
 
   public:
-    enum State
+    enum State : std::uint8_t
     {
         ACTIVE,
         LOADING,

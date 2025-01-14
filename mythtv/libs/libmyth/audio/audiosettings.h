@@ -15,10 +15,10 @@
 #include <QString>
 
 // MythTV headers
-#include "mythexp.h"
-#include "audiooutputsettings.h"
+#include "libmyth/mythexp.h"
+#include "libmyth/audio/audiooutputsettings.h"
 
-enum AudioOutputSource {
+enum AudioOutputSource : std::uint8_t {
     AUDIOOUTPUT_UNKNOWN,
     AUDIOOUTPUT_VIDEO,
     AUDIOOUTPUT_MUSIC,
@@ -42,7 +42,7 @@ class MPUBLIC AudioSettings
         bool                    set_initial_vol,
         bool                    use_passthru,
         int                     upmixer_startup = 0,
-        AudioOutputSettings     *custom = nullptr);
+        const AudioOutputSettings *custom = nullptr);
 
     AudioSettings(AudioFormat   format,
                   int           channels,

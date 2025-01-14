@@ -1,7 +1,8 @@
-// Config header generated in base directory by configure
-#include "config.h"
+// C++
+#include <algorithm>
 
 // Qt
+#include <QtGlobal>
 #include <QCoreApplication>
 #include <QPainter>
 
@@ -49,7 +50,9 @@ void MythOpenGLPainter::FreeResources(void)
         }
         m_mappedBufferPoolReady = false;
     }
-
+    for (auto * proc : std::as_const(m_procedurals))
+        delete proc;
+    m_procedurals.clear();
     MythPainterGPU::FreeResources();
 }
 
@@ -58,7 +61,7 @@ void MythOpenGLPainter::DeleteTextures(void)
     if (!m_render || m_textureDeleteList.empty())
         return;
 
-    QMutexLocker gllocker(&m_textureDeleteLock);
+    QMutexLocker gllocker(&m_imageAndTextureLock);
     OpenGLLocker locker(m_render);
     while (!m_textureDeleteList.empty())
     {
@@ -73,7 +76,7 @@ void MythOpenGLPainter::ClearCache(void)
 {
     LOG(VB_GENERAL, LOG_INFO, "Clearing OpenGL painter cache.");
 
-    QMutexLocker locker(&m_textureDeleteLock);
+    QMutexLocker locker(&m_imageAndTextureLock);
     QMapIterator<MythImage *, MythGLTexture*> it(m_imageToTextureMap);
     while (it.hasNext())
     {
@@ -88,6 +91,7 @@ void MythOpenGLPainter::Begin(QPaintDevice *Parent)
 {
     MythPainterGPU::Begin(Parent);
 
+    m_frameTime = QTime::currentTime().msecsSinceStartOfDay();
     if (!(m_render && m_parent))
     {
         LOG(VB_GENERAL, LOG_ERR, "FATAL ERROR: No render device in 'Begin'");
@@ -114,7 +118,7 @@ void MythOpenGLPainter::Begin(QPaintDevice *Parent)
         static const int s_basesize = 64;
         m_lastSize = currentsize;
         float hdscreens = (static_cast<float>(m_lastSize.width() + 1) * m_lastSize.height()) / s_onehd;
-        int cpu = qMax(static_cast<int>(hdscreens * s_basesize), s_basesize);
+        int cpu = std::max(static_cast<int>(hdscreens * s_basesize), s_basesize);
         int gpu = cpu * 3 / 2;
         SetMaximumCacheSizes(gpu, cpu);
     }
@@ -170,6 +174,7 @@ MythGLTexture* MythOpenGLPainter::GetTextureFromCache(MythImage *Image)
     if (!m_render)
         return nullptr;
 
+    QMutexLocker locker(&m_imageAndTextureLock);
     if (m_imageToTextureMap.contains(Image))
     {
         if (!Image->IsChanged())
@@ -180,6 +185,7 @@ MythGLTexture* MythOpenGLPainter::GetTextureFromCache(MythImage *Image)
         }
         DeleteFormatImagePriv(Image);
     }
+    locker.unlock();
 
     Image->SetChanged(false);
 
@@ -203,6 +209,7 @@ MythGLTexture* MythOpenGLPainter::GetTextureFromCache(MythImage *Image)
         LOG(VB_GENERAL, LOG_NOTICE, QString("Shrinking UIPainterMaxCacheHW to %1KB")
             .arg(m_maxHardwareCacheSize / 1024));
 
+        locker.relock();
         while (m_hardwareCacheSize > m_maxHardwareCacheSize)
         {
             MythImage *expiredIm = m_imageExpireList.front();
@@ -210,10 +217,12 @@ MythGLTexture* MythOpenGLPainter::GetTextureFromCache(MythImage *Image)
             DeleteFormatImagePriv(expiredIm);
             DeleteTextures();
         }
+        locker.unlock();
     }
 
     CheckFormatImage(Image);
     m_hardwareCacheSize += MythRenderOpenGL::GetTextureDataSize(texture);
+    locker.relock();
     m_imageToTextureMap[Image] = texture;
     m_imageExpireList.push_back(Image);
 
@@ -271,6 +280,26 @@ void MythOpenGLPainter::DrawImage(const QRect Dest, MythImage *Image,
     }
 }
 
+void MythOpenGLPainter::DrawProcedural(QRect Dest, int Alpha, const ProcSource& VertexSource, const ProcSource& FragmentSource, const QString &SourceHash)
+{
+    if (auto * shader = GetProceduralShader(VertexSource, FragmentSource, SourceHash); shader && m_render)
+        m_render->DrawProcedural(Dest, Alpha, nullptr, shader, m_frameTime);
+}
+
+QOpenGLShaderProgram* MythOpenGLPainter::GetProceduralShader(const ProcSource& VertexSource, const ProcSource& FragmentSource, const QString& SourceHash)
+{
+    if (!m_render)
+        return nullptr;
+
+    if (auto program = m_procedurals.find(SourceHash); program != m_procedurals.end())
+        return *program;
+
+    auto * result = m_render->CreateShaderProgram(QString(*VertexSource), QString(*FragmentSource));
+    m_procedurals.insert(SourceHash, result);
+    LOG(VB_GENERAL, LOG_INFO, QString("%1 procedural shaders cached").arg(m_procedurals.size()));
+    return result;
+}
+
 /*! \brief Draw a rectangle
  *
  * If it is a simple rectangle, then use our own shaders for rendering (which
@@ -308,9 +337,9 @@ void MythOpenGLPainter::DrawRoundRect(const QRect Area, int CornerRadius,
 
 void MythOpenGLPainter::DeleteFormatImagePriv(MythImage *Image)
 {
+    QMutexLocker locker(&m_imageAndTextureLock);
     if (m_imageToTextureMap.contains(Image))
     {
-        QMutexLocker locker(&m_textureDeleteLock);
         m_textureDeleteList.push_back(m_imageToTextureMap[Image]);
         m_imageToTextureMap.remove(Image);
         m_imageExpireList.remove(Image);

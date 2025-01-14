@@ -12,15 +12,15 @@
 #include <QString>
 
 // MythTV
-#include "iso639.h"
-#include "mythtvexp.h"
+#include "libmythbase/iso639.h"
+#include "libmythtv/mythtvexp.h"
 
 using desc_list_t = std::vector<const unsigned char *>;
 
 class DescriptorID
 {
   public:
-    enum
+    enum : std::uint8_t
     {
         // MPEG
         video_stream                = 0x02,
@@ -129,7 +129,7 @@ class DescriptorID
         dvb_content_identifier         = 0x76, /* partial */
         time_slice_fec_identifier      = 0x77,
         ecm_repetition_rate            = 0x78,
-        s2_satellite_delivery_system   = 0x79,
+        s2_satellite_delivery_system   = 0x79, /* partial */
         eac3                           = 0x7A,
         dts                            = 0x7B,
         aac                            = 0x7C,
@@ -197,7 +197,7 @@ class DescriptorID
 class PrivateDescriptorID
 {
   public:
-    enum
+    enum : std::uint8_t
     {
         // These can conflict and should only be used
         // on these specific networks.
@@ -287,7 +287,7 @@ class PrivateDataSpecifierID
 class OriginalNetworkID
 {
   public:
-    enum
+    enum : std::uint16_t
     {
         SES2     = 0x0002,      // Société Européenne des Satellites
         BBC      = 0x003B,      // BBC / Freesat

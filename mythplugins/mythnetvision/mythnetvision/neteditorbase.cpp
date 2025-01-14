@@ -1,17 +1,17 @@
 #include <QDomDocument>
 
 // MythTV headers
-#include <mythuibuttonlist.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdirs.h>
-#include <netutils.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/netutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibuttonlist.h>
 
 // Tree headers
-#include "neteditorbase.h"
 #include "netcommon.h"
+#include "neteditorbase.h"
 
 #define LOC      QString("NetEditorBase: ")
 #define LOC_WARN QString("NetEditorBase, Warning: ")
@@ -191,7 +191,7 @@ void NetEditorBase::CreateBusyDialog(const QString& title)
 
 void NetEditorBase::FillGrabberButtonList()
 {
-    for (const auto & g : qAsConst(m_grabberList))
+    for (const auto & g : std::as_const(m_grabberList))
     {
         auto *item = new MythUIButtonListItem(m_grabbers, g->GetTitle());
         item->SetText(g->GetTitle(), "title");

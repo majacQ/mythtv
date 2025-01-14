@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -14,14 +14,16 @@
 #include <cmath>
 #include <cstdint>
 
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+
 #include "upnp.h"
 #include "upnpcds.h"
 #include "upnputil.h"
-#include "mythlogging.h"
-#include "mythversion.h"
 
-#define DIDL_LITE_BEGIN "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">"
-#define DIDL_LITE_END   "</DIDL-Lite>";
+static constexpr const char* DIDL_LITE_BEGIN { R"(<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">)" };
+static constexpr const char* DIDL_LITE_END   { "</DIDL-Lite>" };
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -42,7 +44,7 @@ void UPnpCDSExtensionResults::Add( CDSObject *pObject )
 
 void UPnpCDSExtensionResults::Add( const CDSObjects& objects )
 {
-    for (auto *const object : qAsConst(objects))
+    for (auto *const object : std::as_const(objects))
     {
         object->IncrRef();
         m_List.append( object );
@@ -58,7 +60,7 @@ QString UPnpCDSExtensionResults::GetResultXML(FilterMap &filter,
 {
     QString sXML;
 
-    for (auto *item : qAsConst(m_List))
+    for (auto *item : std::as_const(m_List))
         sXML += item->toXml(filter, ignoreChildren);
 
     return sXML;
@@ -69,7 +71,9 @@ QString UPnpCDSExtensionResults::GetResultXML(FilterMap &filter,
 /////////////////////////////////////////////////////////////////////////////
 
 UPnpCDS::UPnpCDS( UPnpDevice *pDevice, const QString &sSharePath )
-  : Eventing( "UPnpCDS", "CDS_Event", sSharePath )
+  : Eventing( "UPnpCDS", "CDS_Event", sSharePath ),
+    m_sControlUrl("/CDS_Control"),
+    m_pShortCuts(new UPnPShortcutFeature())
 {
     m_root.m_eType       = OT_Container;
     m_root.m_sId         = "0";
@@ -92,12 +96,10 @@ UPnpCDS::UPnpCDS( UPnpDevice *pDevice, const QString &sSharePath )
     SetValue< QString  >( "ServiceResetToken",
                           QDateTime::currentDateTimeUtc().toString(Qt::ISODate) );
 
-    QString sUPnpDescPath = UPnp::GetConfiguration()->GetValue( "UPnP/DescXmlPath", sSharePath );
+    QString sUPnpDescPath = XmlConfiguration().GetValue("UPnP/DescXmlPath", sSharePath);
 
     m_sServiceDescFileName = sUPnpDescPath + "CDS_scpd.xml";
-    m_sControlUrl          = "/CDS_Control";
 
-    m_pShortCuts = new UPnPShortcutFeature();
     RegisterFeature(m_pShortCuts);
 
     // Add our Service Definition to the device.
@@ -368,7 +370,7 @@ void UPnpCDS::HandleBrowse( HTTPRequest *pRequest )
     request.m_eBrowseFlag       =
         GetBrowseFlag( pRequest->m_mapParams[ "browseflag"    ] );
     request.m_sFilter           = pRequest->m_mapParams[ "filter"        ];
-    request.m_nStartingIndex    = Max(pRequest->m_mapParams[ "startingindex" ].toUShort(),
+    request.m_nStartingIndex    = std::max(pRequest->m_mapParams[ "startingindex" ].toUShort(),
                                       uint16_t(0));
     request.m_nRequestedCount   =
         pRequest->m_mapParams[ "requestedcount"].toUShort();
@@ -445,8 +447,8 @@ void UPnpCDS::HandleBrowse( HTTPRequest *pRequest )
                 if (request.m_nRequestedCount == 0)
                     request.m_nRequestedCount = nTotalMatches;
 
-                uint16_t nStart = Max( request.m_nStartingIndex, uint16_t( 0 ));
-                uint16_t nCount = Min( nTotalMatches, request.m_nRequestedCount );
+                uint16_t nStart = std::max(request.m_nStartingIndex, uint16_t(0));
+                uint16_t nCount = std::min(nTotalMatches, request.m_nRequestedCount);
 
                 DetermineClient( pRequest, &request );
 
@@ -528,7 +530,9 @@ void UPnpCDS::HandleBrowse( HTTPRequest *pRequest )
         pRequest->FormatActionResponse(list);
     }
     else
+    {
         UPnp::FormatErrorResponse ( pRequest, eErrorCode, sErrorDesc );
+    }
 
 }
 
@@ -568,15 +572,10 @@ void UPnpCDS::HandleSearch( HTTPRequest *pRequest )
     // -=>TODO: This DOES NOT handle ('s or other complex expressions
     // ----------------------------------------------------------------------
 
-    QRegularExpression re {"\\b(or|and)\\b", QRegularExpression::CaseInsensitiveOption};
+    static const QRegularExpression re {"\\b(or|and)\\b", QRegularExpression::CaseInsensitiveOption};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    request.m_sSearchList  = request.m_sSearchCriteria.split(
-        re, QString::SkipEmptyParts);
-#else
     request.m_sSearchList  = request.m_sSearchCriteria.split(
         re, Qt::SkipEmptyParts);
-#endif
     request.m_sSearchClass = "object";  // Default to all objects.
 
     // ----------------------------------------------------------------------
@@ -590,12 +589,7 @@ void UPnpCDS::HandleSearch( HTTPRequest *pRequest )
     {
         if ((*it).contains("upnp:class derivedfrom", Qt::CaseInsensitive))
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList sParts = (*it).split(' ', QString::SkipEmptyParts);
-#else
             QStringList sParts = (*it).split(' ', Qt::SkipEmptyParts);
-#endif
-
             if (sParts.count() > 2)
             {
                 request.m_sSearchClass = sParts[2].trimmed();
@@ -678,7 +672,9 @@ void UPnpCDS::HandleSearch( HTTPRequest *pRequest )
         pRequest->FormatActionResponse(list);
     }
     else
+    {
         UPnp::FormatErrorResponse( pRequest, eErrorCode, sErrorDesc );
+    }
 }
 
 /**
@@ -940,7 +936,8 @@ QString UPnpCDSExtension::RemoveToken( const QString &sToken,
 
     for (int nIdx=0; nIdx < num; nIdx++)
     {
-        if ((nPos = sStr.lastIndexOf( sToken, nPos )) == -1)
+        nPos = sStr.lastIndexOf( sToken, nPos );
+        if (nPos == -1)
             break;
     }
 
@@ -1046,11 +1043,11 @@ IDTokenMap UPnpCDSExtension::TokenizeIDString(const QString& Id)
 IDToken UPnpCDSExtension::GetCurrentToken(const QString& Id)
 {
     QStringList tokens = Id.split('/');
-    QString current = tokens.last();
+    const QString& current = tokens.last();
     QString key = current.section('=', 0, 0).toLower();
     QString value = current.section('=', 1, 1);
 
-    return IDToken(key, value);
+    return {key, value};
 }
 
 QString UPnpCDSExtension::CreateIDString(const QString &requestId,
@@ -1108,7 +1105,7 @@ QString UPnPShortcutFeature::CreateXML()
     for (it = m_shortcuts.begin(); it != m_shortcuts.end(); ++it)
     {
         ShortCutType type = it.key();
-        QString objectID = *it;
+        const QString& objectID = *it;
         xml += "<shortcut>\r\n";
         xml += QString("<name>%1</name>\r\n").arg(TypeToName(type));
         xml += QString("<objectID>%1</objectID>\r\n").arg(HTTPRequest::Encode(objectID));

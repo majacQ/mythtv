@@ -3,21 +3,20 @@
 
 // C++
 #include <algorithm>
-using std::max;
 
 // QT
 #include <QCoreApplication>
 #include <QFileInfo>
 
 // libmythbase
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "mythdirs.h"
-#include "mthread.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remoteutil.h"
 
 // libmyth
-#include "mythcontext.h"
-#include "remoteutil.h"
+#include "libmyth/mythcontext.h"
 
 // libmythtv
 #include "previewgenerator.h"
@@ -222,7 +221,7 @@ void PreviewGeneratorQueue::RemoveListener(QObject *listener)
  * generation thread.
 
  * \bug This function appears to incorrectly compute the value of
- * lastBlockTime.  The call to max() will correctly ensure that if the
+ * lastBlockTime.  The call to std::max() will correctly ensure that if the
  * old value of lastBlockTime is zero, that the new time for the first
  * "retry" will be two.  The problem is that all subsequent "retries"
  * will also be limited to two, so there is no increasing back off
@@ -230,7 +229,7 @@ void PreviewGeneratorQueue::RemoveListener(QObject *listener)
  */
 bool PreviewGeneratorQueue::event(QEvent *e)
 {
-    if (e->type() != MythEvent::MythEventMessage)
+    if (e->type() != MythEvent::kMythEventMessage)
         return QObject::event(e);
 
     auto *me = dynamic_cast<MythEvent*>(e);
@@ -310,7 +309,7 @@ bool PreviewGeneratorQueue::event(QEvent *e)
             else
             {
                 (*it).m_lastBlockTime =
-                    max(m_minBlockSeconds, (*it).m_lastBlockTime * 2);
+                    std::max(m_minBlockSeconds, (*it).m_lastBlockTime * 2);
                 (*it).m_blockRetryUntil =
                     MythDate::current().addSecs((*it).m_lastBlockTime.count());
             }
@@ -320,7 +319,7 @@ bool PreviewGeneratorQueue::event(QEvent *e)
             list.push_back(filename);
             list.push_back(msg);
             list.push_back(datetime);
-            for (const auto & tok : qAsConst((*it).m_tokens))
+            for (const auto & tok : std::as_const((*it).m_tokens))
             {
                 kit = m_tokenToKeyMap.find(tok);
                 if (kit != m_tokenToKeyMap.end())
@@ -330,7 +329,7 @@ bool PreviewGeneratorQueue::event(QEvent *e)
 
             if (list.size() > 4)
             {
-                for (auto *listener : qAsConst(m_listeners))
+                for (auto *listener : std::as_const(m_listeners))
                 {
                     auto *le = new MythEvent(me->Message(), list);
                     QCoreApplication::postEvent(listener, le);
@@ -383,7 +382,7 @@ void PreviewGeneratorQueue::SendEvent(
     list.push_back(token);
 
     QMutexLocker locker(&m_lock);
-    for (auto *listener : qAsConst(m_listeners))
+    for (auto *listener : std::as_const(m_listeners))
     {
         auto *e = new MythEvent(eventname, list);
         QCoreApplication::postEvent(listener, e);
@@ -443,7 +442,7 @@ QString PreviewGeneratorQueue::GeneratePreviewImage(
     {
         SendEvent(pginfo, "PREVIEW_FAILED", key, token,
                   "Pending Delete", QDateTime());
-        return QString();
+        return {};
     }
 
     // keep in sync with default filename in PreviewGenerator::RunReal
@@ -496,7 +495,8 @@ QString PreviewGeneratorQueue::GeneratePreviewImage(
         else
         {
             QFileInfo fi(filename);
-            if ((locally_accessible = fi.isReadable()))
+            locally_accessible = fi.isReadable();
+            if (locally_accessible)
                 previewLastModified = fi.lastModified();
         }
 
@@ -730,10 +730,10 @@ void PreviewGeneratorQueue::SetPreviewGenerator(
  */
 bool PreviewGeneratorQueue::IsGeneratingPreview(const QString &key) const
 {
-    PreviewMap::const_iterator it;
     QMutexLocker locker(&m_lock);
 
-    if ((it = m_previewMap.find(key)) == m_previewMap.end())
+    PreviewMap::const_iterator it = m_previewMap.find(key);
+    if (it == m_previewMap.end())
         return false;
 
     if ((*it).m_blockRetryUntil.isValid())

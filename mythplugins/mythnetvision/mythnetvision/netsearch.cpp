@@ -1,31 +1,31 @@
 // qt
-#include <QString>
-#include <QMetaType>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QMetaType>
+#include <QString>
 
-// myth
-#include <mythdb.h>
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdirs.h>
-#include <mythsystemlegacy.h>
-#include <mythprogressdialog.h>
-#include <storagegroup.h>
-#include <remotefile.h>
-#include <netgrabbermanager.h>
-#include <netutils.h>
-#include <metadata/metadataimagedownload.h>
-#include <metadata/videoutils.h>
-#include <rssparse.h>
-#include <mythcoreutil.h>
-#include <mythuitext.h>
-#include <mythuiimage.h>
-#include <mythsorthelper.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythcoreutil.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythsorthelper.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/netgrabbermanager.h>
+#include <libmythbase/netutils.h>
+#include <libmythbase/remotefile.h>
+#include <libmythbase/rssparse.h>
+#include <libmythbase/storagegroup.h>
+#include <libmythmetadata/metadataimagedownload.h>
+#include <libmythmetadata/videoutils.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
-#include "netsearch.h"
 #include "netcommon.h"
+#include "netsearch.h"
 #include "rsseditor.h"
 #include "searcheditor.h"
 
@@ -129,7 +129,7 @@ bool NetSearch::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -150,12 +150,18 @@ bool NetSearch::keyPressEvent(QKeyEvent *event)
                 GetMoreResults();
         }
         else if (action == "PREVVIEW" && m_pagenum > 1)
+        {
             GetLastResults();
+        }
         else if (action == "NEXTVIEW" && m_searchResultList->GetCount() > 0 &&
                  m_pagenum < m_maxpage)
+        {
             GetMoreResults();
+        }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -236,14 +242,16 @@ void NetSearch::ShowMenu(void)
                              &NetSearch::RunSearchEditor);
     }
     else
+    {
         delete menuPopup;
+    }
 }
 
 void NetSearch::FillGrabberButtonList()
 {
     m_siteList->Reset();
 
-    for (const auto & g : qAsConst(m_grabberList))
+    for (const auto & g : std::as_const(m_grabberList))
     {
         auto *item = new MythUIButtonListItem(m_siteList, g->GetTitle());
         item->SetText(g->GetTitle(), "title");
@@ -417,9 +425,9 @@ void NetSearch::SearchTimeout(Search * /*item*/)
 
 void NetSearch::PopulateResultList(const ResultItem::resultList& list)
 {
-    for (const auto & result : qAsConst(list))
+    for (const auto & result : std::as_const(list))
     {
-        QString title = result->GetTitle();
+        const QString& title = result->GetTitle();
         auto *item = new MythUIButtonListItem(m_searchResultList, title,
                                               QVariant::fromValue(result));
         InfoMap metadataMap;
@@ -466,7 +474,9 @@ void NetSearch::RunSearchEditor() const
         mainStack->AddScreen(searchedit);
     }
     else
+    {
         delete searchedit;
+    }
 }
 
 void NetSearch::DoListRefresh()
@@ -535,7 +545,9 @@ void NetSearch::SetThumbnail(MythUIButtonListItem *btn)
             m_thumbImage->Load();
         }
         else
+        {
             m_thumbImage->Reset();
+        }
     }
 }
 
@@ -570,5 +582,7 @@ void NetSearch::customEvent(QEvent *event)
             SetThumbnail(item);
     }
     else
+    {
         NetBase::customEvent(event);
+    }
 }

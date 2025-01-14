@@ -6,16 +6,18 @@
 //
 // Copyright (c) 2006 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef EVENTING_H_
 #define EVENTING_H_
 
+#include <utility>
+
+#include <QMap>
 #include <QUrl>
 #include <QUuid>
-#include <QMap>
 
 #include "upnpserviceimpl.h"
 #include "upnputil.h"
@@ -39,13 +41,12 @@ class UPNP_PUBLIC SubscriberInfo
         }
 
         SubscriberInfo( const QString &url, std::chrono::seconds duration )
-            : m_nDuration( duration )
+            : m_qURL(url), m_nDuration( duration )
         {
             m_ttExpires = 0us;
             m_ttLastNotified = 0us;
             m_sUUID = QUuid::createUuid().toString();
             m_sUUID = m_sUUID.mid( 1, m_sUUID.length() - 2);
-            m_qURL = url;
 
             SetExpireTime( m_nDuration );
         }
@@ -95,10 +96,9 @@ class UPNP_PUBLIC  StateVariableBase
 
     public:
 
-        explicit StateVariableBase( const QString &sName, bool bNotify = false )
+        explicit StateVariableBase( QString sName, bool bNotify = false )
+          : m_bNotify(bNotify), m_sName(std::move(sName))
         {
-            m_bNotify = bNotify;
-            m_sName   = sName;
             m_ttLastChanged = nowAsDuration<std::chrono::microseconds>();
         }
         virtual ~StateVariableBase() = default;
@@ -145,7 +145,7 @@ class UPNP_PUBLIC  StateVariable : public StateVariableBase
 
         // ------------------------------------------------------------------
 
-        void SetValue( T value )
+        void SetValue( const T& value )
         {
             if ( m_value != value )
             {
@@ -160,7 +160,7 @@ class UPNP_PUBLIC  StateVariable : public StateVariableBase
 template<typename T>
 inline T state_var_init(const T */*unused*/) { return (T)(0); }
 template<>
-inline QString state_var_init(const QString */*unused*/) { return QString(); }
+inline QString state_var_init(const QString */*unused*/) { return {}; }
 
 class UPNP_PUBLIC StateVariables
 {
@@ -176,7 +176,7 @@ class UPNP_PUBLIC StateVariables
         StateVariables() = default;
         virtual ~StateVariables()
         {
-            for (const auto *it : qAsConst(m_map))
+            for (const auto *it : std::as_const(m_map))
                 delete it;
             m_map.clear();
         }
@@ -191,7 +191,7 @@ class UPNP_PUBLIC StateVariables
 
         // ------------------------------------------------------------------
         template < class T >
-        bool SetValue( const QString &sName, T value )
+        bool SetValue( const QString &sName, const T& value )
         {
             SVMap::iterator it = m_map.find(sName);
             if (it == m_map.end())

@@ -6,28 +6,29 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #include <algorithm>
+#include <array>
 #include <chrono> // for milliseconds
 #include <thread> // for sleep_for
 #include <utility>
 
-#include "mythtimer.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtimer.h"
+
 #include "bufferedsocketdevice.h"
 #include "upnputil.h"
-#include "mythlogging.h"
 
 /////////////////////////////////////////////////////////////////////////////
 //
 /////////////////////////////////////////////////////////////////////////////
 
 BufferedSocketDevice::BufferedSocketDevice( int nSocket  )
+  : m_pSocket(new MSocketDevice())
 {
-    m_pSocket = new MSocketDevice();
-
     m_pSocket->setSocket         ( nSocket, MSocketDevice::Stream );
     m_pSocket->setBlocking       ( false );
     m_pSocket->setAddressReusable( true );
@@ -46,17 +47,9 @@ BufferedSocketDevice::BufferedSocketDevice( int nSocket  )
 
 BufferedSocketDevice::BufferedSocketDevice( MSocketDevice *pSocket /* = nullptr*/,
                                             bool bTakeOwnership /* = false */ )
-{
-    m_pSocket            = pSocket;
-
-    m_nDestPort          = 0;
-
-    m_nMaxReadBufferSize = 0; 
-    m_nWriteSize         = 0;
-    m_nWriteIndex        = 0;
-    m_bHandleSocketDelete= bTakeOwnership;
-
-}
+  : m_pSocket(pSocket),
+    m_bHandleSocketDelete(bTakeOwnership)
+{}
 
 /////////////////////////////////////////////////////////////////////////////
 //

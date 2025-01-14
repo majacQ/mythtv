@@ -9,9 +9,9 @@
 #include <QString>
 
 // MythTV headers
-#include "vboxchannelfetcher.h"
+#include "channelscan/vboxchannelfetcher.h"
 
-#define VBOX_MIN_API_VERSION  "VB.2.50"
+static constexpr const char* VBOX_MIN_API_VERSION  { "VB.2.50" };
 
 class VBox
 {
@@ -32,7 +32,7 @@ class VBox
     vbox_chan_map_t *getChannels(void);
 
   protected:
-    enum ErrorCode
+    enum ErrorCode : std::uint8_t
     {
         SUCCESS = 0,
         UNKNOWN_METHOD = 1,
@@ -52,7 +52,7 @@ class VBox
   private:
     static QStringList doUPNPSearch(void);
     static QString getFirstText(QDomElement &element);
-    static QString getStrValue(QDomElement &element, const QString &name, int index = 0);
-    static int getIntValue(QDomElement &element, const QString &name, int index = 0);
+    static QString getStrValue(const QDomElement &element, const QString &name, int index = 0);
+    static int getIntValue(const QDomElement &element, const QString &name, int index = 0);
 };
 #endif // VBOX_UTILS_H

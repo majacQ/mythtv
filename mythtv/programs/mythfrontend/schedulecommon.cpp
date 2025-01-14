@@ -1,31 +1,25 @@
-
-#include "schedulecommon.h"
-
-// QT
+// Qt
 #include <QCoreApplication>
 
-// libmyth
-#include "mythcorecontext.h"
-#include "programinfo.h"
-#include "remoteutil.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/tvremoteutil.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreentype.h"
 
-// libmythtv
-#include "recordinginfo.h"
-#include "tvremoteutil.h"
-
-// libmythui
-#include "mythscreentype.h"
-#include "mythdialogbox.h"
-#include "mythmainwindow.h"
-
-// mythfrontend
-#include "scheduleeditor.h"
-
-#include "proglist.h"
-#include "prevreclist.h"
+// MythFrontend
 #include "customedit.h"
 #include "guidegrid.h"
+#include "prevreclist.h"
 #include "progdetails.h"
+#include "proglist.h"
+#include "schedulecommon.h"
+#include "scheduleeditor.h"
 
 /**
 *  \brief Show the Program Details screen
@@ -64,7 +58,9 @@ void ScheduleCommon::ShowUpcoming(const QString &title,
         mainStack->AddScreen(pl);
     }
     else
+    {
         delete pl;
+    }
 }
 
 /**
@@ -287,50 +283,50 @@ void ScheduleCommon::EditRecording(bool may_watch_now)
 
     QString timeFormat = gCoreContext->GetSetting("TimeFormat", "h:mm AP");
 
-    QString message = recinfo.toString(ProgramInfo::kTitleSubtitle, " - ");
+    QString message = QString("%1 - %2  %3\n")
+        .arg(recinfo.GetRecordingStartTime().toLocalTime().toString(timeFormat),
+             recinfo.GetRecordingEndTime().toLocalTime().toString(timeFormat),
+             recinfo.toString(ProgramInfo::kTitleSubtitle, " - "));
 
-    message += "\n\n";
+    message += "\n";
     message += RecStatus::toDescription(recinfo.GetRecordingStatus(),
-                             recinfo.GetRecordingRuleType(),
-                             recinfo.GetRecordingStartTime());
+                                        recinfo.GetRecordingRuleType(),
+                                        recinfo.GetRecordingStartTime());
 
+    QString messageConflict;
     if (recinfo.GetRecordingStatus() == RecStatus::Conflict ||
         recinfo.GetRecordingStatus() == RecStatus::LaterShowing)
     {
-        vector<ProgramInfo *> *confList = RemoteGetConflictList(&recinfo);
+        std::vector<ProgramInfo *> *confList = RemoteGetConflictList(&recinfo);
+        uint chanid = recinfo.GetChanID();
+        uint sourceid = ChannelUtil::GetSourceIDForChannel(chanid);
 
-        if (!confList->empty())
+        for (auto *p : *confList)
         {
-            message += " ";
-            message += tr("The following programs will be recorded instead:");
-            message += "\n";
-        }
-
-        uint maxi = 0;
-        for (; confList->begin() != confList->end() && maxi < 4; maxi++)
-        {
-            ProgramInfo *p = *confList->begin();
-            message += QString("%1 - %2  %3\n")
-                .arg(p->GetRecordingStartTime()
-                     .toLocalTime().toString(timeFormat),
-                     p->GetRecordingEndTime()
-                     .toLocalTime().toString(timeFormat),
-                     p->toString(ProgramInfo::kTitleSubtitle, " - "));
+            if (sourceid == p->GetSourceID())
+            {
+                messageConflict += QString("%1 - %2  %3\n")
+                    .arg(p->GetRecordingStartTime().toLocalTime().toString(timeFormat),
+                         p->GetRecordingEndTime().toLocalTime().toString(timeFormat),
+                         p->toString(ProgramInfo::kTitleSubtitle, " - "));
+            }
             delete p;
-            confList->erase(confList->begin());
-        }
-        message += "\n";
-        while (!confList->empty())
-        {
-            delete confList->back();
-            confList->pop_back();
         }
         delete confList;
     }
 
+    if (!messageConflict.isEmpty())
+    {
+        message += " ";
+        message += tr("The following programs will be recorded instead:");
+        message += "\n";
+        message += messageConflict;
+        message += "\n";
+    }
+
     MythScreenStack *popupStack = GetMythMainWindow()->GetStack("popup stack");
-    auto *menuPopup = new MythDialogBox(message, popupStack,
-                                        "recOptionPopup", true);
+    auto *menuPopup = new MythDialogBox(message, popupStack, "recOptionPopup", true);
+
     if (!menuPopup->Create())
     {
         delete menuPopup;
@@ -432,11 +428,12 @@ void ScheduleCommon::EditRecording(bool may_watch_now)
 
             const RecordingDupMethodType dupmethod =
                 recinfo.GetDuplicateCheckMethod();
+            static const QRegularExpression kGenericEpisodeRE { "0000$" };
             if (recinfo.GetRecordingRuleType() != kOverrideRecord &&
-                !((recinfo.GetFindID() == 0 ||
-                   !IsFindApplicable(recinfo)) &&
-                  recinfo.GetCategoryType() == ProgramInfo::kCategorySeries &&
-                  recinfo.GetProgramID().contains(QRegularExpression("0000$"))) &&
+                ((recinfo.GetFindID() != 0 &&
+                   IsFindApplicable(recinfo)) ||
+                  recinfo.GetCategoryType() != ProgramInfo::kCategorySeries ||
+                  !recinfo.GetProgramID().contains(kGenericEpisodeRE)) &&
                 ((((dupmethod & kDupCheckNone) == 0) &&
                   !recinfo.GetProgramID().isEmpty() &&
                   (recinfo.GetFindID() != 0 ||
@@ -511,7 +508,9 @@ void ScheduleCommon::customEvent(QEvent *event)
                 }
             }
             else if (resulttext == tr("Record all showings"))
+            {
                 recInfo.ApplyRecordStateChange(kAllRecord);
+            }
             else if (resulttext == tr("Record one showing (this episode)") ||
                      resulttext == tr("Record one showing"))
             {
@@ -540,21 +539,31 @@ void ScheduleCommon::customEvent(QEvent *event)
                     MakeOverride(&recInfo);
             }
             else if (resulttext == tr("Restart this recording"))
+            {
                 recInfo.ReactivateRecording();
+            }
             else if (resulttext == tr("Forget previous recording"))
+            {
                 recInfo.ForgetHistory();
+            }
             else if (resulttext == tr("Don't record this showing"))
+            {
                 recInfo.ApplyRecordStateChange(kDontRecord);
+            }
             else if (resulttext == tr("Never record this episode"))
             {
                 recInfo.ApplyNeverRecord();
             }
             else if (resulttext == tr("Edit recording rule") ||
                      resulttext == tr("Edit override rule"))
+            {
                 EditScheduled(&recInfo);
+            }
             else if (resulttext == tr("Delete recording rule") ||
                      resulttext == tr("Delete override rule"))
+            {
                 recInfo.ApplyRecordStateChange(kNotRecording);
+            }
         }
     }
 }

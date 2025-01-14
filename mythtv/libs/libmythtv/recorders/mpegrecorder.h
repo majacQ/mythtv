@@ -3,10 +3,10 @@
 #ifndef MPEGRECORDER_H_
 #define MPEGRECORDER_H_
 
-#include "v4lrecorder.h"
-#include "tspacket.h"
-#include "mpegstreamdata.h"
 #include "DeviceReadBuffer.h"
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/tspacket.h"
+#include "v4lrecorder.h"
 
 struct AVFormatContext;
 struct AVPacket;
@@ -87,11 +87,7 @@ class MpegRecorder : public V4LRecorder,
     bool           m_supportsSlicedVbi        {false};
 
     // State
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex m_startStopEncodingLock    {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_startStopEncodingLock;
-#endif
 
     // Pausing state
     bool           m_clearTimeOnPause         {false};

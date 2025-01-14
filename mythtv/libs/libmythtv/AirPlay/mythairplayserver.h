@@ -2,31 +2,28 @@
 #define MYTHAIRPLAYSERVER_H
 
 #include <QObject>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QUrl>
 #include <cstdint>     // for uintxx_t
 
-#include "serverpool.h"
-#include "mythtvexp.h"
-#include "mythmainwindow.h"
+#include "libmythbase/serverpool.h"
+#include "libmythui/mythmainwindow.h"
+
+#include "libmythtv/mythtvexp.h"
 
 class QTimer;
 class MThread;
 class BonjourRegister;
 
-#define AIRPLAY_PORT_RANGE 100
-#define AIRPLAY_HARDWARE_ID_SIZE 6
+static constexpr int AIRPLAY_PORT_RANGE { 100 };
+static constexpr size_t AIRPLAY_HARDWARE_ID_SIZE { 6 };
 QString     AirPlayHardwareId(void);
 QString     GenerateNonce(void);
 QByteArray  DigestMd5Response(const QString& response, const QString& option,
                               const QString& nonce, const QString& password,
                               QByteArray &auth);
 
-enum AirplayEvent
+enum AirplayEvent : std::int8_t
 {
     AP_EVENT_NONE = -1,
     AP_EVENT_PLAYING = 0,
@@ -79,11 +76,7 @@ class MTV_PUBLIC MythAirplayServer : public ServerPool
     { return gMythAirplayServer; }
 
     MythAirplayServer() :
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        m_lock(new QMutex(QMutex::Recursive))
-#else
         m_lock(new QRecursiveMutex())
-#endif
         {}
 
   private slots:
@@ -98,7 +91,7 @@ class MTV_PUBLIC MythAirplayServer : public ServerPool
     ~MythAirplayServer(void) override;
     void Teardown(void);
     void HandleResponse(APHTTPRequest *req, QTcpSocket *socket);
-    static QByteArray StatusToString(int status);
+    static QByteArray StatusToString(uint16_t status);
     static QString eventToString(AirplayEvent event);
     static void GetPlayerStatus(bool &playing, float &speed,
                                 double &position, double &duration,
@@ -106,7 +99,7 @@ class MTV_PUBLIC MythAirplayServer : public ServerPool
     static QString GetMacAddress();
     bool SendReverseEvent(QByteArray &session, AirplayEvent event);
     void SendResponse(QTcpSocket *socket,
-                      int status, const QByteArray& header,
+                      uint16_t status, const QByteArray& header,
                       const QByteArray& content_type, const QString& body);
 
     void deleteConnection(QTcpSocket *socket);
@@ -121,22 +114,14 @@ class MTV_PUBLIC MythAirplayServer : public ServerPool
 
     // Globals
     static MythAirplayServer *gMythAirplayServer;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex            *gMythAirplayServerMutex;
-#else
     static QRecursiveMutex   *gMythAirplayServerMutex;
-#endif
     static MThread           *gMythAirplayServerThread;
 
     // Members
     QString          m_name          {"MythTV"};
     BonjourRegister *m_bonjour       {nullptr};
     bool             m_valid         {false};
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex          *m_lock          {nullptr};
-#else
     QRecursiveMutex *m_lock          {nullptr};
-#endif
     int              m_setupPort     {5100};
     QList<QTcpSocket*> m_sockets;
     QHash<QByteArray,AirplayConnection> m_connections;

@@ -1,31 +1,30 @@
 
 #include <algorithm>
 
-#include "mythconfig.h"
+#include "libmythbase/iso639.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
 
-#include "mythplayer.h"
-#include "mythlogging.h"
-#include "decoderbase.h"
-#include "programinfo.h"
-#include "iso639.h"
-#include "DVD/mythdvdbuffer.h"
 #include "Bluray/mythbdbuffer.h"
+#include "DVD/mythdvdbuffer.h"
+#include "decoderbase.h"
 #include "mythcodeccontext.h"
+#include "mythplayer.h"
 
 #define LOC QString("Dec: ")
 
 DecoderBase::DecoderBase(MythPlayer *parent, const ProgramInfo &pginfo)
     : m_parent(parent), m_playbackInfo(new ProgramInfo(pginfo)),
       m_audio(m_parent->GetAudio()),
-      m_totalDuration(AVRationalInit(0)),
 
       // language preference
       m_languagePreference(iso639_get_language_key_list())
 {
     ResetTracks();
-    m_tracks[kTrackTypeAudio].emplace_back(0, 0, 0, 0, 0);
-    m_tracks[kTrackTypeCC608].emplace_back(0, 0, 0, 1, 0);
-    m_tracks[kTrackTypeCC608].emplace_back(0, 0, 2, 3, 0);
+    m_tracks[kTrackTypeAudio].emplace_back(0, 0, 0, 0, kAudioTypeNormal);
+    m_tracks[kTrackTypeCC608].emplace_back(0, 1);
+    m_tracks[kTrackTypeCC608].emplace_back(0, 3);
 }
 
 DecoderBase::~DecoderBase()
@@ -61,7 +60,7 @@ void DecoderBase::Reset(bool reset_video_data, bool seek_reset, bool reset_file)
         m_frameCounter += 100;
         m_fpsSkip = 0;
         m_framesRead = 0;
-        m_totalDuration = AVRationalInit(0);
+        m_totalDuration = MythAVRational(0);
         m_dontSyncPositionMap = false;
     }
 
@@ -735,10 +734,6 @@ bool DecoderBase::DoFastForward(long long desiredFrame, bool discardFrames)
         return DoRewind(desiredFrame, discardFrames);
     desiredFrame = std::max(desiredFrame, m_framesPlayed);
 
-    // Save rawframe state, for later restoration...
-    bool oldrawstate = m_getRawFrames;
-    m_getRawFrames = false;
-
     ConditionallyUpdatePosMap(desiredFrame);
 
     // Fetch last keyframe in position map
@@ -778,8 +773,6 @@ bool DecoderBase::DoFastForward(long long desiredFrame, bool discardFrames)
 
         if (m_atEof)
         {
-            // Re-enable rawframe state if it was enabled before FF
-            m_getRawFrames = oldrawstate;
             return false;
         }
     }
@@ -788,8 +781,6 @@ bool DecoderBase::DoFastForward(long long desiredFrame, bool discardFrames)
         QMutexLocker locker(&m_positionMapLock);
         if (m_positionMap.empty())
         {
-            // Re-enable rawframe state if it was enabled before FF
-            m_getRawFrames = oldrawstate;
             return false;
         }
     }
@@ -806,9 +797,6 @@ bool DecoderBase::DoFastForward(long long desiredFrame, bool discardFrames)
 
     if (discardFrames || m_transcoding)
         m_parent->SetFramesPlayed(m_framesPlayed+1);
-
-    // Re-enable rawframe state if it was enabled before FF
-    m_getRawFrames = oldrawstate;
 
     return true;
 }
@@ -883,7 +871,7 @@ void DecoderBase::FileChanged(void)
     ResetPosMap();
     m_framesPlayed = 0;
     m_framesRead = 0;
-    m_totalDuration = AVRationalInit(0);
+    m_totalDuration = MythAVRational(0);
 
     m_waitingForChange = false;
     m_justAfterChange = true;
@@ -975,6 +963,13 @@ int DecoderBase::SetTrack(uint Type, int TrackNo)
     {
         m_wantedTrack[Type]   = m_tracks[Type][static_cast<size_t>(m_currentTrack[Type])];
         m_selectedTrack[Type] = m_tracks[Type][static_cast<size_t>(m_currentTrack[Type])];
+        if (Type == kTrackTypeSubtitle)
+        {
+            // Rechoose the associated forced track, preferring the same language
+            int forcedTrackIndex = BestTrack(Type, true, m_selectedTrack[Type].m_language);
+            if (m_tracks[Type][forcedTrackIndex].m_forced)
+                m_selectedForcedTrack[Type] = m_tracks[Type][forcedTrackIndex];
+        }
     }
 
     return m_currentTrack[Type];
@@ -1018,22 +1013,62 @@ int DecoderBase::NextTrack(uint Type)
     return next_track;
 }
 
-bool DecoderBase::InsertTrack(uint Type, const StreamInfo &Info)
+/** \fn DecoderBase::BestTrack(uint, bool)
+ *  \brief Determine the best track according to weights
+ *
+ * Select the best track.  Primary attribute is to favor or disfavor
+ * a forced track. Secondary attribute is language preference,
+ * in order of most preferred to least preferred language.
+ * Third attribute is track order, preferring the earliesttrack.
+ *
+ * Whether to favor or disfavor forced is controlled by the second
+ * parameter.
+ *
+ * A preferredlanguage can be specified as third parameter, which
+ * will override the user's preferrence list.
+ *
+ * This function must not be called without taking m_trackLock
+ *
+ *  \return the highest weighted track, or -1 if none.
+*/
+int DecoderBase::BestTrack(uint Type, bool forcedPreferred, int preferredLanguage)
 {
-    QMutexLocker locker(&m_trackLock);
+    LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("Trying to select track (w/lang & %1forced)")
+        .arg(forcedPreferred ? "" : "!"));
+    const int kForcedWeight   = forcedPreferred ? (1 << 20) : -(1 << 20);
+    const int kLanguageWeight = (1 << 10);
+    const int kPositionWeight = (1 << 0);
+    int bestScore = -1;
+    int selTrack = -1;
+    uint numStreams = static_cast<uint>(m_tracks[Type].size());
 
-    if (std::any_of(m_tracks[Type].cbegin(), m_tracks[Type].cend(),
-                    [&](const StreamInfo& Si) { return Si.m_stream_id == Info.m_stream_id; } ))
+    for (uint i = 0; i < numStreams; i++)
     {
-        return false;
+        bool forced = (Type == kTrackTypeSubtitle &&
+                        m_tracks[Type][i].m_forced);
+        int position = static_cast<int>(numStreams) - static_cast<int>(i);
+        int language = 0;
+        if (preferredLanguage != 0 && m_tracks[Type][i].m_language == preferredLanguage)
+        {
+            language = static_cast<int>(m_languagePreference.size()) + 1;
+        }
+        for (uint j = 0; (language == 0) && (j < m_languagePreference.size()); ++j)
+        {
+            if (m_tracks[Type][i].m_language == m_languagePreference[j])
+                language = static_cast<int>(m_languagePreference.size()) - static_cast<int>(j);
+        }
+        int score = (1 << 20) +
+                    (kForcedWeight * static_cast<int>(forced)) +
+                    (kLanguageWeight * language) +
+                    (kPositionWeight * position);
+        if (score > bestScore)
+        {
+            bestScore = score;
+            selTrack = static_cast<int>(i);
+        }
     }
 
-    m_tracks[Type].push_back(Info);
-
-    if (m_parent)
-        emit m_parent->SignalTracksChanged(Type);
-
-    return true;
+    return selTrack;
 }
 
 /** \fn DecoderBase::AutoSelectTrack(uint)
@@ -1090,36 +1125,24 @@ int DecoderBase::AutoSelectTrack(uint Type)
 
     if (selTrack < 0)
     {
-        // Select the best track.  Primary attribute is to favor a
-        // forced track.  Secondary attribute is language preference,
-        // in order of most preferred to least preferred language.
-        // Third attribute is track order, preferring the earliest
-        // track.
-        LOG(VB_PLAYBACK, LOG_INFO, LOC + "Trying to select track (w/lang & forced)");
-        const int kForcedWeight   = (1 << 20);
-        const int kLanguageWeight = (1 << 10);
-        const int kPositionWeight = (1 << 0);
-        int bestScore = -1;
-        selTrack = 0;
-        for (uint i = 0; i < numStreams; i++)
+        // Find best track favoring forced.
+        selTrack = BestTrack(Type, true);
+
+        if (Type == kTrackTypeSubtitle)
         {
-            bool forced = (Type == kTrackTypeSubtitle &&
-                           m_tracks[Type][i].m_forced &&
-                           m_parent->ForcedSubtitlesFavored());
-            int position = static_cast<int>(numStreams) - static_cast<int>(i);
-            int language = 0;
-            for (uint j = 0; (language == 0) && (j < m_languagePreference.size()); ++j)
+            if (m_tracks[Type][selTrack].m_forced)
             {
-                if (m_tracks[Type][i].m_language == m_languagePreference[j])
-                    language = static_cast<int>(m_languagePreference.size()) - static_cast<int>(j);
-            }
-            int score = (kForcedWeight * static_cast<int>(forced)) +
-                        (kLanguageWeight * language) +
-                        (kPositionWeight * position);
-            if (score > bestScore)
-            {
-                bestScore = score;
-                selTrack = static_cast<int>(i);
+                // A forced AV Subtitle tracks is handled without the user
+                // explicitly enabling subtitles. Try to find a good non-forced
+                // track that can be swapped to in the case the user does
+                // explicitly enable subtitles.
+                int nonForcedTrack = BestTrack(Type, false);
+
+                if (!m_tracks[Type][nonForcedTrack].m_forced)
+                {
+                    m_selectedForcedTrack[Type] = m_tracks[Type][selTrack];
+                    selTrack = nonForcedTrack;
+                }
             }
         }
     }
@@ -1137,7 +1160,7 @@ int DecoderBase::AutoSelectTrack(uint Type)
             .arg(m_currentTrack[Type]+1).arg(Type).arg(iso639_key_toName(lang)).arg(lang));
 
     if (m_parent && (oldTrack != m_currentTrack[Type]))
-        emit m_parent->SignalTracksChanged(Type);
+        m_parent->tracksChanged(Type);
 
     return selTrack;
 }
@@ -1240,10 +1263,10 @@ QString toString(AudioTrackType type)
 
 void DecoderBase::SaveTotalDuration(void)
 {
-    if (!m_playbackInfo || av_q2d(m_totalDuration) == 0)
+    if (!m_playbackInfo || !m_totalDuration.isNonzero() || !m_totalDuration.isValid())
         return;
 
-    m_playbackInfo->SaveTotalDuration(millisecondsFromFloat(1000 * av_q2d(m_totalDuration)));
+    m_playbackInfo->SaveTotalDuration(std::chrono::milliseconds{m_totalDuration.toFixed(1000)});
 }
 
 void DecoderBase::SaveTotalFrames(void)
@@ -1291,7 +1314,7 @@ uint64_t DecoderBase::TranslatePosition(const frm_pos_map_t &map,
     {
         // Extrapolate from (key1,val1) based on fallback_ratio
         key2 = key;
-        val2 = llroundf(val1 + fallback_ratio * (key2 - key1));
+        val2 = llroundf(val1 + (fallback_ratio * (key2 - key1)));
         LOG(VB_PLAYBACK, LOG_DEBUG, LOC +
             QString("TranslatePosition(key=%1, ratio=%2): "
                     "extrapolating to (%3,%4)")
@@ -1303,7 +1326,7 @@ uint64_t DecoderBase::TranslatePosition(const frm_pos_map_t &map,
     if (key1 == key2) // this happens for an exact keyframe match
         return val2; // can also set key2 = key1 + 1 avoid dividing by zero
 
-    return llround(val1 + (double) (key - key1) * (val2 - val1) / (key2 - key1));
+    return llround(val1 + ((double) (key - key1) * (val2 - val1) / (key2 - key1)));
 }
 
 // Convert from an absolute frame number (not cutlist adjusted) to its

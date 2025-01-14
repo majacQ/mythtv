@@ -1,10 +1,15 @@
-#include "galleryslide.h"
-
+// C++
+#include <algorithm>
 #include <cmath>       // for roundf
-#include "mythmainwindow.h"
-#include "mythlogging.h"
 
-#include "imagemetadata.h"
+// MythTV
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/sizetliteral.h"
+#include "libmythmetadata/imagemetadata.h"
+#include "libmythui/mythmainwindow.h"
+
+// MythFrontend
+#include "galleryslide.h"
 
 #define LOC QString("Slide: ")
 #define SBLOC QString("SlideBuffer: ")
@@ -17,7 +22,7 @@
 // If too small, rapid browsing will result in skipping slides rather than flicking
 // quickly through them.
 // Minimum is 4: 3 for displaying a transition, 1 to handle load requests
-#define SLIDE_BUFFER_SIZE 9
+static constexpr size_t SLIDE_BUFFER_SIZE { 9 };
 
 
 /*!
@@ -188,9 +193,21 @@ void SequentialAnimation::SetSpeed(float speed)
 */
 void SequentialAnimation::Finished()
 {
+    bool finished { false };
+
     // Finish group when last child finishes
-    if ((m_forwards && ++m_current == m_group.size())
-            || (!m_forwards && --m_current < 0))
+    if (m_forwards)
+    {
+        m_current++;
+        finished = (m_current == m_group.size());
+    }
+    else
+    {
+        m_current--;
+        finished = (m_current < 0);
+    }
+
+    if (finished)
         AbstractAnimation::Finished();
     else
         // Start next child
@@ -205,7 +222,7 @@ void ParallelAnimation::Pulse()
     if (m_running)
     {
         // Pulse all children
-        for (AbstractAnimation *animation : qAsConst(m_group))
+        for (AbstractAnimation *animation : std::as_const(m_group))
             animation->Pulse();
     }
 }
@@ -225,7 +242,7 @@ void ParallelAnimation::Start(bool forwards, float speed)
 
     // Start group, then all children
     GroupAnimation::Start(forwards, speed);
-    for (AbstractAnimation *animation : qAsConst(m_group))
+    for (AbstractAnimation *animation : std::as_const(m_group))
         animation->Start(m_forwards, m_speed);
 }
 
@@ -238,7 +255,7 @@ void ParallelAnimation::SetSpeed(float speed)
 {
     // Set group speed, then all children
     GroupAnimation::SetSpeed(speed);
-    for (AbstractAnimation *animation : qAsConst(m_group))
+    for (AbstractAnimation *animation : std::as_const(m_group))
         animation->SetSpeed(m_speed);
 }
 
@@ -449,8 +466,7 @@ void Slide::Zoom(int percentage)
     // Sentinel indicates reset to default zoom
     float newZoom = (percentage == 0)
             ? 1.0F
-            : qMax(MIN_ZOOM,
-                   qMin(MAX_ZOOM, m_zoom * (1.0F + percentage / 100.0F)));
+            : std::clamp(m_zoom * (1.0F + percentage / 100.0F), MIN_ZOOM, MAX_ZOOM);
     if (newZoom != m_zoom)
     {
         if (m_zoomAnimation)
@@ -459,7 +475,9 @@ void Slide::Zoom(int percentage)
             m_zoomAnimation->Start();
         }
         else
+        {
             SetZoom(newZoom);
+        }
     }
 }
 
@@ -507,7 +525,9 @@ void Slide::Pan(QPoint offset)
             m_panAnimation->Start();
         }
         else
+        {
             SetPan(dest);
+        }
     }
 }
 
@@ -530,22 +550,22 @@ void Slide::SetPan(QPoint pos)
     QRect imageArea = m_images[m_curPos]->rect();
     float hRatio    = float(imageArea.height()) / m_area.height();
     float wRatio    = float(imageArea.width()) / m_area.width();
-    float ratio     = qMax(hRatio, wRatio);
+    float ratio     = std::max(hRatio, wRatio); // TODO create a Rational number class
 
     if (m_zoom != 0.0F)
         ratio /= m_zoom;
 
     // Determine crop area
-    int h = qMin(int(roundf(m_area.height() * ratio)), imageArea.height());
-    int w = qMin(int(roundf(m_area.width() * ratio)), imageArea.width());
-    int x = imageArea.center().x() - w / 2;
-    int y = imageArea.center().y() - h / 2;
+    int h = std::min(int(roundf(m_area.height() * ratio)), imageArea.height());
+    int w = std::min(int(roundf(m_area.width() * ratio)), imageArea.width());
+    int x = imageArea.center().x() - (w / 2);
+    int y = imageArea.center().y() - (h / 2);
 
     // Constrain pan to boundaries
     int limitX = (imageArea.width() - w) / 2;
     int limitY = (imageArea.height() - h) / 2;
-    m_pan.setX(qMax(qMin(pos.x(), limitX), -limitX));
-    m_pan.setY(qMax(qMin(pos.y(), limitY), -limitY));
+    m_pan.setX(std::clamp(pos.x(), -limitX, limitX));
+    m_pan.setY(std::clamp(pos.y(), -limitY, limitY));
 
     SetCropRect(x + m_pan.x(), y + m_pan.y(), w, h);
     SetRedraw();
@@ -575,7 +595,7 @@ SlideBuffer::~SlideBuffer()
 void SlideBuffer::Teardown()
 {
     QMutexLocker lock(&m_mutexQ);
-    for (Slide *s : qAsConst(m_queue))
+    for (Slide *s : std::as_const(m_queue))
         s->Clear();
     LOG(VB_GUI, LOG_DEBUG, "Aborted Slidebuffer");
 }
@@ -590,7 +610,7 @@ void SlideBuffer::Initialise(MythUIImage &image)
 {
     // Require at least 4 slides: 2 for transitions, 1 to handle further requests
     // and 1 to prevent solitary slide from being used whilst it is loading
-    int size = qMax(SLIDE_BUFFER_SIZE, 4);
+    size_t size = std::max(SLIDE_BUFFER_SIZE, 4_UZ);
 
     // Fill buffer with slides cloned from the XML image widget
 
@@ -604,7 +624,7 @@ void SlideBuffer::Initialise(MythUIImage &image)
     m_queue.enqueue(slide);
 
     // Rest are simple clones of first
-    for (int i = 1; i < size; ++i)
+    for (size_t i = 1; i < size; ++i)
     {
         slide = new Slide(&image, QString("slide%1").arg(i), slide);
 

@@ -1,15 +1,15 @@
 #include "freesat_huffman.h"
 
-#define START   '\0'
-#define STOP    '\0'
-#define ESCAPE  '\1'
+static constexpr uint8_t START   { '\0' };
+static constexpr uint8_t STOP    { '\0' };
+static constexpr uint8_t ESCAPE  { '\1' };
 
 QString freesat_huffman_to_string(const unsigned char *compressed, uint size)
 {
     const unsigned char *src = compressed;
 
     if ((src[1] != 1) && (src[1] != 2))
-        return QString("");
+        return {""};
 
     const std::vector<fsattab> &fsat_table = (src[1] == 1) ? fsat_table_1 : fsat_table_2;
     const std::vector<uint16_t> &fsat_index = (src[1] == 1) ? fsat_index_1 : fsat_index_2;
@@ -71,7 +71,7 @@ QString freesat_huffman_to_string(const unsigned char *compressed, uint size)
         {
             if (nextCh != STOP && nextCh != ESCAPE)
             {
-                if (p >= uncompressed.count())
+                if (p >= uncompressed.size())
                     uncompressed.resize(p+10);
                 uncompressed[p++] = nextCh;
             }
@@ -86,7 +86,10 @@ QString freesat_huffman_to_string(const unsigned char *compressed, uint size)
                     bit = 0;
                     byte++;
                 }
-                else bit++;
+                else
+                {
+                    bit++;
+                }
             }
         }
         else

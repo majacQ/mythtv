@@ -213,7 +213,7 @@ public:
     bool                        m_created         {false};
     uint32_t                    m_content         {kNone};
     uint32_t                    m_update          {(uint32_t)kAll};
-    MythNotification::Type      m_type            {MythNotification::New};
+    MythNotification::Type      m_type            {MythNotification::kNew};
     MythUIImage                *m_artworkImage    {nullptr};
     MythUIText                 *m_titleText       {nullptr};
     MythUIText                 *m_originText      {nullptr};
@@ -252,7 +252,7 @@ public:
 
     void CheckDeletes()
     {
-        for (auto * screen : qAsConst(m_toDelete))
+        for (auto * screen : std::as_const(m_toDelete))
         {
             screen->SetAlpha(0);
             screen->SetVisible(false);

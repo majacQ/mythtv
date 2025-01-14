@@ -16,25 +16,25 @@
 #include "mythlocale.h"
 #include "mythsession.h"
 
-#define MYTH_APPNAME_MYTHBACKEND "mythbackend"
-#define MYTH_APPNAME_MYTHJOBQUEUE "mythjobqueue"
-#define MYTH_APPNAME_MYTHFRONTEND "mythfrontend"
-#define MYTH_APPNAME_MYTHTV_SETUP "mythtv-setup"
-#define MYTH_APPNAME_MYTHFILLDATABASE "mythfilldatabase"
-#define MYTH_APPNAME_MYTHCOMMFLAG "mythcommflag"
-#define MYTH_APPNAME_MYTHCCEXTRACTOR "mythccextractor"
-#define MYTH_APPNAME_MYTHPREVIEWGEN "mythpreviewgen"
-#define MYTH_APPNAME_MYTHTRANSCODE "mythtranscode"
-#define MYTH_APPNAME_MYTHWELCOME "mythwelcome"
-#define MYTH_APPNAME_MYTHSHUTDOWN "mythshutdown"
-#define MYTH_APPNAME_MYTHLCDSERVER "mythlcdserver"
-#define MYTH_APPNAME_MYTHAVTEST "mythavtest"
-#define MYTH_APPNAME_MYTHMEDIASERVER "mythmediaserver"
-#define MYTH_APPNAME_MYTHMETADATALOOKUP "mythmetadatalookup"
-#define MYTH_APPNAME_MYTHUTIL "mythutil"
-#define MYTH_APPNAME_MYTHSCREENWIZARD "mythscreenwizard"
-#define MYTH_APPNAME_MYTHFFPROBE "mythffprobe"
-#define MYTH_APPNAME_MYTHEXTERNRECORDER "mythexternrecorder"
+static constexpr const char * MYTH_APPNAME_MYTHBACKEND { "mythbackend" };
+static constexpr const char * MYTH_APPNAME_MYTHJOBQUEUE { "mythjobqueue" };
+static constexpr const char * MYTH_APPNAME_MYTHFRONTEND { "mythfrontend" };
+static constexpr const char * MYTH_APPNAME_MYTHTV_SETUP { "mythtv-setup" };
+static constexpr const char * MYTH_APPNAME_MYTHFILLDATABASE { "mythfilldatabase" };
+static constexpr const char * MYTH_APPNAME_MYTHCOMMFLAG { "mythcommflag" };
+static constexpr const char * MYTH_APPNAME_MYTHCCEXTRACTOR { "mythccextractor" };
+static constexpr const char * MYTH_APPNAME_MYTHPREVIEWGEN { "mythpreviewgen" };
+static constexpr const char * MYTH_APPNAME_MYTHTRANSCODE { "mythtranscode" };
+static constexpr const char * MYTH_APPNAME_MYTHWELCOME { "mythwelcome" };
+static constexpr const char * MYTH_APPNAME_MYTHSHUTDOWN { "mythshutdown" };
+static constexpr const char * MYTH_APPNAME_MYTHLCDSERVER { "mythlcdserver" };
+static constexpr const char * MYTH_APPNAME_MYTHAVTEST { "mythavtest" };
+static constexpr const char * MYTH_APPNAME_MYTHMEDIASERVER { "mythmediaserver" };
+static constexpr const char * MYTH_APPNAME_MYTHMETADATALOOKUP { "mythmetadatalookup" };
+static constexpr const char * MYTH_APPNAME_MYTHUTIL { "mythutil" };
+static constexpr const char * MYTH_APPNAME_MYTHSCREENWIZARD { "mythscreenwizard" };
+static constexpr const char * MYTH_APPNAME_MYTHFFPROBE { "mythffprobe" };
+static constexpr const char * MYTH_APPNAME_MYTHEXTERNRECORDER { "mythexternrecorder" };
 
 class MDBManager;
 class MythCoreContextPrivate;
@@ -145,8 +145,6 @@ class MBASE_PUBLIC MythCoreContext : public QObject, public MythObservable, publ
     MythScheduler *GetScheduler(void);
 
     bool IsDatabaseIgnored(void) const;
-    DatabaseParams GetDatabaseParams(void)
-        { return GetDB()->GetDatabaseParams(); }
 
     void SaveSetting(const QString &key, int newValue);
     void SaveSetting(const QString &key, const QString &newValue);
@@ -202,13 +200,15 @@ class MBASE_PUBLIC MythCoreContext : public QObject, public MythObservable, publ
     int GetMasterServerStatusPort(void);
     int GetBackendServerPort(void);
     int GetBackendServerPort(const QString &host);
+    static void ClearBackendServerPortCache();
     int GetBackendStatusPort(void);
     int GetBackendStatusPort(const QString &host);
+    static QHash<QString,int> s_serverPortCache;
 
     bool GetScopeForAddress(QHostAddress &addr) const;
     void SetScopeForAddress(const QHostAddress &addr);
     void SetScopeForAddress(const QHostAddress &addr, int scope);
-    enum ResolveType { ResolveAny = -1, ResolveIPv4 = 0, ResolveIPv6 = 1 };
+    enum ResolveType : std::int8_t { ResolveAny = -1, ResolveIPv4 = 0, ResolveIPv6 = 1 };
     QString resolveSettingAddress(const QString &name,
                                   const QString &host = QString(),
                                   ResolveType type = ResolveAny,
@@ -235,6 +235,9 @@ class MBASE_PUBLIC MythCoreContext : public QObject, public MythObservable, publ
     QString GetLanguage(void);
     QString GetLanguageAndVariant(void);
     void ResetLanguage(void);
+    QString GetAudioLanguage(void);
+    QString GetAudioLanguageAndVariant(void);
+    void ResetAudioLanguage(void);
     void ResetSockets(void);
 
     using PlaybackStartCb = void (QObject::*)(void);
@@ -308,7 +311,7 @@ class MBASE_PUBLIC MythCoreContext : public QObject, public MythObservable, publ
     void TVPlaybackPlaying(void);
 
   private:
-    Q_DISABLE_COPY(MythCoreContext)
+    Q_DISABLE_COPY_MOVE(MythCoreContext)
     MythCoreContextPrivate *d {nullptr}; // NOLINT(readability-identifier-naming)
 
     void connected(MythSocket *sock) override { (void)sock; } //MythSocketCBs
@@ -316,9 +319,9 @@ class MBASE_PUBLIC MythCoreContext : public QObject, public MythObservable, publ
     void connectionClosed(MythSocket *sock) override; // MythSocketCBs
     void readyRead(MythSocket *sock) override; // MythSocketCBs
 
-    QMap<QString,int>     m_testOverrideInts    {};
-    QMap<QString,double>  m_testOverrideFloats  {};
-    QMap<QString,QString> m_testOverrideStrings {};
+    QMap<QString,int>     m_testOverrideInts;
+    QMap<QString,double>  m_testOverrideFloats;
+    QMap<QString,QString> m_testOverrideStrings;
 
   private:
     bool m_dvbv3                {false};

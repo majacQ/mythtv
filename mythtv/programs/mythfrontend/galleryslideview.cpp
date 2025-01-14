@@ -1,15 +1,24 @@
-#include "galleryslideview.h"
-
+// C++
 #include <utility>
 
-#include "mythmainwindow.h"
-#include "mythuitext.h"
-#include "mythdialogbox.h"
+// MythTV
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuitext.h"
 
+// MythFrontend
+#include "galleryslideview.h"
 #include "galleryviews.h"
 
 #define LOC QString("Slideview: ")
 
+// EXIF tag 0x9286 UserComment can contain garbage
+static QString clean_comment(const QString &comment)
+{
+    QString result;
+    std::copy_if(comment.cbegin(), comment.cend(), std::back_inserter(result), [](QChar x) { return x.isPrint(); } );
+    return result;
+}
 
 /**
  *  \brief  Constructor
@@ -38,11 +47,6 @@ GallerySlideView::GallerySlideView(MythScreenStack *parent, const char *name,
     connect(&m_updateTransition, &Transition::finished,
             this, &GallerySlideView::TransitionComplete, Qt::QueuedConnection);
 
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    // Seed random generator for random transitions
-    qsrand(QTime::currentTime().msec());
-#endif
-
     // Initialise slideshow timer
     m_timer.setSingleShot(true);
     m_timer.setInterval(m_slideShowTime);
@@ -53,6 +57,9 @@ GallerySlideView::GallerySlideView(MythScreenStack *parent, const char *name,
     m_delay.setSingleShot(true);
     m_delay.setInterval(gCoreContext->GetDurSetting<std::chrono::milliseconds>("GalleryStatusDelay", 0s));
     connect(&m_delay, &QTimer::timeout, this, &GallerySlideView::ShowStatus);
+
+    MythMainWindow::DisableScreensaver();
+    LOG(VB_GUI, LOG_DEBUG, "Created Slideview");
 }
 
 
@@ -62,6 +69,7 @@ GallerySlideView::GallerySlideView(MythScreenStack *parent, const char *name,
 GallerySlideView::~GallerySlideView()
 {
     delete m_view;
+    MythMainWindow::RestoreScreensaver();
     LOG(VB_GUI, LOG_DEBUG, "Deleted Slideview");
 }
 
@@ -140,7 +148,7 @@ bool GallerySlideView::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "LEFT")
@@ -163,33 +171,61 @@ bool GallerySlideView::keyPressEvent(QKeyEvent *event)
                 Play();
         }
         else if (action == "SELECT")
+        {
             PlayVideo();
+        }
         else if (action == "STOP")
+        {
             Stop();
+        }
         else if (action == "ROTRIGHT")
+        {
             Transform(kRotateCW);
+        }
         else if (action == "ROTLEFT")
+        {
             Transform(kRotateCCW);
+        }
         else if (action == "FLIPHORIZONTAL")
+        {
             Transform(kFlipHorizontal);
+        }
         else if (action == "FLIPVERTICAL")
+        {
             Transform(kFlipVertical);
+        }
         else if (action == "ZOOMIN")
+        {
             Zoom(10);
+        }
         else if (action == "ZOOMOUT")
+        {
             Zoom(-10);
+        }
         else if (action == "FULLSIZE")
+        {
             Zoom();
+        }
         else if (action == "SCROLLUP")
+        {
             Pan(QPoint(0, 100));
+        }
         else if (action == "SCROLLDOWN")
+        {
             Pan(QPoint(0, -100));
+        }
         else if (action == "SCROLLLEFT")
+        {
             Pan(QPoint(-120, 0));
+        }
         else if (action == "SCROLLRIGHT")
+        {
             Pan(QPoint(120, 0));
+        }
         else if (action == "RECENTER")
+        {
             Pan();
+        }
         else if (action == "ESCAPE" && !GetMythMainWindow()->IsExitingToMain())
         {
             // Exit info details, if shown
@@ -214,7 +250,7 @@ bool GallerySlideView::keyPressEvent(QKeyEvent *event)
  */
 void GallerySlideView::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
@@ -571,7 +607,7 @@ void GallerySlideView::ShowSlide(int direction)
 void GallerySlideView::SlideAvailable(int count)
 {
     // Transition speed = 0.5x for every slide waiting. Min = 1x, Max = Half buffer size
-    float speed = 0.5 + count / 2.0;
+    float speed = 0.5 + (count / 2.0);
 
     // Are we transitioning ?
     if (m_transitioning)
@@ -627,6 +663,7 @@ void GallerySlideView::TransitionComplete()
     m_slides.ReleaseCurrent();
 
     // No further actions when skipping
+    // cppcheck-suppress knownConditionTrueFalse
     if (m_transitioning)
         return;
 
@@ -645,8 +682,9 @@ void GallerySlideView::TransitionComplete()
         QStringList text;
         text << ImageManagerFe::LongDateOf(im);
 
-        if (!im->m_comment.isEmpty())
-            text << im->m_comment;
+        QString comment = clean_comment(im->m_comment);
+        if (!comment.isEmpty())
+            text << comment;
 
         m_uiCaptionText->SetText(text.join(" - "));
     }
@@ -703,7 +741,9 @@ void GallerySlideView::ShowNextSlide(int inc, bool useTransition)
         }
     }
     else if (m_view->Next(inc))
+    {
         ShowSlide(useTransition ? 1 : 0);
+    }
     else
     {
         // No images
@@ -774,6 +814,8 @@ void GallerySlideView::ClearStatus(const Slide &slide)
             SetStatus(tr("Failed to load %1").arg(im ? im->m_filePath : "?"));
         }
         else
+        {
             m_uiStatus->Reset();
+        }
     }
 }

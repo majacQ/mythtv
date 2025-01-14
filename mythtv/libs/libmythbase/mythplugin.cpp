@@ -108,7 +108,8 @@ MythPluginManager::MythPluginManager()
             LOG(VB_GENERAL, LOG_WARNING,
                     "No libraries in plugins directory " + filterDir.path());
 
-        for (auto library : qAsConst(libraries))
+        // coverity[auto_causes_copy]
+        for (auto library : std::as_const(libraries))
         {
             // pull out the base library name
             library = library.right(library.length() - prefixLength);
@@ -118,8 +119,10 @@ MythPluginManager::MythPluginManager()
         }
     }
     else
+    {
         LOG(VB_GENERAL, LOG_WARNING,
                  "No plugins directory " + filterDir.path());
+    }
 }
 
 bool MythPluginManager::init_plugin(const QString &plugname)
@@ -219,7 +222,7 @@ MythPlugin *MythPluginManager::GetPlugin(const QString &plugname)
 
 void MythPluginManager::DestroyAllPlugins(void)
 {
-    for (auto *it : qAsConst(m_dict))
+    for (auto *it : std::as_const(m_dict))
     {
         it->destroy();
         delete it;
@@ -232,7 +235,7 @@ void MythPluginManager::DestroyAllPlugins(void)
 QStringList MythPluginManager::EnumeratePlugins(void)
 {
     QStringList ret;
-    for (auto *it : qAsConst(m_dict))
+    for (auto *it : std::as_const(m_dict))
         ret << it->getName();
     return ret;
 }

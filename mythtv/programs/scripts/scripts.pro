@@ -6,7 +6,7 @@ TEMPLATE = aux
 # database backup/restore scripts are standalone
 #
 database_scripts.path = $${PREFIX}/share/mythtv
-database_scripts.files = database/*
+database_scripts.files = database/*pl
 INSTALLS += database_scripts
 
 #
@@ -40,6 +40,7 @@ using_bindings_python {
     for(name, DIR_NAMES) {
         PYTHON_SOURCES -= $$name
     }
+    PYTHON_SOURCES -= $$files("CMakeLists.txt", true)
 
     python_pathfix.output  = $${OBJECTS_DIR}/${QMAKE_FILE_NAME}
     python_pathfix.commands = $${QMAKE_COPY} ${QMAKE_FILE_NAME} $${OBJECTS_DIR}/${QMAKE_FILE_NAME} $$escape_expand(\n\t) \
@@ -63,28 +64,9 @@ using_bindings_python {
 
     INSTALLS += hardwareprofile_scripts metadata_scripts internetcontent_scripts
 
-    unix|macx|mingw:QMAKE_CLEAN += -r $${OBJECTS_DIR}/hardwareprofile/distros \
-                                      $${OBJECTS_DIR}/internetcontent/nv_python_libs \
-                                      $${OBJECTS_DIR}/metadata/Movie \
-                                      $${OBJECTS_DIR}/metadata/Music \
-                                      $${OBJECTS_DIR}/metadata/Television
-    unix|macx|mingw:QMAKE_DISTCLEAN += -r $${OBJECTS_DIR}/hardwareprofile \
-                                          $${OBJECTS_DIR}/internetcontent \
-                                          $${OBJECTS_DIR}/metadata
-    win32-msvc*:QMAKE_CLEAN += /s /f /q $${OBJECTS_DIR}/hardwareprofile/distros \
-                                        $${OBJECTS_DIR}/internetcontent/nv_python_libs \
-                                        $${OBJECTS_DIR}/metadata/Movie \
-                                        $${OBJECTS_DIR}/metadata/Music \
-                                        $${OBJECTS_DIR}/metadata/Television $$escape_expand(\n\t) \
-                               rd /s /q $${OBJECTS_DIR}/hardwareprofile/distros \
-                                        $${OBJECTS_DIR}/internetcontent/nv_python_libs \
-                                        $${OBJECTS_DIR}/metadata/Movie \
-                                        $${OBJECTS_DIR}/metadata/Music \
-                                        $${OBJECTS_DIR}/metadata/Television
+    unix|macx|mingw:QMAKE_DISTCLEAN += -r $${OBJECTS_DIR}
     win32-msvc*:QMAKE_DISTCLEAN += /s /f /q $${OBJECTS_DIR}/*.* $$escape_expand(\n\t) \
-                                   rd /s /q $${OBJECTS_DIR}/hardwareprofile \
-                                            $${OBJECTS_DIR}/internetcontent \
-                                            $${OBJECTS_DIR}/metadata
+                                   rd /s /q $${OBJECTS_DIR}
 
 } else {
 
@@ -97,6 +79,7 @@ using_bindings_python {
     }
 
     PYTHON_SOURCES += metadata/Music/*
+    PYTHON_SOURCES -= $$files("CMakeLists.txt", true)
 
     python_pathfix.output  = $${OBJECTS_DIR}/${QMAKE_FILE_NAME}
     python_pathfix.commands = $${QMAKE_COPY_DIR} ${QMAKE_FILE_NAME} $${OBJECTS_DIR}/${QMAKE_FILE_NAME}
@@ -128,11 +111,8 @@ using_bindings_python {
 
     }
 
-    unix|macx|mingw:QMAKE_CLEAN += -r $${OBJECTS_DIR}/metadata/Music/*
-    unix|macx|mingw:QMAKE_DISTCLEAN += -r $${OBJECTS_DIR}/metadata
-    win32-msvc*:QMAKE_CLEAN += /s /f /q $${OBJECTS_DIR}/metadata/Music/*.* $$escape_expand(\n\t) \
-                               rd /s /q $${OBJECTS_DIR}/metadata/Music/*.*
+    unix|macx|mingw:QMAKE_DISTCLEAN += -r $${OBJECTS_DIR}
     win32-msvc*:QMAKE_DISTCLEAN += /s /f /q $${OBJECTS_DIR}/metadata/*.* $$escape_expand(\n\t) \
-                                   rd /s /q $${OBJECTS_DIR}/metadata
+                                   rd /s /q $${OBJECTS_DIR}
 
 }

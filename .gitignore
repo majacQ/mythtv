@@ -42,6 +42,7 @@ obj
 *.ipch
 .directory
 .vscode
+*.code-workspace
 .qmake.stash
 tags
 TAGS
@@ -57,3 +58,12 @@ uic_wrapper.sh
 *.profraw
 *.profdata
 __pycache__
+mocinclude.opt
+build
+build-*
+*.bak
+README.CMake.*
+CMakeUserPresets.json
+libsinstall-*
+cppcheck.html
+cppcheck.xml

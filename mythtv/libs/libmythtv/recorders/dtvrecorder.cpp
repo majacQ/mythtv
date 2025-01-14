@@ -18,19 +18,21 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include "atscstreamdata.h"
-#include "mpegstreamdata.h"
-#include "dvbstreamdata.h"
-#include "dtvrecorder.h"
-#include "programinfo.h"
-#include "mythlogging.h"
-#include "mpegtables.h"
-#include "io/mythmediabuffer.h"
-#include "tv_rec.h"
-#include "mythsystemevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/sizetliteral.h"
 
-#include "AVCParser.h"
-#include "HEVCParser.h"
+#include "bytereader.h"
+#include "dtvrecorder.h"
+#include "io/mythmediabuffer.h"
+#include "mpeg/AVCParser.h"
+#include "mpeg/HEVCParser.h"
+#include "mpeg/atscstreamdata.h"
+#include "mpeg/dvbstreamdata.h"
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/mpegtables.h"
+#include "mythsystemevent.h"
+#include "tv_rec.h"
 
 #define LOC ((m_tvrec) ? \
     QString("DTVRec[%1]: ").arg(m_tvrec->GetInputId()) : \
@@ -51,7 +53,7 @@ DTVRecorder::DTVRecorder(TVRec *rec) :
     m_h2645Parser(reinterpret_cast<H2645Parser *>(new AVCParser))
 {
     SetPositionMapType(MARK_GOP_BYFRAME);
-    m_payloadBuffer.reserve(TSPacket::kSize * (50 + 1));
+    m_payloadBuffer.reserve(TSPacket::kSize * (50_UZ + 1));
 
     DTVRecorder::ResetForNewFile();
 
@@ -194,7 +196,7 @@ void DTVRecorder::ClearStatistics(void)
     m_totalDuration              = 0;
     m_tdBase                     = 0;
     m_tdTickCount                = 0;
-    m_tdTickFramerate            = FrameRate(0);
+    m_tdTickFramerate            = MythAVRational(0);
 
 }
 
@@ -311,7 +313,7 @@ void DTVRecorder::BufferedWrite(const TSPacket &tspacket, bool insert)
         if (!m_payloadBuffer.empty())
         {
             if (m_ringBuffer)
-                m_ringBuffer->Write(&m_payloadBuffer[0], m_payloadBuffer.size());
+                m_ringBuffer->Write((m_payloadBuffer).data(), m_payloadBuffer.size());
             m_payloadBuffer.clear();
         }
     }
@@ -327,7 +329,7 @@ void DTVRecorder::BufferedWrite(const TSPacket &tspacket, bool insert)
     }
 }
 
-enum { kExtractPTS, kExtractDTS };
+enum : std::uint8_t { kExtractPTS, kExtractDTS };
 static int64_t extract_timestamp(
     const uint8_t *bufptr, int bytes_left, int pts_or_dts)
 {
@@ -365,13 +367,13 @@ static QDateTime ts_to_qdatetime(
     return dt.addMSecs((pts - pts_first)/90);
 }
 
-static const std::array<const FrameRate,16> frameRateMap = {
-    FrameRate(0),  FrameRate(24000, 1001), FrameRate(24),
-    FrameRate(25), FrameRate(30000, 1001), FrameRate(30),
-    FrameRate(50), FrameRate(60000, 1001), FrameRate(60),
-    FrameRate(0),  FrameRate(0),           FrameRate(0),
-    FrameRate(0),  FrameRate(0),           FrameRate(0),
-    FrameRate(0)
+static const std::array<const MythAVRational,16> frameRateMap = {
+    MythAVRational(0),  MythAVRational(24000, 1001), MythAVRational(24),
+    MythAVRational(25), MythAVRational(30000, 1001), MythAVRational(30),
+    MythAVRational(50), MythAVRational(60000, 1001), MythAVRational(60),
+    MythAVRational(0),  MythAVRational(0),           MythAVRational(0),
+    MythAVRational(0),  MythAVRational(0),           MythAVRational(0),
+    MythAVRational(0)
 };
 
 /** \fn DTVRecorder::FindMPEG2Keyframes(const TSPacket* tspacket)
@@ -422,7 +424,7 @@ bool DTVRecorder::FindMPEG2Keyframes(const TSPacket* tspacket)
     uint aspectRatio = 0;
     uint height = 0;
     uint width = 0;
-    FrameRate frameRate(0);
+    MythAVRational frameRate {0};
 
     // Scan for PES header codes; specifically picture_start
     // sequence_start (SEQ) and group_start (GOP).
@@ -437,15 +439,21 @@ bool DTVRecorder::FindMPEG2Keyframes(const TSPacket* tspacket)
 
     while (bufptr < bufend)
     {
-        bufptr = avpriv_find_start_code(bufptr, bufend, &m_startCode);
+        bufptr = ByteReader::find_start_code_truncated(bufptr, bufend, &m_startCode);
         int bytes_left = bufend - bufptr;
-        if ((m_startCode & 0xffffff00) == 0x00000100)
+        if (ByteReader::start_code_is_valid(m_startCode))
         {
             // At this point we have seen the start code 0 0 1
             // the next byte will be the PES packet stream id.
             const int stream_id = m_startCode & 0x000000ff;
             if (PESStreamID::PictureStartCode == stream_id)
-                hasFrame = true;
+            {
+                if (m_progressiveSequence)
+                {
+                    hasFrame = true;
+                }
+                // else deterimine hasFrame from the following picture_coding_extension()
+            }
             else if (PESStreamID::GOPStartCode == stream_id)
             {
                 m_lastGopSeen   = m_framesSeenCount;
@@ -481,10 +489,47 @@ bool DTVRecorder::FindMPEG2Keyframes(const TSPacket* tspacket)
                     case 0x8: /* picture coding extension */
                         if (bytes_left >= 5)
                         {
-                            //int picture_structure = bufptr[2]&3;
+                            int picture_structure  = bufptr[2] & 3;
                             int top_field_first = bufptr[3] & (1 << 7);
                             int repeat_first_field = bufptr[3] & (1 << 1);
                             int progressive_frame = bufptr[4] & (1 << 7);
+#if 0
+                            LOG(VB_RECORD, LOG_DEBUG, LOC +
+                                QString("picture_coding_extension(): (m_progressiveSequence: %1) picture_structure: %2 top_field_first: %3 repeat_first_field: %4 progressive_frame: %5")
+                                    .arg(QString::number(m_progressiveSequence , 2),
+                                         QString::number(picture_structure , 2),
+                                         QString::number(top_field_first , 2),
+                                         QString::number(repeat_first_field , 2),
+                                         QString::number(progressive_frame , 2)
+                                        )
+                               );
+#endif
+                            if (!m_progressiveSequence)
+                            {
+                                if (picture_structure == 0b00)
+                                {
+                                    ; // reserved
+                                }
+                                else if (picture_structure == 0b11)
+                                {
+                                    // frame picture (either interleaved interlaced or progressive)
+                                    hasFrame = true;
+                                }
+                                else if (picture_structure < 0b11)
+                                {
+                                    // field picture
+                                    // Only add a frame for the first presented field.
+                                    // Do not add a frame for each field picture.
+                                    if (top_field_first != 0)
+                                    {
+                                        hasFrame = (picture_structure == 0b01); // Top Field
+                                    }
+                                    else // top_field_first == 0
+                                    {
+                                        hasFrame = (picture_structure == 0b10); // Bottom Field
+                                    }
+                                }
+                            }
 
                             /* check if we must repeat the frame */
                             m_repeatPict = 1;
@@ -522,7 +567,7 @@ bool DTVRecorder::FindMPEG2Keyframes(const TSPacket* tspacket)
                 HandleTimestamps(stream_id, pts, dts);
                 // Detect music choice program (very slow frame rate and audio)
                 if (m_firstKeyframe < 0
-                    &&  m_tsLast[stream_id] - m_tsFirst[stream_id] > 3*90000)
+                    &&  m_tsLast[stream_id] - m_tsFirst[stream_id] > 3*90000LL)
                 {
                     hasKeyFrame = true;
                     m_musicChoice = true;
@@ -623,18 +668,18 @@ void DTVRecorder::HandleTimestamps(int stream_id, int64_t pts, int64_t dts)
     if (m_usePts)
     {
         ts = dts;
-        gap_threshold = 2*90000; // two seconds, compensate for GOP ordering
+        gap_threshold = 2*90000LL; // two seconds, compensate for GOP ordering
     }
 
     if (m_musicChoice)
-        gap_threshold = 8*90000; // music choice uses frames every 6 seconds
+        gap_threshold = 8*90000LL; // music choice uses frames every 6 seconds
 
     if (m_tsLast[stream_id] >= 0)
     {
         int64_t diff = ts - m_tsLast[stream_id];
 
         // time jumped back more then 10 seconds, handle it as 33bit overflow
-        if (diff < (10 * -90000))
+        if (diff < (10 * -90000LL))
             // MAX_PTS is 33bits all 1
             diff += 0x1ffffffffLL;
 
@@ -699,8 +744,9 @@ void DTVRecorder::UpdateFramesWritten(void)
     m_tdTickCount += (2 + m_repeatPict);
     if (m_tdTickFramerate.isNonzero())
     {
+        // not 1000 since m_tdTickCount needs to be divided by 2 to get an equivalent frame count
         m_totalDuration = m_tdBase + (int64_t) 500 * m_tdTickCount *
-            m_tdTickFramerate.getDen() / (double) m_tdTickFramerate.getNum();
+            m_tdTickFramerate.invert().toDouble();
     }
 
     if (m_framesWrittenCount < 2000 || m_framesWrittenCount % 1000 == 0)
@@ -723,7 +769,7 @@ bool DTVRecorder::FindAudioKeyframes(const TSPacket* /*tspacket*/)
     if (!m_ringBuffer || (GetStreamData()->VideoPIDSingleProgram() <= 0x1fff))
         return hasKeyFrame;
 
-    static constexpr uint64_t kMsecPerDay = 24 * 60 * 60 * 1000ULL;
+    static constexpr uint64_t kMsecPerDay { 24ULL * 60 * 60 * 1000 };
     const double frame_interval = (1000.0 / m_videoFrameRate);
     uint64_t elapsed = 0;
     if (m_audioTimer.isValid())
@@ -851,7 +897,7 @@ bool DTVRecorder::FindH2645Keyframes(const TSPacket *tspacket)
     uint aspectRatio = 0;
     uint height = 0;
     uint width = 0;
-    FrameRate frameRate(0);
+    MythAVRational frameRate {0};
     SCAN_t scantype(SCAN_t::UNKNOWN_SCAN);
 
     bool hasFrame = false;
@@ -874,9 +920,9 @@ bool DTVRecorder::FindH2645Keyframes(const TSPacket *tspacket)
             }
 
             // must find the PES start code
-            if (tspacket->data()[i++] != 0x00 ||
-                tspacket->data()[i++] != 0x00 ||
-                tspacket->data()[i++] != 0x01)
+            if (tspacket->data()[i  ] != 0x00 ||
+                tspacket->data()[i+1] != 0x00 ||
+                tspacket->data()[i+2] != 0x01)
             {
                 if (!m_pesTimer.isRunning() || m_pesTimer.elapsed() > 20000ms)
                 {
@@ -886,6 +932,7 @@ bool DTVRecorder::FindH2645Keyframes(const TSPacket *tspacket)
                 }
                 break;
             }
+            i += 3;
 
             m_pesTimer.stop();
 
@@ -949,7 +996,7 @@ bool DTVRecorder::FindH2645Keyframes(const TSPacket *tspacket)
                 height = m_h2645Parser->pictureHeight();
                 aspectRatio = m_h2645Parser->aspectRatio();
                 scantype = m_h2645Parser->GetScanType();
-                m_h2645Parser->getFrameRate(frameRate);
+                frameRate   = m_h2645Parser->getFrameRate();
             }
         }
     } // for (; i < TSPacket::kSize; ++i)
@@ -1056,7 +1103,9 @@ void DTVRecorder::HandleH2645Keyframe(void)
         SendMythSystemRecEvent("REC_STARTED_WRITING", m_curRecording);
     }
     else
+    {
         startpos = m_h2645Parser->keyframeAUstreamOffset();
+    }
 
     // Add key frame to position map
     m_positionMapLock.lock();
@@ -1081,7 +1130,7 @@ void DTVRecorder::FindPSKeyFrames(const uint8_t *buffer, uint len)
     uint aspectRatio = 0;
     uint height = 0;
     uint width = 0;
-    FrameRate frameRate(0);
+    MythAVRational frameRate {0};
 
     uint skip = std::max(m_audioBytesRemaining, m_otherBytesRemaining);
     while (bufptr + skip < bufend)
@@ -1090,14 +1139,13 @@ void DTVRecorder::FindPSKeyFrames(const uint8_t *buffer, uint len)
         bool hasKeyFrame  = false;
 
         const uint8_t *tmp = bufptr;
-        bufptr =
-            avpriv_find_start_code(bufptr + skip, bufend, &m_startCode);
+        bufptr = ByteReader::find_start_code_truncated(bufptr + skip, bufend, &m_startCode);
         m_audioBytesRemaining = 0;
         m_otherBytesRemaining = 0;
         m_videoBytesRemaining -= std::min(
             (uint)(bufptr - tmp), m_videoBytesRemaining);
 
-        if ((m_startCode & 0xffffff00) != 0x00000100)
+        if (!ByteReader::start_code_is_valid(m_startCode))
             continue;
 
         // NOTE: Length may be zero for packets that only contain bytes from
@@ -1145,7 +1193,7 @@ void DTVRecorder::FindPSKeyFrames(const uint8_t *buffer, uint len)
                 frameRate = frameRateMap[(bufptr[3] & 0x0000000f)];
             }
         }
-        else if (!m_videoBytesRemaining && !m_audioBytesRemaining)
+        else if (!m_audioBytesRemaining)
         {
             if ((stream_id >= PESStreamID::MPEGVideoStreamBegin) &&
                 (stream_id <= PESStreamID::MPEGVideoStreamEnd))
@@ -1222,7 +1270,7 @@ void DTVRecorder::FindPSKeyFrames(const uint8_t *buffer, uint len)
                 if (m_ringBuffer)
                 {
                     m_ringBuffer->Write(
-                        &m_payloadBuffer[0], m_payloadBuffer.size());
+                        (m_payloadBuffer).data(), m_payloadBuffer.size());
                 }
                 m_payloadBuffer.clear();
             }
@@ -1270,6 +1318,21 @@ void DTVRecorder::HandlePAT(const ProgramAssociationTable *_pat)
     int progNum = m_streamData->DesiredProgram();
     uint pmtpid = _pat->FindPID(progNum);
 
+    // If we have not found the desired program in the PAT and this happens to be
+    // an SPTS then update the desired program to the one that is present in the PAT.
+    if (!pmtpid)
+    {
+        if (_pat->ProgramCount() == 1)
+        {
+            int oldProgNum = progNum;
+            progNum = _pat->ProgramNumber(0);
+            LOG(VB_GENERAL, LOG_INFO, LOC +
+                QString("Update desired program found in SPTS PAT from %1 to %2")
+                .arg(oldProgNum).arg(progNum));
+            GetStreamData()->SetDesiredProgram(progNum);
+            pmtpid = _pat->FindPID(progNum);
+        }
+    }
     if (!pmtpid)
     {
         LOG(VB_RECORD, LOG_ERR, LOC +
@@ -1556,7 +1619,7 @@ bool DTVRecorder::ProcessVideoTSPacket(const TSPacket &tspacket)
         {
             // Flush the buffer
             if (m_ringBuffer)
-                m_ringBuffer->Write(&m_payloadBuffer[0], m_payloadBuffer.size());
+                m_ringBuffer->Write((m_payloadBuffer).data(), m_payloadBuffer.size());
             m_payloadBuffer.clear();
         }
 
@@ -1588,7 +1651,7 @@ bool DTVRecorder::ProcessAudioTSPacket(const TSPacket &tspacket)
         {
             // Flush the buffer
             if (m_ringBuffer)
-                m_ringBuffer->Write(&m_payloadBuffer[0], m_payloadBuffer.size());
+                m_ringBuffer->Write((m_payloadBuffer).data(), m_payloadBuffer.size());
             m_payloadBuffer.clear();
         }
 

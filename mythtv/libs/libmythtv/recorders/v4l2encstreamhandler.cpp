@@ -1,7 +1,5 @@
 // -*- Mode: c++ -*-
 
-#include <iostream>
-
 // POSIX headers
 #include <fcntl.h>
 #include <unistd.h>
@@ -10,25 +8,24 @@
 //#include <sys/select.h>
 #include <sys/ioctl.h>
 #endif
+
 #include <chrono> // for milliseconds
+#include <iostream>
 #include <thread> // for sleep_for
 
 // Qt headers
-#include <QString>
 #include <QFile>
+#include <QString>
 
 // MythTV headers
-#include "v4l2encstreamhandler.h"
-#include "v4lchannel.h"
-#include "dtvsignalmonitor.h"
-#include "streamlisteners.h"
-#include "mpegstreamdata.h"
-#include "cardutil.h"
-#include "exitcodes.h"
+#include "libmythbase/exitcodes.h"
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-  #define loadRelaxed load
-#endif
+#include "cardutil.h"
+#include "dtvsignalmonitor.h"
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/streamlisteners.h"
+#include "recorders/v4l2encstreamhandler.h"
+#include "recorders/v4lchannel.h"
 
 const std::array<const std::string,15> V4L2encStreamHandler::kStreamTypes
 {
@@ -229,7 +226,9 @@ void V4L2encStreamHandler::run(void)
                     m_failing = true;
                 }
                 else
+                {
                     gap = true;
+                }
             }
 
             RestartEncoding();
@@ -510,7 +509,8 @@ bool V4L2encStreamHandler::StartEncoding(void)
         return false;
     }
 
-    if ((old_cnt = m_streamingCnt.loadRelaxed()) == 0)
+    old_cnt = m_streamingCnt.loadRelaxed();
+    if (old_cnt == 0)
     {
         // Start encoding
 
@@ -591,7 +591,9 @@ bool V4L2encStreamHandler::StartEncoding(void)
         }
     }
     else
+    {
         LOG(VB_RECORD, LOG_INFO, LOC + "Already encoding");
+    }
 
     QMutexLocker listen_lock(&m_listenerLock);
 
@@ -775,13 +777,21 @@ bool V4L2encStreamHandler::SetOption(const QString &opt, int value)
         }
     }
     else if (opt == "mpeg2audvolume")
+    {
         m_audioVolume = value;
+    }
     else if (opt == "low_mpegbitratemode")
+    {
         m_lowBitrateMode = value;
+    }
     else if (opt == "medium_mpegbitratemode")
+    {
         m_mediumBitrateMode = value;
+    }
     else if (opt == "high_mpegbitratemode")
+    {
         m_highBitrateMode = value;
+    }
     else if (opt.endsWith("avgbitrate"))
     {
         if (opt.startsWith("low"))
@@ -805,7 +815,9 @@ bool V4L2encStreamHandler::SetOption(const QString &opt, int value)
             return false;
     }
     else
+    {
         return false;
+    }
 
     LOG(VB_RECORD, LOG_INFO, LOC + QString("SetOption('%1', %2) -- success")
         .arg(opt).arg(value));
@@ -901,7 +913,9 @@ bool V4L2encStreamHandler::SetOption(const QString &opt, const QString &value)
         }
     }
     else
+    {
         return false;
+    }
 
     LOG(VB_RECORD, LOG_INFO, LOC + QString("SetOption('%1', '%2') -- success")
         .arg(opt, value));

@@ -62,7 +62,7 @@ extern "C" {
 #define O_LARGEFILE 0
 #endif
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 static int replex_all_set(struct replex *rx);
 
@@ -88,18 +88,27 @@ static int avcodec_encode_audio(AVCodecContext *avctx,
                                 uint8_t *buf, int buf_size,
                                 const short *samples)
 {
-    AVPacket pkt;
+    AVPacket *pkt;
     AVFrame *frame;
     int ret, samples_size;
 
-    av_init_packet(&pkt);
-    pkt.data = buf;
-    pkt.size = buf_size;
+    pkt = av_packet_alloc();
+    if (pkt == nullptr)
+    {
+        LOG(VB_GENERAL, LOG_ERR, "packet allocation failed");
+        return AVERROR(ENOMEM);
+    }
+
+    pkt->data = buf;
+    pkt->size = buf_size;
 
     if (samples) {
         frame = av_frame_alloc();
         if (!frame)
+        {
+            av_packet_free(&pkt);
             return AVERROR(ENOMEM);
+        }
 
         if (avctx->frame_size) {
             frame->nb_samples = avctx->frame_size;
@@ -111,13 +120,15 @@ static int avcodec_encode_audio(AVCodecContext *avctx,
                 av_log(avctx, AV_LOG_ERROR, "avcodec_encode_audio() does not "
                                             "support this codec\n");
                 av_frame_free(&frame);
+                av_packet_free(&pkt);
                 return AVERROR(EINVAL);
             }
             nb_samples = (int64_t)buf_size * 8 /
                          (av_get_bits_per_sample(avctx->codec_id) *
-                          avctx->channels);
+                          avctx->ch_layout.nb_channels);
             if (nb_samples >= INT_MAX) {
                 av_frame_free(&frame);
+                av_packet_free(&pkt);
                 return AVERROR(EINVAL);
             }
             frame->nb_samples = nb_samples;
@@ -125,14 +136,15 @@ static int avcodec_encode_audio(AVCodecContext *avctx,
 
         /* it is assumed that the samples buffer is large enough based on the
          * relevant parameters */
-        samples_size = av_samples_get_buffer_size(nullptr, avctx->channels,
+        samples_size = av_samples_get_buffer_size(nullptr, avctx->ch_layout.nb_channels,
                                                   frame->nb_samples,
                                                   avctx->sample_fmt, 1);
-        if ((ret = avcodec_fill_audio_frame(frame, avctx->channels,
+        if ((ret = avcodec_fill_audio_frame(frame, avctx->ch_layout.nb_channels,
                                             avctx->sample_fmt,
                                             (const uint8_t *)samples,
                                             samples_size, 1)) < 0) {
             av_frame_free(&frame);
+            av_packet_free(&pkt);
             return ret;
         }
 
@@ -145,9 +157,9 @@ static int avcodec_encode_audio(AVCodecContext *avctx,
     //  Now that avcodec_encode_audio2 is deprecated and replaced
     //  by 2 calls, this could be optimized
     //  into separate routines or separate threads.
-    ret = avcodec_receive_packet(avctx, &pkt);
+    ret = avcodec_receive_packet(avctx, pkt);
     if (ret != 0)
-        pkt.size=0;
+        pkt->size=0;
     if (ret == AVERROR(EAGAIN))
         ret = 0;
     if (ret == 0)
@@ -162,18 +174,20 @@ static int avcodec_encode_audio(AVCodecContext *avctx,
     }
 
     /* free any side data since we cannot return it */
-    av_packet_free_side_data(&pkt);
+    av_packet_free_side_data(pkt);
 
     if (frame && frame->extended_data != frame->data)
         av_freep(&frame->extended_data);
 
     av_frame_free(&frame);
-    return ret ? ret : pkt.size;
+    int size = pkt->size;
+    av_packet_free(&pkt);
+    return ret ? ret : size;
 }
 
 static int encode_mp2_audio(audio_frame_t *aframe, uint8_t *buffer, int bufsize)
 {
-	AVCodec *codec;
+	const AVCodec *codec;
 	AVCodecContext *c= nullptr;
 	int frame_size, j, out_size;
 	short *samples;
@@ -192,7 +206,7 @@ static int encode_mp2_audio(audio_frame_t *aframe, uint8_t *buffer, int bufsize)
 	/* put sample parameters */
 	c->bit_rate = aframe->bit_rate;
 	c->sample_rate = aframe->frequency;
-	c->channels = 2;
+	c->ch_layout.nb_channels = 2;
 	c->sample_fmt = AV_SAMPLE_FMT_S16;
 
     /* open it */
@@ -204,7 +218,7 @@ static int encode_mp2_audio(audio_frame_t *aframe, uint8_t *buffer, int bufsize)
 
 	/* the codec gives us the frame size, in samples */
 	frame_size = c->frame_size;
-	samples = static_cast<short*>(malloc(frame_size * 2 * c->channels));
+	samples = static_cast<short*>(malloc(frame_size * 2 * c->ch_layout.nb_channels));
 	
 	/* create samples for a single blank frame */
 	for (j=0;j<frame_size;j++) {

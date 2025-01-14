@@ -29,16 +29,17 @@
  *
  */
 
-#include "scanwizardconfig.h"
-#include "channelscanner_gui.h"
-#include "scanwizard.h"
+#include <utility>
 
-#include "channelimporter.h"
-#include "mythlogging.h"
-#include "scaninfo.h"
+#include "libmythbase/mythlogging.h"
+
+#include "channelscan/channelimporter.h"
+#include "channelscan/channelscanner_gui.h"
+#include "channelscan/scaninfo.h"
+#include "channelscan/scanwizardconfig.h"
+#include "scanwizard.h"
 #include "sourceutil.h"
 #include "videosource.h"
-#include <utility>
 
 #define LOC QString("SWiz: ")
 
@@ -71,7 +72,7 @@ void ScanWizard::Scan()
     if (scantype == ScanTypeSetting::DVBUtilsImport)
     {
         m_scannerPane->ImportDVBUtils(sourceid, m_lastHWCardType,
-                                    GetFilename());
+                                      GetFilename());
     }
     else if (scantype == ScanTypeSetting::NITAddScan_DVBT)
     {
@@ -107,13 +108,19 @@ void ScanWizard::Scan()
     {
         do_scan = false;
         m_scannerPane->ImportVBox(cardid, inputname, sourceid,
-                                DoFreeToAirOnly(),
-                                GetServiceRequirements());
+                                  DoFreeToAirOnly(),
+                                  GetServiceRequirements());
     }
     else if (scantype == ScanTypeSetting::ExternRecImport)
     {
         do_scan = false;
         m_scannerPane->ImportExternRecorder(cardid, inputname, sourceid);
+    }
+    else if (scantype == ScanTypeSetting::HDHRImport)
+    {
+        do_scan = false;
+        m_scannerPane->ImportHDHR(cardid, inputname, sourceid,
+                                  GetServiceRequirements());
     }
     else if (scantype == ScanTypeSetting::IPTVImportMPTS)
     {
@@ -209,7 +216,7 @@ void ScanWizard::SetInput(const QString &cardid_inputname)
     // We need to check against the last capture card so that we don't
     // try and probe a card which is already open by scan()
     if ((m_lastHWCardID != cardid) ||
-        (m_lastHWCardType == CardUtil::ERROR_OPEN))
+        (m_lastHWCardType == CardUtil::INPUT_TYPES::ERROR_OPEN))
     {
         m_lastHWCardID    = cardid;
         QString subtype = CardUtil::ProbeSubTypeName(cardid);

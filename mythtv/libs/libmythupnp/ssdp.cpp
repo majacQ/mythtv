@@ -6,9 +6,10 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
+#include "ssdp.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -16,10 +17,12 @@
 #include <cstdlib>
 #include <thread> // for sleep_for
 
-#include "upnp.h"
-#include "mythmiscutil.h"
-#include "mythlogging.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
 
+#include "upnp.h"
 #include "upnptasksearch.h"
 #include "upnptaskcache.h"
 
@@ -75,10 +78,12 @@ SSDP::SSDP() :
 {
     LOG(VB_UPNP, LOG_NOTICE, "Starting up SSDP Thread..." );
 
-    Configuration *pConfig = UPnp::GetConfiguration();
+    {
+        auto config = XmlConfiguration();
 
-    m_nPort       = pConfig->GetValue("UPnP/SSDP/Port"      , SSDP_PORT      );
-    m_nSearchPort = pConfig->GetValue("UPnP/SSDP/SearchPort", SSDP_SEARCHPORT);
+        m_nPort       = config.GetValue("UPnP/SSDP/Port"      , SSDP_PORT      );
+        m_nSearchPort = config.GetValue("UPnP/SSDP/SearchPort", SSDP_SEARCHPORT);
+    }
 
     m_sockets[ SocketIdx_Search    ] =
         new MMulticastSocketDevice();
@@ -228,7 +233,7 @@ void SSDP::PerformSearch(const QString &sST, std::chrono::seconds timeout)
         LOG(VB_GENERAL, LOG_INFO,
             "SSDP::PerformSearch - did not write entire buffer.");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom() % 250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom(0, 250)));
 
     if ( pSocket->writeBlock( sRequest.data(),
                               sRequest.size(), address, SSDP_PORT ) != nSize)
@@ -381,11 +386,7 @@ void SSDP::ProcessData( MSocketDevice *pSocket )
         
         // ------------------------------------------------------------------
         QString     str          = QString(buffer.constData());
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList lines        = str.split("\r\n", QString::SkipEmptyParts);
-#else
         QStringList lines        = str.split("\r\n", Qt::SkipEmptyParts);
-#endif
         QString     sRequestLine = !lines.empty() ? lines[0] : "";
 
         if (!lines.isEmpty())
@@ -406,7 +407,7 @@ void SSDP::ProcessData( MSocketDevice *pSocket )
 
         QStringMap  headers;
 
-        for (const auto& sLine : qAsConst(lines))
+        for (const auto& sLine : std::as_const(lines))
         {
             QString sName  = sLine.section( ':', 0, 0 ).trimmed();
             QString sValue = sLine.section( ':', 1 );
@@ -463,11 +464,7 @@ void SSDP::ProcessData( MSocketDevice *pSocket )
 
 SSDPRequestType SSDP::ProcessRequestLine( const QString &sLine )
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList tokens = sLine.split(m_procReqLineExp, QString::SkipEmptyParts);
-#else
     QStringList tokens = sLine.split(m_procReqLineExp, Qt::SkipEmptyParts);
-#endif
 
     // ----------------------------------------------------------------------
     // if this is actually a response, then sLine's format will be:
@@ -531,8 +528,8 @@ bool SSDP::ProcessSearchRequest( const QStringMap &sHeaders,
     if ( sMAN                  != "\"ssdp:discover\"" ) return false;
     if ( sST.length()          == 0                   ) return false;
     if ( sMX.length()          == 0                   ) return false;
-    if ((nMX = std::chrono::seconds(sMX.toInt())) == 0s) return false;
-    if ( nMX                    < 0s                  ) return false;
+    nMX = std::chrono::seconds(sMX.toInt());
+    if ( nMX                   <= 0s                  ) return false;
 
     // ----------------------------------------------------------------------
     // Adjust timeout to be a random interval between 0 and MX (max of 120)
@@ -540,7 +537,7 @@ bool SSDP::ProcessSearchRequest( const QStringMap &sHeaders,
 
     nMX = std::clamp(nMX, 0s, 120s);
 
-    auto nNewMX = std::chrono::milliseconds(MythRandom()) % nMX;
+    auto nNewMX = std::chrono::milliseconds(MythRandom(0, (duration_cast<std::chrono::milliseconds>(nMX)).count()));
 
     // ----------------------------------------------------------------------
     // See what they are looking for...
@@ -615,7 +612,8 @@ bool SSDP::ProcessSearchResponse( const QStringMap &headers )
     if (nPos < 0)
         return false;
 
-    if ((nPos = sCache.indexOf("=", nPos)) < 0)
+    nPos = sCache.indexOf("=", nPos);
+    if (nPos < 0)
         return false;
 
     auto nSecs = std::chrono::seconds(sCache.mid( nPos+1 ).toInt());
@@ -653,7 +651,8 @@ bool SSDP::ProcessNotify( const QStringMap &headers )
         if (nPos < 0)
             return false;
 
-        if ((nPos = sCache.indexOf("=", nPos)) < 0)
+        nPos = sCache.indexOf("=", nPos);
+        if (nPos < 0)
             return false;
 
         auto nSecs = std::chrono::seconds(sCache.mid( nPos+1 ).toInt());
@@ -691,8 +690,7 @@ SSDPExtension::SSDPExtension( int nServicePort , const QString &sSharePath)
     m_nServicePort(nServicePort)
 {
     m_nSupportedMethods |= (RequestTypeMSearch | RequestTypeNotify);
-    m_sUPnpDescPath = UPnp::GetConfiguration()->GetValue( "UPnP/DescXmlPath",
-                                                 m_sSharePath );
+    m_sUPnpDescPath = XmlConfiguration().GetValue("UPnP/DescXmlPath", m_sSharePath);
 }
 
 /////////////////////////////////////////////////////////////////////////////

@@ -3,7 +3,7 @@ include ( ../../version.pro )
 include ( ../programs-libs.pro )
 
 QT += network xml sql widgets
-contains(QT_MAJOR_VERSION, 5): QT += script
+using_qtscript: QT += script
 mingw | win32-msvc* {
    # script debugger currently only enabled for WIN32 builds
    QT += scripttools
@@ -48,14 +48,14 @@ HEADERS += videoplayercommand.h         videopopups.h
 HEADERS += videofilter.h                videolist.h
 HEADERS += videoplayersettings.h        videodlg.h
 HEADERS += videoglobalsettings.h        upnpscanner.h
-HEADERS += commandlineparser.h          idlescreen.h
+HEADERS += mythfrontend_commandlineparser.h          idlescreen.h
 HEADERS += gallerythumbview.h           galleryslideview.h
 HEADERS += galleryconfig.h              galleryviews.h
 HEADERS += galleryslide.h               gallerytransitions.h
 HEADERS += galleryinfo.h                prevreclist.h
 HEADERS += settingshelper.h
 
-SOURCES += main.cpp playbackbox.cpp viewscheduled.cpp audiogeneralsettings.cpp
+SOURCES += mythfrontend.cpp playbackbox.cpp viewscheduled.cpp audiogeneralsettings.cpp
 SOURCES += globalsettings.cpp manualschedule.cpp programrecpriority.cpp
 SOURCES += channelrecpriority.cpp statusbox.cpp networkcontrol.cpp
 SOURCES += mediarenderer.cpp mythfexml.cpp playbackboxlistitem.cpp
@@ -74,7 +74,7 @@ SOURCES += videoplayercommand.cpp       videopopups.cpp
 SOURCES += videofilter.cpp              videolist.cpp
 SOURCES += videoplayersettings.cpp      videodlg.cpp
 SOURCES += videoglobalsettings.cpp      upnpscanner.cpp
-SOURCES += commandlineparser.cpp        idlescreen.cpp
+SOURCES += mythfrontend_commandlineparser.cpp        idlescreen.cpp
 SOURCES += gallerythumbview.cpp         galleryslideview.cpp
 SOURCES += galleryconfig.cpp            galleryviews.cpp
 SOURCES += galleryslide.cpp             gallerytransitions.cpp
@@ -84,8 +84,14 @@ HEADERS += serviceHosts/frontendServiceHost.h
 HEADERS += services/frontend.h
 SOURCES += services/frontend.cpp
 
+HEADERS += services/mythfrontendservice.h
+SOURCES += services/mythfrontendservice.cpp
+
 HEADERS += progdetails.h proginfolist.h
 SOURCES += progdetails.cpp proginfolist.cpp
+
+HEADERS += playbackstate.h
+SOURCES += playbackstate.cpp
 
 macx {
     mac_bundle {
@@ -111,7 +117,6 @@ win32 : !debug {
 }
 
 using_x11:DEFINES += USING_X11
-using_xrandr:DEFINES += USING_XRANDR
 using_opengl:DEFINES += USING_OPENGL
 using_vdpau:DEFINES += USING_VDPAU
 using_vaapi:using_opengl:DEFINES += USING_VAAPI
@@ -130,52 +135,6 @@ using_libdns_sd {
 }
 
 android {
-
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libbluray.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicudata65.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libexiv2.14.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfreetype.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfribidi.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libiconv.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libass.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libtag.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libxml2.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfontconfig.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)liblzo2.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicuuc65.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicui18n65.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)mariadb/libmariadb.so
-
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libexiv2.14.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)liblzo2.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicudata65.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicui18n65.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libicuuc65.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libbluray.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libxml2.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfreetype.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)mariadb/libmariadb.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfontconfig.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libtag.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libfribidi.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libass.so
-    #ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libiconv.so
-
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythavutil.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythpostproc.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythavfilter.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythswresample.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythswscale.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythavcodec.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIBCOMMON)libmythavformat.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythbase-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythui-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythservicecontracts-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythupnp-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmyth-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythtv-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythmetadata-$${LIBVERSION}.so
-    ANDROID_EXTRA_LIBS += $$(MYTHINSTALLLIB)libmythprotoserver-$${LIBVERSION}.so
-
-    ANDROID_PACKAGE_SOURCE_DIR += $$(MYTHPACKAGEBASE)/android-package-source
+    message( myth android lib include $$(ANDROID_QT_DEPENDENCY_INCLUDE) )
+    include ( $$(ANDROID_QT_DEPENDENCY_INCLUDE) )
 }

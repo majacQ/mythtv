@@ -3,16 +3,20 @@
 #ifndef REMOTEAVFORMATCONTEXT_H
 #define REMOTEAVFORMATCONTEXT_H
 
+// C++
 #include <iostream>
+
+// Qt
 #include <QString>
 
-#include <remotefile.h>
-#include <mythlogging.h>
+// MythTV
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/remotefile.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
-#include "libavutil/opt.h"
+#include <libavutil/opt.h>
 }
 
 class RemoteAVFormatContext
@@ -69,7 +73,7 @@ class RemoteAVFormatContext
             probe_data.buf_size = m_rf->Read(m_buffer, BUFFER_SIZE);
             probe_data.buf = m_buffer;
 
-            AVInputFormat *fmt = av_probe_input_format(&probe_data, 1);
+            const AVInputFormat *fmt = av_probe_input_format(&probe_data, 1);
             if (!fmt)
             {
                 LOG(VB_GENERAL, LOG_ERR,  QString("RemoteAVFormatContext::Open: Failed to probe file: %1").arg(filename));
@@ -132,10 +136,12 @@ class RemoteAVFormatContext
     static int ReadFunc(void *opaque, uint8_t *buf, int buf_size)
     {
         auto *rf = reinterpret_cast< RemoteFile* >(opaque);
-        return rf->Read(buf, buf_size);
+        int len = rf->Read(buf, buf_size);
+        int ret = ((len == 0) && (buf_size > 0)) ? AVERROR_EOF : len;
+        return ret;
     }
 
-    static int WriteFunc(void */*opaque*/, uint8_t */*buf*/, int/*buf_size*/)
+    static int WriteFunc(void */*opaque*/, const uint8_t */*buf*/, int/*buf_size*/)
     {  return -1; }
 
     static int64_t SeekFunc(void *opaque, int64_t offset, int whence)

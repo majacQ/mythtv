@@ -1,28 +1,27 @@
-// ANSI C
-#include <cstdlib>
-
 // POSIX
 #include <unistd.h>
 
 // C++
 #include <chrono>
+#include <cstdlib>
 
 // qt
+#include <QEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
-#include <QEvent>
 
 // myth
-#include "exitcodes.h"
-#include "mythcontext.h"
-#include "mythdbcon.h"
-#include "lcddevice.h"
-#include "tv.h"
-#include "compat.h"
-#include "mythdirs.h"
-#include "remoteutil.h"
-#include "mythsystemlegacy.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/lcddevice.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythtv/tv.h"
 
+// mythwelcome
 #include "welcomedialog.h"
 #include "welcomesettings.h"
 
@@ -137,7 +136,7 @@ void WelcomeDialog::checkAutoStart(void)
 
 void WelcomeDialog::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(e);
         if (me == nullptr)
@@ -233,7 +232,7 @@ bool WelcomeDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -293,7 +292,9 @@ bool WelcomeDialog::keyPressEvent(QKeyEvent *event)
             myth_system(mythtv_setup + logPropagateArgs);
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -365,7 +366,9 @@ void WelcomeDialog::updateScreen(void)
                        MythDate::toString(tuner.endTime, MythDate::kTime));
         }
         else
+        {
             status = tr("There are no recordings currently taking place");
+        }
 
         m_recordingText->SetText(status);
 
@@ -395,7 +398,9 @@ void WelcomeDialog::updateScreen(void)
                 m_screenScheduledNo = 0;
         }
         else
+        {
             status = tr("There are no scheduled recordings");
+        }
 
         m_scheduledText->SetText(status);
     }
@@ -569,7 +574,9 @@ bool WelcomeDialog::checkConnectionToServer(void)
             updateAll();
         }
         else
+        {
            updateScreen();
+        }
     }
 
     if (bRes)
@@ -681,7 +688,7 @@ void WelcomeDialog::shutdownNow(void)
 
         int add = gCoreContext->GetNumSetting("StartupSecsBeforeRecording", 240);
         if (add)
-            restarttime = restarttime.addSecs((-1) * add);
+            restarttime = restarttime.addSecs((-1LL) * add);
 
         QString wakeup_timeformat = gCoreContext->GetSetting("WakeupTimeFormat",
                                                             "yyyy-MM-ddThh:mm");
@@ -698,8 +705,10 @@ void WelcomeDialog::shutdownNow(void)
                 );
         }
         else
+        {
             setwakeup_cmd.replace(
                 "$time", restarttime.toLocalTime().toString(wakeup_timeformat));
+        }
 
         if (!setwakeup_cmd.isEmpty())
         {

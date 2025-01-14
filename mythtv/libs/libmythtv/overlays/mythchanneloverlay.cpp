@@ -2,11 +2,11 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "mythlogging.h"
-#include "mythdialogbox.h"
-#include "mythuibutton.h"
-#include "tv_play.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythuibutton.h"
 #include "mythchanneloverlay.h"
+#include "tv_play.h"
 
 #define LOC QString("ChannelEdit: ")
 
@@ -87,7 +87,7 @@ bool MythChannelOverlay::keyPressEvent(QKeyEvent *Event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         if (action == "ESCAPE" )
         {
             SendResult(3);

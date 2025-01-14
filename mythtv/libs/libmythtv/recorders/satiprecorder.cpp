@@ -3,13 +3,14 @@
 #include <thread>
 
 // MythTV includes
-#include "tsstreamdata.h"
-#include "satipstreamhandler.h"
-#include "satiprecorder.h"
-#include "satipchannel.h"
+#include "libmythbase/mythlogging.h"
+
 #include "io/mythmediabuffer.h"
+#include "mpeg/tsstreamdata.h"
+#include "satipchannel.h"
+#include "satiprecorder.h"
+#include "satipstreamhandler.h"
 #include "tv_rec.h"
-#include "mythlogging.h"
 
 #define LOC QString("SatIPRec[%1]: ").arg(m_inputId)
 
@@ -18,6 +19,7 @@ SatIPRecorder::SatIPRecorder(TVRec *rec, SatIPChannel *channel)
     , m_channel(channel)
     , m_inputId(rec->GetInputId())
 {
+    LOG(VB_RECORD, LOG_INFO, LOC + QString("ctor %1").arg(m_channel->GetDevice()));
 }
 
 bool SatIPRecorder::Open(void)
@@ -32,7 +34,7 @@ bool SatIPRecorder::Open(void)
 
     if (m_channel->GetFormat().compare("MPTS") == 0)
     {
-        // MPTS only.  Use TSStreamData to write out unfiltered data.
+        // MPTS only. Use TSStreamData to write out unfiltered data.
         LOG(VB_RECORD, LOG_INFO, LOC + "Using TSStreamData");
         SetStreamData(new TSStreamData(m_inputId));
         m_recordMptsOnly = true;
@@ -73,7 +75,6 @@ void SatIPRecorder::run(void)
 {
     LOG(VB_RECORD, LOG_INFO, LOC + "run -- begin");
 
-    /* Create video socket. */
     if (!Open())
     {
         m_error = "Failed to open SatIPRecorder device";
@@ -148,6 +149,7 @@ void SatIPRecorder::run(void)
     m_recordingWait.wakeAll();
 
     LOG(VB_RECORD, LOG_INFO, LOC + "run -- end");
+    LOG(VB_GENERAL, LOG_INFO, LOC + QString("< %1").arg(__func__));
 }
 
 bool SatIPRecorder::PauseAndWait(std::chrono::milliseconds timeout)
@@ -181,15 +183,4 @@ bool SatIPRecorder::PauseAndWait(std::chrono::milliseconds timeout)
 QString SatIPRecorder::GetSIStandard(void) const
 {
     return m_channel->GetSIStandard();
-}
-
-void SatIPRecorder::SetOptionsFromProfile(RecordingProfile *profile,
-                                          const QString &videodev,
-                                          const QString &/*audiodev*/,
-                                          const QString &/*vbidev*/)
-{
-    // We don't want to call DTVRecorder::SetOptionsFromProfile() since
-    // we do not have a "recordingtype" in our profile.
-    DTVRecorder::SetOption("videodevice", videodev);
-    SetIntOption(profile, "recordmpts");
 }

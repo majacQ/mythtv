@@ -17,8 +17,6 @@
  * along with MythTV. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "prevreclist.h"
-
 // C/C++
 #include <algorithm>
 #include <deque>                        // for _Deque_iterator, operator-, etc
@@ -29,22 +27,23 @@
 #include <QString>
 
 //MythTV
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythmiscutil.h"
-#include "xmlparsebase.h"
-#include "recordinginfo.h"
-#include "recordingrule.h"
-#include "scheduledrecording.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/stringutil.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythtv/scheduledrecording.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuiutils.h"      // for UIUtilE, UIUtilW
+#include "libmythui/xmlparsebase.h"
 
-// MythUI
-#include "mythuitext.h"
-#include "mythuibuttonlist.h"
-#include "mythuibutton.h"
-#include "mythscreenstack.h"
-#include "mythmainwindow.h"
-#include "mythuiutils.h"                // for UIUtilE, UIUtilW
-#include "mythdialogbox.h"
+// MythFrontend
+#include "prevreclist.h"
 
 #define LOC      QString("PrevRecordedList: ")
 
@@ -167,20 +166,14 @@ void PrevRecordedList::Load(void)
     QCoreApplication::postEvent(this, slce);
 }
 
-static bool comp_sorttitle_lt(
-    const ProgramInfo *a, const ProgramInfo *b)
+static bool comp_sorttitle_lt(const ProgramInfo *a, const ProgramInfo *b)
 {
-    QString a_st = a->GetSortTitle();
-    QString b_st = b->GetSortTitle();
-    return naturalCompare(a_st,b_st) < 0;
+    return StringUtil::naturalSortCompare(a->GetSortTitle(), b->GetSortTitle());
 }
 
-static bool comp_sorttitle_lt_rev(
-    const ProgramInfo *a, const ProgramInfo *b)
+static bool comp_sorttitle_lt_rev(const ProgramInfo *a, const ProgramInfo *b)
 {
-    QString a_st = a->GetSortTitle();
-    QString b_st = b->GetSortTitle();
-    return naturalCompare(b_st, a_st) < 0;
+    return StringUtil::naturalSortCompare(b->GetSortTitle(), a->GetSortTitle());
 }
 
 static bool comp_sortdate_lt(
@@ -272,11 +265,7 @@ bool PrevRecordedList::LoadDates(void)
         int month(query.value(1).toInt());
         program = new ProgramInfo();
         QDate startdate(year,month,1);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QDateTime starttime(startdate);
-#else
         QDateTime starttime = startdate.startOfDay();
-#endif
         program->SetRecordingStartTime(starttime);
         QString date = QString("%1/%2")
             .arg(year,4,10,QChar('0')).arg(month,2,10,QChar('0'));
@@ -333,7 +322,9 @@ void PrevRecordedList::UpdateList(MythUIButtonList *bnList,
                 state = "disabled";
         }
         else
+        {
             infoMap["buttontext"] = infoMap["title"];
+        }
 
         item->SetTextFromMap(infoMap, state);
     }
@@ -420,7 +411,7 @@ void PrevRecordedList::LoadShowsByTitle(void)
     MSqlBindings bindings;
     QString sql = " AND oldrecorded.title = :TITLE " + m_where;
     uint selected = m_titleList->GetCurrentPos();
-    if (selected < m_titleData.size())
+    if (selected < m_titleData.size() && (m_titleData[selected] != nullptr))
         bindings[":TITLE"] = m_titleData[selected]->GetTitle();
     else
         bindings[":TITLE"] = "";
@@ -434,6 +425,12 @@ void PrevRecordedList::LoadShowsByDate(void)
 {
     MSqlBindings bindings;
     int selected = m_titleList->GetCurrentPos();
+    if (m_titleData[selected] == nullptr)
+    {
+        LOG(VB_GENERAL, LOG_ERR, LOC +
+            QString("Invalid selection in title data: %1").arg(selected));
+        return;
+    }
     QString sortTitle = m_titleData[selected]->GetSortTitle();
     QStringList dateParts = sortTitle.split('/');
     if (dateParts.size() != 2)
@@ -483,7 +480,7 @@ bool PrevRecordedList::keyPressEvent(QKeyEvent *e)
     bool needUpdate = false;
     for (uint i = 0; i < uint(actions.size()) && !handled; ++i)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "CUSTOMEDIT")

@@ -9,14 +9,14 @@
 #include <QStringList>
 
 // MythTV headers
-#include "mythuistatetype.h"
-#include "mythscreentype.h"
-#include "mythdialogbox.h"
-#include "mythuibutton.h"
-#include "audiooutput.h"
-#include "mythcontext.h"
-#include "standardsettings.h"
-#include "mthread.h"
+#include "libmyth/audio/audiooutput.h"
+#include "libmyth/mythcontext.h"
+#include "libmythui/standardsettings.h"
+#include "libmythbase/mthread.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythscreentype.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuistatetype.h"
 
 class AudioDeviceComboBox;
 class AudioTest;
@@ -141,7 +141,7 @@ class ChannelChangedEvent : public QEvent
     QString m_channel;
     bool    m_fulltest;
 
-    static Type kEventType;
+    static const Type kEventType;
 };
 
 class AudioTestThread : public MThread

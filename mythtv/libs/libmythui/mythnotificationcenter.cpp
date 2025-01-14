@@ -14,28 +14,27 @@
 #include <QTimer>
 
 // MythTV headers
-#include "mythcorecontext.h"
-#include "mythmainwindow.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
 
+#include "mythmainwindow.h"
 #include "mythnotificationcenter.h"
 #include "mythnotificationcenter_private.h"
-
 #include "mythpainter.h"
 #include "mythscreenstack.h"
 #include "mythscreentype.h"
 #include "mythuiimage.h"
-#include "mythuitext.h"
 #include "mythuiprogressbar.h"
-#include "mythdate.h"
+#include "mythuitext.h"
 
 #define LOC QString("NotificationCenter: ")
 
-#define HGAP 5
+static constexpr int8_t HGAP { 5 };
 static constexpr std::chrono::milliseconds DEFAULT_DURATION { 5s };
 
 //// MythNotificationCenterEvent
 
-QEvent::Type MythNotificationCenterEvent::kEventType =
+const QEvent::Type MythNotificationCenterEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 //// class MythNotificationScreenStack
@@ -92,7 +91,7 @@ void MythNotificationScreenStack::PopScreen(MythScreenType *screen, bool allowFa
 
     if (!m_children.isEmpty())
     {
-        for (auto *draw : qAsConst(m_drawOrder))
+        for (auto *draw : std::as_const(m_drawOrder))
         {
             if (draw != screen && !draw->IsDeleting())
             {
@@ -212,15 +211,15 @@ void MythNotificationScreen::SetNotification(MythNotification &notification)
 
     m_type = notification.type();
 
-    if (m_type == MythNotification::Error   ||
-        m_type == MythNotification::Warning ||
-        m_type == MythNotification::Check ||
-        m_type == MythNotification::Busy)
+    if (m_type == MythNotification::kError   ||
+        m_type == MythNotification::kWarning ||
+        m_type == MythNotification::kCheck ||
+        m_type == MythNotification::kBusy)
     {
         m_update |= kImage;
         update = false;
     }
-    else if (m_type == MythNotification::Update)
+    else if (m_type == MythNotification::kUpdate)
     {
         update = true;
     }
@@ -499,21 +498,21 @@ void MythNotificationScreen::SetErrorState(void) const
     if (!m_errorState)
         return;
 
-    const char *state = "ok";
+    const char *state {nullptr};
 
-    if (m_type == MythNotification::Error)
+    if (m_type == MythNotification::kError)
     {
         state = "error";
     }
-    else if (m_type == MythNotification::Warning)
+    else if (m_type == MythNotification::kWarning)
     {
         state = "warning";
     }
-    else if (m_type == MythNotification::Check)
+    else if (m_type == MythNotification::kCheck)
     {
         state = "check";
     }
-    else if (m_type == MythNotification::Busy)
+    else if (m_type == MythNotification::kBusy)
     {
         state = "busy";
     }
@@ -599,26 +598,25 @@ void MythNotificationScreen::UpdatePlayback(float progress, const QString &text)
 void MythNotificationScreen::UpdateFrom(const MythNotificationScreen &s)
 {
     // check if anything has changed
-    m_refresh = !(
-                  m_id == s.m_id &&
-                  m_image == s.m_image &&
-                  m_imagePath == s.m_imagePath &&
-                  m_title == s.m_title &&
-                  m_origin == s.m_origin &&
-                  m_description == s.m_description &&
-                  m_extra == s.m_extra &&
-                  m_duration == s.m_duration &&
-                  m_progress == s.m_progress &&
-                  m_progresstext == s.m_progresstext &&
-                  m_content == s.m_content &&
-                  m_fullscreen == s.m_fullscreen &&
-                  m_expiry == s.m_expiry &&
-                  m_index == s.m_index &&
-                  m_style == s.m_style &&
-                  m_visibility == s.m_visibility &&
-                  m_priority == s.m_priority &&
-                  m_type == s.m_type
-                  );
+    m_refresh =   m_id != s.m_id ||
+                  m_image != s.m_image ||
+                  m_imagePath != s.m_imagePath ||
+                  m_title != s.m_title ||
+                  m_origin != s.m_origin ||
+                  m_description != s.m_description ||
+                  m_extra != s.m_extra ||
+                  m_duration != s.m_duration ||
+                  m_progress != s.m_progress ||
+                  m_progresstext != s.m_progresstext ||
+                  m_content != s.m_content ||
+                  m_fullscreen != s.m_fullscreen ||
+                  m_expiry != s.m_expiry ||
+                  m_index != s.m_index ||
+                  m_style != s.m_style ||
+                  m_visibility != s.m_visibility ||
+                  m_priority != s.m_priority ||
+                  m_type != s.m_type
+                  ;
 
     if (m_refresh)
     {
@@ -652,7 +650,7 @@ void MythNotificationScreen::UpdateFrom(const MythNotificationScreen &s)
 void MythNotificationScreen::AdjustYPosition(void)
 {
     MythPoint point = m_position;
-    point.setY(m_position.getY().toInt() + (GetHeight() + HGAP) * m_index);
+    point.setY(m_position.getY().toInt() + ((GetHeight() + HGAP) * m_index));
 
     if (point == GetPosition())
         return;
@@ -731,7 +729,7 @@ bool MythNotificationScreen::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
 
         if (action == "ESCAPE")
         {
@@ -773,7 +771,7 @@ NCPrivate::~NCPrivate()
     DeleteAllScreens();
 
     // Delete all outstanding queued notifications
-    for (MythNotification *n : qAsConst(m_notifications))
+    for (MythNotification *n : std::as_const(m_notifications))
     {
         delete n;
     }
@@ -886,7 +884,7 @@ bool NCPrivate::Queue(const MythNotification &notification)
             // refuse all notification updates
             if (m_suspended.contains(id))
             {
-                if (notification.type() == MythNotification::Update)
+                if (notification.type() == MythNotification::kUpdate)
                     return false;
                 // got something else than an update, remove it from the
                 // suspended list
@@ -912,7 +910,7 @@ void NCPrivate::ProcessQueue(void)
 
     DeleteAllScreens();
 
-    for (MythNotification *n : qAsConst(m_notifications))
+    for (MythNotification *n : std::as_const(m_notifications))
     {
         int id = n->GetId();
         bool created = false;
@@ -1057,7 +1055,7 @@ void NCPrivate::UnRegister(void *from, int id, bool closeimemdiately)
 
 void NCPrivate::DeleteAllRegistrations(void)
 {
-    for (auto *registration : qAsConst(m_registrations))
+    for (auto *registration : std::as_const(m_registrations))
     {
         if (registration)
         {
@@ -1234,7 +1232,7 @@ void NCPrivate::GetNotificationScreens(QList<MythScreenType*> &_screens)
     m_screenStack->GetScreenList(screens);
 
     int position = 0;
-    for (auto *item : qAsConst(screens))
+    for (auto *item : std::as_const(screens))
     {
         auto *screen = qobject_cast<MythNotificationScreen*>(item);
         if (screen)
@@ -1381,7 +1379,7 @@ QDateTime MythNotificationCenter::ScreenExpiryTime(const MythScreenType *screen)
 {
     const auto *s = qobject_cast<const MythNotificationScreen*>(screen);
     if (!s)
-        return QDateTime();
+        return {};
     return s->m_expiry;
 }
 
@@ -1460,7 +1458,7 @@ void ShowNotification(bool  error,
                       const MythNotification::Priority priority,
                       const QString &style)
 {
-    ShowNotification(error ? MythNotification::Error : MythNotification::New,
+    ShowNotification(error ? MythNotification::kError : MythNotification::kNew,
                      msg, origin, detail, image, extra, progress_text, progress,
                      duration, fullscreen, visibility, priority, style);
 }
@@ -1490,15 +1488,15 @@ void ShowNotification(MythNotification::Type type,
     data["asal"] = detail;
     data["asfm"] = extra;
 
-    if (type == MythNotification::Error   ||
-        type == MythNotification::Warning ||
-        type == MythNotification::Check ||
-        type == MythNotification::Busy)
+    if (type == MythNotification::kError   ||
+        type == MythNotification::kWarning ||
+        type == MythNotification::kCheck ||
+        type == MythNotification::kBusy)
     {
         n = new MythNotification(type, data);
         if (duration != 0s &&
-            type != MythNotification::Check &&
-            type != MythNotification::Busy)
+            type != MythNotification::kCheck &&
+            type != MythNotification::kBusy)
         {
             // default duration for those type of notifications is 10s
             duration = 10s;

@@ -13,7 +13,7 @@
 
 using IntToBuf = QMap<int, const unsigned char*>;
 
-class MultipleStringStructure
+class MTV_PUBLIC MultipleStringStructure
 {
   public:
     explicit MultipleStringStructure(const unsigned char *data) : m_data(data)
@@ -302,7 +302,7 @@ class AC3AudioStreamDescriptor : public MPEGDescriptor
             return str;
         }
 #endif
-        return QString("TODO");
+        return {"TODO"};
     }
     // for(i=0; i<N; i++) {
     //   additional_info[i] Nx8 bslbf

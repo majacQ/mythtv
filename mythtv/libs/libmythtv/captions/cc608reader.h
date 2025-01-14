@@ -8,12 +8,11 @@
 #include <QMutex>
 
 // MythTV headers
-#include "captions/cc608decoder.h"
+#include "libmythtv/captions/cc608decoder.h"
+#include "libmythtv/mythtvexp.h"
 
-#include "mythtvexp.h"
-
-#define MAXTBUFFER 60
-#define MAXOUTBUFFERS (16 + 1)
+static constexpr int8_t MAXTBUFFER    { 60     };
+static constexpr int8_t MAXOUTBUFFERS { 16 + 1 };
 
 class CC608Text
 {

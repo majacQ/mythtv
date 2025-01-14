@@ -1,29 +1,44 @@
 #include "scanwizardconfig.h"
 
-#include "videosource.h"
 #include "cardutil.h"
-#include "frequencytablesetting.h"
-#include "channelutil.h"
-
 #include "channelscanmiscsettings.h"
+#include "channelutil.h"
+#include "frequencytablesetting.h"
 #include "inputselectorsetting.h"
 #include "scanwizard.h"
+#include "videosource.h"
 
+#include "paneall.h"
+#include "paneanalog.h"
+#include "paneatsc.h"
+#include "panedvbc.h"
 #include "panedvbs.h"
 #include "panedvbs2.h"
-#include "panedvbc.h"
 #include "panedvbt.h"
 #include "panedvbt2.h"
-#include "paneatsc.h"
-#include "paneanalog.h"
-#include "panesingle.h"
-#include "paneall.h"
 #include "panedvbutilsimport.h"
 #include "paneexistingscanimport.h"
+#include "panesingle.h"
 
 #ifdef USING_SATIP
-#include "satiputils.h"
+#include "recorders/satiputils.h"
 #endif
+
+// Update default tuning parameters from reference transponder
+void PaneDVBS2::SetTuningParameters(StandardSetting *setting)
+{
+  QString sat = setting->getValue();
+  QString frequency = m_transponder->getFrequency(sat);
+  if (!frequency.isEmpty())
+  {
+    setFrequency(frequency.toUInt());
+    setPolarity(m_transponder->getPolarity(sat));
+    setSymbolrate(m_transponder->getSymbolrate(sat));
+    setModulation(m_transponder->getModulation(sat));
+    setModSys(m_transponder->getModSys(sat));
+    setFec(m_transponder->getFec(sat));
+  }
+}
 
 void ScanWizard::SetupConfig(
     uint    default_sourceid,  uint default_cardid,
@@ -214,27 +229,30 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
 
     m_hwCardId     = cardid;
     QString subtype = CardUtil::ProbeSubTypeName(m_hwCardId);
-    int nCardType   = CardUtil::toInputType(subtype);
+    CardUtil::INPUT_TYPES nCardType   = CardUtil::toInputType(subtype);
 
 #ifdef USING_SATIP
-    if (nCardType == CardUtil::SATIP)
+    if (nCardType == CardUtil::INPUT_TYPES::SATIP)
     {
         nCardType = SatIP::toDVBInputType(CardUtil::GetVideoDevice(cardid));
     }
 #endif // USING_SATIP
 
+    const QString fullScanHelpTextDVBT2 = QObject::tr(
+        "For DVB-T/T2 and scan type 'Full Scan' select a country to get the correct set of frequencies.");
+
     clearSelections();
 
     switch (nCardType)
     {
-        case CardUtil::V4L:
-        case CardUtil::MPEG:
+        case CardUtil::INPUT_TYPES::V4L:
+        case CardUtil::INPUT_TYPES::MPEG:
             addSelection(tr("Full Scan"),
                          QString::number(FullScan_Analog), true);
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             return;
-        case CardUtil::DVBT:
+        case CardUtil::INPUT_TYPES::DVBT:
             addSelection(tr("Full Scan"),
                          QString::number(FullScan_DVBT), true);
             addSelection(tr("Full Scan (Tuned)"),
@@ -243,8 +261,9 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
 //                          QString::number(DVBUtilsImport));
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
+            setHelpText(fullScanHelpTextDVBT2);
             break;
-        case CardUtil::DVBT2:
+        case CardUtil::INPUT_TYPES::DVBT2:
             addSelection(tr("Full Scan"),
                          QString::number(FullScan_DVBT2), true);
             addSelection(tr("Full Scan (Tuned)"),
@@ -253,8 +272,9 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
 //                          QString::number(DVBUtilsImport));
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
+            setHelpText(fullScanHelpTextDVBT2);
             break;
-        case CardUtil::DVBS:
+        case CardUtil::INPUT_TYPES::DVBS:
             addSelection(tr("Full Scan (Tuned)"),
                          QString::number(NITAddScan_DVBS));
 //             addSelection(tr("Import channels.conf"),
@@ -262,7 +282,7 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             break;
-        case CardUtil::DVBS2:
+        case CardUtil::INPUT_TYPES::DVBS2:
             addSelection(tr("Full Scan (Tuned)"),
                          QString::number(NITAddScan_DVBS2));
 //             addSelection(tr("Import channels.conf"),
@@ -270,7 +290,7 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             break;
-        case CardUtil::QAM:
+        case CardUtil::INPUT_TYPES::QAM:  // QAM == DVBC
             addSelection(tr("Full Scan (Tuned)"),
                          QString::number(NITAddScan_DVBC));
             addSelection(tr("Full Scan"),
@@ -280,7 +300,7 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             break;
-        case CardUtil::ATSC:
+        case CardUtil::INPUT_TYPES::ATSC:
             addSelection(tr("Full Scan"),
                          QString::number(FullScan_ATSC), true);
 //             addSelection(tr("Import channels.conf"),
@@ -288,7 +308,7 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             break;
-        case CardUtil::HDHOMERUN:
+        case CardUtil::INPUT_TYPES::HDHOMERUN:
             if (CardUtil::HDHRdoesDVBC(CardUtil::GetVideoDevice(cardid)))
             {
                 addSelection(tr("Full Scan (Tuned)"),
@@ -302,36 +322,41 @@ void ScanTypeSetting::SetInput(const QString &cardids_inputname)
                              QString::number(FullScan_DVBT), true);
                 addSelection(tr("Full Scan (Tuned)"),
                              QString::number(NITAddScan_DVBT));
+                setHelpText(fullScanHelpTextDVBT2);
             }
             else
+            {
                 addSelection(tr("Full Scan"),
                              QString::number(FullScan_ATSC), true);
+            }
 //             addSelection(tr("Import channels.conf"),
 //                          QString::number(DVBUtilsImport));
+            addSelection(tr("HDHomeRun Channel Import"),
+                         QString::number(HDHRImport));
             addSelection(tr("Import existing scan"),
                          QString::number(ExistingScanImport));
             break;
-        case CardUtil::VBOX:
+        case CardUtil::INPUT_TYPES::VBOX:
             addSelection(tr("VBox Channel Import"),
                          QString::number(VBoxImport), true);
             return;
-        case CardUtil::FREEBOX:
+        case CardUtil::INPUT_TYPES::FREEBOX:
             addSelection(tr("M3U Import with MPTS"),
                          QString::number(IPTVImportMPTS), true);
             addSelection(tr("M3U Import"),
                          QString::number(IPTVImport), true);
             return;
-        case CardUtil::ASI:
+        case CardUtil::INPUT_TYPES::ASI:
             addSelection(tr("ASI Scan"),
                          QString::number(CurrentTransportScan), true);
             return;
-        case CardUtil::EXTERNAL:
+        case CardUtil::INPUT_TYPES::EXTERNAL:
             addSelection(tr("MPTS Scan"),
                          QString::number(CurrentTransportScan), true);
             addSelection(tr("Import from ExternalRecorder"),
                          QString::number(ExternRecImport), true);
             return;
-        case CardUtil::ERROR_PROBE:
+        case CardUtil::INPUT_TYPES::ERROR_PROBE:
             addSelection(tr("Failed to probe the card"),
                          QString::number(Error_Probe), true);
             return;

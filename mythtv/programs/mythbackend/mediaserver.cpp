@@ -8,33 +8,31 @@
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include "mediaserver.h"
+#include "libmythbase/mythconfig.h"
+
+// Qt
+#include <QNetworkInterface>
+#include <QNetworkProxy>
+#if CONFIG_QTSCRIPT
+#include <QScriptEngine>
+#endif
+
+// MythTV
+#ifdef USING_LIBDNS_SD
+#include "libmythbase/bonjourregister.h"
+#endif
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythupnp/htmlserver.h"
+
+// MythBackend
 #include "httpconfig.h"
 #include "internetContent.h"
-#include "mythdirs.h"
-#include "htmlserver.h"
-
-#include "upnpcdstv.h"
+#include "mediaserver.h"
 #include "upnpcdsmusic.h"
+#include "upnpcdstv.h"
 #include "upnpcdsvideo.h"
 
-#include <QScriptEngine>
-#include <QNetworkProxy>
-#include <QNetworkInterface>
-
-#include "serviceHosts/mythServiceHost.h"
-#include "serviceHosts/guideServiceHost.h"
-#include "serviceHosts/contentServiceHost.h"
-#include "serviceHosts/dvrServiceHost.h"
-#include "serviceHosts/channelServiceHost.h"
-#include "serviceHosts/videoServiceHost.h"
-#include "serviceHosts/musicServiceHost.h"
-#include "serviceHosts/captureServiceHost.h"
-#include "serviceHosts/imageServiceHost.h"
-
-#ifdef USING_LIBDNS_SD
-#include "bonjourregister.h"
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -51,28 +49,19 @@
 MediaServer::MediaServer(void) :
     m_sSharePath(GetShareDir())
 {
-    LOG(VB_UPNP, LOG_INFO, "MediaServer(): Begin");
-
-    // ----------------------------------------------------------------------
-    // Initialize Configuration class (Database for Servers)
-    // ----------------------------------------------------------------------
-
-    SetConfiguration( new DBConfiguration() );
-
-    // ----------------------------------------------------------------------
-    // Create mini HTTP Server
-    // ----------------------------------------------------------------------
-
-    LOG(VB_UPNP, LOG_INFO, "MediaServer(): End");
+    LOG(VB_UPNP, LOG_INFO, "MediaServer()");
 }
 
 void MediaServer::Init(bool bIsMaster, bool bDisableUPnp /* = false */)
 {
     LOG(VB_UPNP, LOG_INFO, "MediaServer::Init(): Begin");
 
-    int     nPort     = g_pConfig->GetValue( "BackendStatusPort", 6544 );
-    int     nSSLPort  = g_pConfig->GetValue( "BackendSSLPort", (g_pConfig->GetValue( "BackendStatusPort", 6544 ) + 10) );
-    int     nWSPort   = (g_pConfig->GetValue( "BackendStatusPort", 6544 ) + 5);
+    int nPort     = GetMythDB()->GetNumSetting("BackendStatusPort", 6544);
+    int nSSLPort  = GetMythDB()->GetNumSetting("BackendSSLPort", nPort + 10);
+    int nWSPort   = nPort + 5;
+    // UPNP port is now status port + 6 (default 6550)
+    nPort += 6;
+    nSSLPort += 6;
 
     auto *pHttpServer = new HttpServer();
 
@@ -107,8 +96,7 @@ void MediaServer::Init(bool bIsMaster, bool bDisableUPnp /* = false */)
         }
     }
 
-    QString sFileName = g_pConfig->GetValue( "upnpDescXmlPath",
-                                                m_sSharePath );
+    QString sFileName = GetMythDB()->GetSetting("upnpDescXmlPath", m_sSharePath);
 
     if ( bIsMaster )
         sFileName  += "devicemaster.xml";
@@ -136,17 +124,6 @@ void MediaServer::Init(bool bIsMaster, bool bDisableUPnp /* = false */)
     pHttpServer->RegisterExtension( new HttpConfig() );
     pHttpServer->RegisterExtension( new InternetContent   ( m_sSharePath ));
 
-    pHttpServer->RegisterExtension( new MythServiceHost   ( m_sSharePath ));
-    pHttpServer->RegisterExtension( new GuideServiceHost  ( m_sSharePath ));
-    pHttpServer->RegisterExtension( new ContentServiceHost( m_sSharePath ));
-    pHttpServer->RegisterExtension( new DvrServiceHost    ( m_sSharePath ));
-    pHttpServer->RegisterExtension( new ChannelServiceHost( m_sSharePath ));
-    pHttpServer->RegisterExtension( new VideoServiceHost  ( m_sSharePath ));
-    pHttpServer->RegisterExtension( new MusicServiceHost  ( m_sSharePath ));
-    pHttpServer->RegisterExtension( new CaptureServiceHost( m_sSharePath ));
-    pHttpServer->RegisterExtension( new ImageServiceHost  ( m_sSharePath ));
-
-
     // ------------------------------------------------------------------
     // Register Service Types with Scripting Engine
     //
@@ -156,28 +133,6 @@ void MediaServer::Init(bool bIsMaster, bool bDisableUPnp /* = false */)
     //          classes. - dblain
     // ------------------------------------------------------------------
 
-     QScriptEngine* pEngine = pHtmlServer->ScriptEngine();
-
-     pEngine->globalObject().setProperty("Myth"   ,
-         pEngine->scriptValueFromQMetaObject< ScriptableMyth    >() );
-     pEngine->globalObject().setProperty("Guide"  ,
-         pEngine->scriptValueFromQMetaObject< ScriptableGuide   >() );
-     pEngine->globalObject().setProperty("Content",
-         pEngine->scriptValueFromQMetaObject< ScriptableContent >() );
-     pEngine->globalObject().setProperty("Dvr"    ,
-         pEngine->scriptValueFromQMetaObject< ScriptableDvr     >() );
-     pEngine->globalObject().setProperty("Channel",
-         pEngine->scriptValueFromQMetaObject< ScriptableChannel >() );
-     pEngine->globalObject().setProperty("Video"  ,
-         pEngine->scriptValueFromQMetaObject< ScriptableVideo   >() );
-     pEngine->globalObject().setProperty("Music"  ,
-         pEngine->scriptValueFromQMetaObject< ScriptableVideo   >() );
-     pEngine->globalObject().setProperty("Capture"  ,
-         pEngine->scriptValueFromQMetaObject< ScriptableCapture  >() );
-     pEngine->globalObject().setProperty("Image"  ,
-         pEngine->scriptValueFromQMetaObject< ScriptableImage   >() );
-
-    // ------------------------------------------------------------------
 
     if (bDisableUPnp)
     {

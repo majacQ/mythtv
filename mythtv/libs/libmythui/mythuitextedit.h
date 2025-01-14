@@ -4,17 +4,19 @@
 #include <QString>
 #include <QClipboard>
 
-#include "mythtimer.h"
-#include "mythuitype.h"
-#include "mythvirtualkeyboard.h"
-#include "mythstorage.h"
+#include "libmythbase/mythstorage.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythui/mythuitype.h"
+#include "libmythui/mythvirtualkeyboard.h"
+
+class QInputMethodEvent;
 
 class MythFontProperties;
 class MythUIStateType;
 class MythUIImage;
 class MythUIText;
 
-enum InputFilter
+enum InputFilter : std::uint8_t
 {
     FilterNone = 0x0,
     FilterAlpha = 0x01,
@@ -39,6 +41,7 @@ class MUI_PUBLIC MythUITextEdit : public MythUIType, public StorageUser
 
     void Pulse(void) override; // MythUIType
     bool keyPressEvent(QKeyEvent *event) override; // MythUIType
+    bool inputMethodEvent(QInputMethodEvent *event) override; // MythUIType
     bool gestureEvent(MythGestureEvent *event) override; // MythUIType
     void Reset(void) override; // MythUIType
 
@@ -50,7 +53,8 @@ class MUI_PUBLIC MythUITextEdit : public MythUIType, public StorageUser
     void SetPassword(bool isPassword)  { m_isPassword = isPassword; }
     void SetMaxLength(int length);
 
-    enum MoveDirection { MoveLeft, MoveRight, MoveUp, MoveDown, MovePageUp, MovePageDown, MoveEnd };
+    enum MoveDirection : std::uint8_t
+                       { MoveLeft, MoveRight, MoveUp, MoveDown, MovePageUp, MovePageDown, MoveEnd };
     bool MoveCursor(MoveDirection moveDir);
 
     void SetKeyboardPosition(PopupPosition pos) { m_keyboardPosition = pos; }
@@ -83,28 +87,32 @@ class MUI_PUBLIC MythUITextEdit : public MythUIType, public StorageUser
     void CutTextToClipboard(void);
     void CopyTextToClipboard(void);
     void PasteTextFromClipboard(QClipboard::Mode mode = QClipboard::Clipboard);
+    bool UpdateTmpString(const QString &str);
 
-    bool m_initialized;
+    bool m_initialized                 { false };
 
-    int m_blinkInterval;
-    int m_cursorBlinkRate;
+    int m_blinkInterval                { 0 };
+    int m_cursorBlinkRate              { 40 };
     MythTimer m_lastKeyPress;
 
-    int m_maxLength;
+    int m_maxLength                    { 255 };
 
     QString m_message;
-    InputFilter m_filter;
-    int m_position;
+    InputFilter m_filter               { FilterNone };
+    int m_position                     { -1 };
 
-    bool m_isPassword;
+    bool m_isPassword                  { false };
 
-    PopupPosition m_keyboardPosition;
+    PopupPosition m_keyboardPosition   { VK_POSBELOWEDIT };
 
-    MythUIStateType *m_backgroundState;
-    MythUIImage *m_cursorImage;
-    MythUIText  *m_text;
+    MythUIStateType *m_backgroundState { nullptr };
+    MythUIImage *m_cursorImage         { nullptr };
+    MythUIText  *m_text                { nullptr };
 
-    int m_composeKey;
+    int m_composeKey                   { 0 };
+
+    bool m_isIMEinput                  { false };
+    QString m_messageBak;
 };
 
 #endif

@@ -1,6 +1,9 @@
 
-#include "mythcoreutil.h"
-#include "mythdate.h"
+ // MythTV
+#include "libmythbase/mythcoreutil.h"
+#include "libmythbase/mythdate.h"
+
+// MythFrontend
 #include "proginfolist.h"
 
 /*!
@@ -41,7 +44,9 @@ void ProgInfoList::Toggle(void)
         return;
     }
     else
+    {
         m_infoVisible = kLevel1;
+    }
 
     Clear();
 
@@ -95,7 +100,7 @@ void ProgInfoList::Display(const DataList& data)
     Clear();
 
     // Create buttons for each data pair
-    for (const auto & pi : qAsConst(data))
+    for (const auto & pi : std::as_const(data))
     {
         if (m_infoVisible != kNone && std::get<2>(pi) <= m_infoVisible)
             CreateButton(std::get<0>(pi), std::get<1>(pi));

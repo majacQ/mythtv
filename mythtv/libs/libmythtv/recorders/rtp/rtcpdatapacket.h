@@ -9,12 +9,14 @@
 #ifndef MythTV_rtcpdatapacket_h
 #define MythTV_rtcpdatapacket_h
 
+#include <limits> // workaround QTBUG-90395
+
 #include <QHostAddress>
 #include <QByteArray>
 #include <QtEndian>
 
+#include "libmythbase/mythlogging.h"
 #include "udppacket.h"
-#include "mythlogging.h"
 
 #define RTP_VERSION 2
 #define RTCP_RR     201

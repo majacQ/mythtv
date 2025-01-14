@@ -1,6 +1,7 @@
 #include "mythuianimation.h"
 #include "mythuitype.h"
 #include "mythmainwindow.h"
+#include "libmythbase/mythcorecontext.h"
 
 #include <QDomDocument>
 
@@ -48,7 +49,8 @@ QRect UIEffects::GetExtent(const QSize size) const
 
 void MythUIAnimation::Activate(void)
 {
-    m_active = true;
+    if (GetMythDB()->GetBoolSetting("SmoothTransitions", true))
+        m_active = true;
     setCurrentTime(0);
 }
 
@@ -100,7 +102,7 @@ void MythUIAnimation::IncrementCurrentTime(void)
         return;
 
     std::chrono::milliseconds current = MythDate::currentMSecsSinceEpochAsDuration();
-    std::chrono::milliseconds interval = std::min(current - m_lastUpdate, 50ms);
+    std::chrono::milliseconds interval = std::clamp(current - m_lastUpdate, 10ms, 50ms);
     m_lastUpdate = current;
 
     int offset = (direction() == Forward) ? interval.count() : -interval.count();
@@ -266,7 +268,9 @@ void MythUIAnimation::ParseSection(const QDomElement &element,
             parseZoom(effect, start, end);
         }
         else
+        {
             continue;
+        }
 
         auto* a = new MythUIAnimation(parent, trigger, type);
         a->setStartValue(start);

@@ -8,10 +8,12 @@
 */
 
 // c/c++
+#include <algorithm>
 #include <chrono> // for milliseconds
 #include <cmath>
 #include <cstdlib>
 #include <thread> // for sleep_for
+#include <utility>
 
 //qt
 #include <QCoreApplication>
@@ -20,29 +22,28 @@
 #include <QStringConverter>
 #endif
 #include <QTimer>
-#include <utility>
 
 // mythtv
-#include "mythcontext.h"
-#include "mythdbcon.h"
-#include "mythdate.h"
-#include "tv.h"
-#include "compat.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/lcddevice.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythtv/tv.h"
 
-//mythlcdserver
+// mythlcdserver
 #include "lcdprocclient.h"
 #include "lcdserver.h"
-#include "lcddevice.h"
 
-#define LCD_START_COL 3
+static constexpr uint8_t LCD_START_COL { 3 };
 
-#define LCD_VERSION_4 1
-#define LCD_VERSION_5 2
+static constexpr uint8_t LCD_VERSION_4 { 1 };
+static constexpr uint8_t LCD_VERSION_5 { 2 };
 
 static constexpr std::chrono::milliseconds LCD_TIME_TIME       { 3s };
 static constexpr std::chrono::milliseconds LCD_SCROLLLIST_TIME { 2s };
 
-int lcdStartCol = LCD_START_COL;
+uint8_t lcdStartCol = LCD_START_COL;
 
 LCDProcClient::LCDProcClient(LCDServer *lparent)
               : QObject(nullptr),
@@ -71,12 +72,7 @@ LCDProcClient::LCDProcClient(LCDServer *lparent)
         LOG(VB_GENERAL, LOG_INFO,
             "LCDProcClient: An LCDProcClient object now exists");
 
-#if QT_VERSION < QT_VERSION_CHECK(5,15,0)
-    connect(m_socket, qOverload<QAbstractSocket::SocketError>(&QAbstractSocket::error),
-            this, &LCDProcClient::veryBadThings);
-#else
     connect(m_socket, &QAbstractSocket::errorOccurred, this, &LCDProcClient::veryBadThings);
-#endif
     connect(m_socket, &QIODevice::readyRead, this, &LCDProcClient::serverSendingData);
 
     lcdStartCol = LCD_START_COL;
@@ -1009,7 +1005,7 @@ void LCDProcClient::scrollWidgets()
         return; // Weird...
 
     unsigned int len = 0;
-    for (const auto & item : qAsConst(*m_lcdTextItems))
+    for (const auto & item : std::as_const(*m_lcdTextItems))
     {
         if (item.getScroll())
         {
@@ -1403,7 +1399,9 @@ void LCDProcClient::beginScrollingMenuText()
             curItem->setScroll(true);
         }
         else
+        {
             curItem->setScroll(false);
+        }
     }
 
     // Can get segfaults if we try to start a timer thats already running. . .
@@ -1519,8 +1517,13 @@ void LCDProcClient::scrollMenuText()
     {
         LCDMenuItem *curItem = &(*it);
         ++it;
-        if (curItem->ItemName().length() > longest_line)
-            longest_line = curItem->ItemName().length();
+        longest_line = std::max(
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+            curItem->ItemName().length(),
+#else
+            static_cast<int>(curItem->ItemName().length()),
+#endif
+            longest_line);
 
         if ((int)curItem->getScrollPos() > max_scroll_pos)
             max_scroll_pos = curItem->getScrollPos();
@@ -1731,10 +1734,7 @@ void LCDProcClient::setVolumeLevel(float value)
 
     m_volumeLevel = value;
 
-    if ( m_volumeLevel < 0.0F)
-        m_volumeLevel = 0.0F;
-    if ( m_volumeLevel > 1.0F)
-        m_volumeLevel = 1.0F;
+    m_volumeLevel = std::clamp(m_volumeLevel, 0.0F, 1.0F);
 
     outputVolume();
 }
@@ -1803,7 +1803,7 @@ void LCDProcClient::dobigclock (void)
 
     // Add Hour 10's Digit
     aString = "widget_set Time d0 ";
-    aString += QString::number( m_lcdWidth/2 - 5 - xoffset) + " ";
+    aString += QString::number( (m_lcdWidth/2) - 5 - xoffset) + " ";
     if (toffset == 0)
         aString += "11";
     else
@@ -1812,25 +1812,25 @@ void LCDProcClient::dobigclock (void)
 
     // Add Hour 1's Digit
     aString = "widget_set Time d1 ";
-    aString += QString::number( m_lcdWidth/2 - 2 - xoffset) + " ";
+    aString += QString::number( (m_lcdWidth/2) - 2 - xoffset) + " ";
     aString += time.at(0 + toffset);
     sendToServer(aString);
 
     // Add the Colon
     aString = "widget_set Time sep ";
-    aString += QString::number( m_lcdWidth/2 + 1 - xoffset);
+    aString += QString::number( (m_lcdWidth/2) + 1 - xoffset);
     aString += " 10";   // 10 means: colon
     sendToServer(aString);
 
     // Add Minute 10's Digit
     aString = "widget_set Time d2 ";
-    aString += QString::number( m_lcdWidth/2 + 2 - xoffset) + " ";
+    aString += QString::number( (m_lcdWidth/2) + 2 - xoffset) + " ";
     aString += time.at(2 + toffset);
     sendToServer(aString);
 
     // Add Minute 1's Digit
     aString = "widget_set Time d3 ";
-    aString += QString::number( m_lcdWidth/2 + 5 - xoffset) + " ";
+    aString += QString::number( (m_lcdWidth/2) + 5 - xoffset) + " ";
     aString += time.at(3 + toffset);
     sendToServer(aString);
 
@@ -1891,14 +1891,18 @@ void LCDProcClient::dostdclock()
         aString += time + "\"";
         if ( m_timeFlash )
         {
-            aString = aString.remove(":");
+            aString = aString.replace(':', ' ');
             m_timeFlash = false;
         }
         else
+        {
             m_timeFlash = true;
+        }
     }
     else
+    {
         aString += " \"";
+    }
     sendToServer(aString);
 }
 
@@ -2019,7 +2023,9 @@ void LCDProcClient::outputRecStatus(void)
             sendToServer(aString);
         }
         else
+        {
             sendToServer("widget_set RecStatus progressBar 1 1 0");
+        }
 
         listTime = list.count() * LCD_SCROLLLIST_TIME * 2;
     }
@@ -2053,7 +2059,7 @@ QStringList LCDProcClient::formatScrollerText(const QString &text) const
     int lastSplit = 0;
     QString line = "";
 
-    for (auto x : qAsConst(text))
+    for (const auto& x : std::as_const(text))
     {
         if (separators.contains(x))
             lastSplit = line.length();
@@ -2131,7 +2137,9 @@ void LCDProcClient::outputMusic()
             outputLeftText("Music", aString, "infoWidget", m_lcdHeight );
         }
         else
+        {
             outputLeftText("Music", "        ", "infoWidget", m_lcdHeight );
+        }
 
         aString = "widget_set Music progressBar ";
         aString += QString::number(info_width + 1);
@@ -2159,24 +2167,29 @@ void LCDProcClient::outputChannel()
             outputCenteredText("Channel", m_channelTime, "timeWidget", 3);
     }
     else
+    {
         sendToServer("widget_set Channel progressBar 1 1 0");
+    }
 }
 
 void LCDProcClient::outputGeneric()
 {
     if ( m_lcdHeight > 1)
     {
-    QString aString;
-    aString = "widget_set Generic progressBar ";
-    aString += QString::number ( m_busyPos );
-    aString += " ";
-    aString += QString::number( m_lcdHeight );
-    aString += " ";
-    aString += QString::number((int)std::rint( m_genericProgress * m_lcdWidth *
-                                     m_cellWidth ));
-    sendToServer(aString);
-}
-    else sendToServer("widget_set Generic progressBar 1 1 0");
+        QString aString;
+        aString = "widget_set Generic progressBar ";
+        aString += QString::number ( m_busyPos );
+        aString += " ";
+        aString += QString::number( m_lcdHeight );
+        aString += " ";
+        aString += QString::number((int)std::rint( m_genericProgress * m_lcdWidth *
+                                                   m_cellWidth ));
+        sendToServer(aString);
+    }
+    else
+    {
+        sendToServer("widget_set Generic progressBar 1 1 0");
+    }
 }
 
 void LCDProcClient::outputVolume()
@@ -2388,7 +2401,7 @@ LCDProcClient::~LCDProcClient()
 
 void LCDProcClient::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(e);
         if (me == nullptr)

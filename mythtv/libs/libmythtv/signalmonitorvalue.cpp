@@ -1,8 +1,9 @@
 #include <algorithm>
 #include <utility>
 
+#include "libmythbase/mythlogging.h"
+
 #include "signalmonitorvalue.h"
-#include "mythlogging.h"
 
 bool SignalMonitorValue::run_static_init = true;
 QStringList SignalMonitorValue::ERROR_NO_CHANNEL;
@@ -82,7 +83,7 @@ SignalMonitorValue::SignalMonitorValue(QString _name,
 QString SignalMonitorValue::GetName(void) const
 {
     if (m_name.isNull())
-        return QString();
+        return {};
 
     return m_name;
 }
@@ -90,7 +91,7 @@ QString SignalMonitorValue::GetName(void) const
 QString SignalMonitorValue::GetShortName(void) const
 {
     if (m_noSpaceName.isNull())
-        return QString();
+        return {};
 
     return m_noSpaceName;
 }
@@ -115,12 +116,7 @@ bool SignalMonitorValue::Set(const QString& _name, const QString& _longString)
         return true;
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList vals = longString.split(" ", QString::SkipEmptyParts);
-#else
     QStringList vals = longString.split(" ", Qt::SkipEmptyParts);
-#endif
-
     if (8 != vals.size() || "(null)" == vals[0])
         return false;
 

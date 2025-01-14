@@ -15,7 +15,7 @@
 class MSqlQuery;
 class VideoMetadataListManager;
 
-enum { VIDEO_YEAR_DEFAULT = 1895 };
+static constexpr uint16_t VIDEO_YEAR_DEFAULT { 1895 };
 
 const QString VIDEO_SUBTITLE_DEFAULT = "";
 
@@ -90,8 +90,15 @@ class META_PUBLIC VideoMetadata
     bool sortBefore(const VideoMetadata &rhs) const;
 
     void toMap(InfoMap &metadataMap);
+    QString GetText(const QString& name) const;
     void GetStateMap(InfoMap &stateMap) const;
+    QString GetState(const QString& name) const;
     void GetImageMap(InfoMap &imageMap);
+    QString GetImage(const QString& name) const;
+
+    static QString MetadataGetTextCb(const QString& name, void *data);
+    static QString MetadataGetImageCb(const QString& name, void *data);
+    static QString MetadataGetStateCb(const QString& name, void *data);
 
     const QString &GetPrefix() const;
     void SetPrefix(const QString &prefix);

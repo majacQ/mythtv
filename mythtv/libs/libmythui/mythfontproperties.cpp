@@ -1,6 +1,5 @@
 
 #include "mythfontproperties.h"
-#include "mythcorecontext.h"
 
 #include <cmath>
 
@@ -11,8 +10,9 @@
 #include <QRect>
 #include <QRegularExpression>
 
-#include "mythlogging.h"
-#include "mythdb.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
 
 #include "mythuihelper.h"
 #include "mythmainwindow.h"
@@ -20,7 +20,7 @@
 
 #define LOC      QString("MythFontProperties: ")
 
-#define KEEP_OLD_NAMES 1
+#define KEEP_OLD_NAMES 1 // NOLINT(cppcoreguidelines-macro-usage)
 
 QMutex MythFontProperties::s_zoomLock;
 uint MythFontProperties::s_zoomPercent = 0;
@@ -447,9 +447,10 @@ MythFontProperties *MythFontProperties::ParseFromXml(
 
     newFont->Unfreeze();
 
+    static const QRegularExpression re { "\\[.*]" };
     QFontInfo fi(newFont->m_face);
     QString fi_family =
-        fi.family().remove(QRegularExpression("\\[.*]")).trimmed();
+        fi.family().remove(re).trimmed();
     if (newFont->m_face.family() != fi_family)
     {
         VERBOSE_XML(VB_GENERAL, LOG_ERR, filename, element,
@@ -466,7 +467,7 @@ MythFontProperties *MythFontProperties::ParseFromXml(
 #else
             QStringList families = QFontDatabase::families();
 #endif
-            for (const QString & family : qAsConst(families))
+            for (const QString & family : std::as_const(families))
             {
                 QStringList family_styles;
 
@@ -476,7 +477,7 @@ MythFontProperties *MythFontProperties::ParseFromXml(
 #else
                 QStringList styles = QFontDatabase::styles(family);
 #endif
-                for (const QString & style : qAsConst(styles))
+                for (const QString & style : std::as_const(styles))
                 {
                     family_styles << style + ":";
 
@@ -487,7 +488,7 @@ MythFontProperties *MythFontProperties::ParseFromXml(
 #else
                     QList<int> pointList = QFontDatabase::smoothSizes(family, style);
 #endif
-                    for (int points : qAsConst(pointList))
+                    for (int points : std::as_const(pointList))
                     {
                         if (tic)
                             sizes += ",";

@@ -9,8 +9,8 @@ extern "C" {
 
 
 AudioBuffer::AudioBuffer()
+  : m_buffer((uint8_t *)av_malloc(ABLOCK_SIZE))
 {
-    m_buffer    = (uint8_t *)av_malloc(ABLOCK_SIZE);
     if (m_buffer == nullptr)
     {
         throw std::bad_alloc();
@@ -101,7 +101,7 @@ void AudioReencodeBuffer::SetEffDsp(int dsprate)
 void AudioReencodeBuffer::Reset(void)
 {
     QMutexLocker locker(&m_bufferMutex);
-    for (AudioBuffer *ab : qAsConst(m_bufferList))
+    for (AudioBuffer *ab : std::as_const(m_bufferList))
     {
         delete ab;
     }
@@ -225,7 +225,7 @@ long long AudioReencodeBuffer::GetSamples(std::chrono::milliseconds time)
         return 0;
 
     long long samples = 0;
-    for (auto *ab : qAsConst(m_bufferList))
+    for (auto *ab : std::as_const(m_bufferList))
     {
         if (ab->m_time <= time)
             samples += ab->m_frames;

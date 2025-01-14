@@ -1,6 +1,8 @@
 ﻿// MythTV
+#include "libmyth/mythavframe.h"
+
 #ifdef USING_DRM_VIDEO
-#include "platforms/mythdisplaydrm.h"
+#include "libmythui/platforms/mythdisplaydrm.h"
 #endif
 
 #include "mythvideoout.h"
@@ -250,7 +252,7 @@ bool MythVAAPIInterop::SetupDeinterlacer(MythDeintType Deinterlacer, bool Double
         LOG(VB_GENERAL, LOG_ERR, LOC + "av_buffersrc_parameters_set failed");
         goto end;
     }
-    av_freep(&params);
+    av_freep(reinterpret_cast<void*>(&params));
 
     /* buffer video sink: to terminate the filter chain. */
     ret = avfilter_graph_create_filter(&Sink, buffersink, "out",
@@ -288,15 +290,17 @@ bool MythVAAPIInterop::SetupDeinterlacer(MythDeintType Deinterlacer, bool Double
     inputs->pad_idx    = 0;
     inputs->next       = nullptr;
 
-    if ((ret = avfilter_graph_parse_ptr(Graph, filters.toLocal8Bit(),
-                                        &inputs, &outputs, nullptr)) < 0)
+    ret = avfilter_graph_parse_ptr(Graph, filters.toLocal8Bit(),
+                                   &inputs, &outputs, nullptr);
+    if (ret < 0)
     {
         LOG(VB_GENERAL, LOG_ERR, LOC + QString("avfilter_graph_parse_ptr failed for %1")
             .arg(filters));
         goto end;
     }
 
-    if ((ret = avfilter_graph_config(Graph, nullptr)) < 0)
+    ret = avfilter_graph_config(Graph, nullptr);
+    if (ret < 0)
     {
         LOG(VB_GENERAL, LOG_ERR, LOC +
             QString("VAAPI deinterlacer config failed - '%1' unsupported?").arg(deinterlacer));
@@ -472,9 +476,12 @@ VASurfaceID MythVAAPIInterop::Deinterlace(MythVideoFrame *Frame, VASurfaceID Cur
 
                 // add another frame
                 MythAVFrame sourceframe;
-                sourceframe->top_field_first =
-                    static_cast<int>(Frame->m_interlacedReverse ? !Frame->m_topFieldFirst : Frame->m_topFieldFirst);
-                sourceframe->interlaced_frame = 1;
+                sourceframe->flags &= ~AV_FRAME_FLAG_TOP_FIELD_FIRST;
+                if (Frame->m_interlacedReverse ^ Frame->m_topFieldFirst)
+                {
+                    sourceframe->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
+                }
+                sourceframe->flags |= AV_FRAME_FLAG_INTERLACED;
                 sourceframe->data[3] = Frame->m_buffer;
                 auto* buffer = reinterpret_cast<AVBufferRef*>(Frame->m_priv[0]);
                 sourceframe->buf[0] = buffer ? av_buffer_ref(buffer) : nullptr;

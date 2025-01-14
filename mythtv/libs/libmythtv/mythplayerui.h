@@ -7,6 +7,8 @@
 #include "jitterometer.h"
 #include "mythplayer.h"
 
+class MythDisplay;
+
 class MTV_PUBLIC MythPlayerUI : public MythPlayerEditorUI, public MythVideoScanTracker
 {
     Q_OBJECT
@@ -19,6 +21,7 @@ class MTV_PUBLIC MythPlayerUI : public MythPlayerEditorUI, public MythVideoScanT
     void ChangeOSDDebug();
     void UpdateOSDDebug();
     virtual void SetBookmark(bool Clear = false);
+    virtual void SetLastPlayPosition(uint64_t frame = 0);
 
   public:
     MythPlayerUI(MythMainWindow* MainWindow, TV* Tv, PlayerContext* Context, PlayerFlags Flags);
@@ -44,7 +47,7 @@ class MTV_PUBLIC MythPlayerUI : public MythPlayerEditorUI, public MythVideoScanT
   protected:
     void InitFrameInterval() override;
     virtual void DisplayPauseFrame();
-    virtual void DisplayNormalFrame(bool CheckPrebuffer = true);
+    virtual bool DisplayNormalFrame(bool CheckPrebuffer = true);
 
     void FileChanged();
     void RefreshPauseFrame();
@@ -54,6 +57,7 @@ class MTV_PUBLIC MythPlayerUI : public MythPlayerEditorUI, public MythVideoScanT
     void EnableBitrateMonitor(bool Enable = false);
 
     Jitterometer    m_outputJmeter { "Player" };
+    std::chrono::microseconds m_refreshInterval { 0us };
 
   private:
     Q_DISABLE_COPY(MythPlayerUI)
@@ -64,6 +68,8 @@ class MTV_PUBLIC MythPlayerUI : public MythPlayerEditorUI, public MythVideoScanT
 
     bool    m_osdDebug { false };
     QTimer  m_osdDebugTimer;
+
+    MythDisplay *m_display { nullptr };
 };
 
 #endif

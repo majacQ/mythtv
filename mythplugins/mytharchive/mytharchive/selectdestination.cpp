@@ -7,20 +7,21 @@
 #include <QKeyEvent>
 
 // myth
-#include <mythcontext.h>
-#include <mythcoreutil.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuicheckbox.h>
-#include <mythuibuttonlist.h>
-#include <mythuitextedit.h>
-#include <mythmainwindow.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythcoreutil.h>
+#include <libmythbase/stringutil.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // mytharchive
-#include "selectdestination.h"
-#include "fileselector.h"
 #include "archiveutil.h"
 #include "exportnative.h"
+#include "fileselector.h"
+#include "selectdestination.h"
 #include "themeselector.h"
 
 SelectDestination::~SelectDestination(void)
@@ -94,14 +95,16 @@ bool SelectDestination::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
         {
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -253,7 +256,7 @@ void SelectDestination::setDestination(MythUIButtonListItem* item)
     // update free space
     if (ArchiveDestinations[itemNo].freeSpace != -1)
     {
-        m_freespaceText->SetText(formatSize(ArchiveDestinations[itemNo].freeSpace, 2));
+        m_freespaceText->SetText(StringUtil::formatKBytes(ArchiveDestinations[itemNo].freeSpace, 2));
         m_freeSpace = ArchiveDestinations[itemNo].freeSpace / 1024;
     }
     else
@@ -309,7 +312,7 @@ void SelectDestination::filenameEditLostFocus()
 
     if (m_archiveDestination.freeSpace != -1)
     {
-        m_freespaceText->SetText(formatSize(m_archiveDestination.freeSpace, 2));
+        m_freespaceText->SetText(StringUtil::formatKBytes(m_archiveDestination.freeSpace, 2));
         m_freeSpace = m_archiveDestination.freeSpace;
     }
     else

@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2007 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -15,11 +15,10 @@
 
 #include <QDomDocument>
 
-#include "upnpexp.h"
-
-#include "mythdbparams.h"
-#include "upnp.h"
-#include "soapclient.h"
+#include "libmythbase/mythdbparams.h"
+#include "libmythupnp/upnpexp.h"
+#include "libmythupnp/soapclient.h"
+#include "libmythupnp/upnp.h"
 
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////

@@ -3,10 +3,10 @@
 #include <QCryptographicHash>
 
 // MythTV
-#include "mythconfig.h"
-#include "mythlogging.h"
-#include "mythdirs.h"
-#include "mythcdrom.h"
+#include "libmythbase/mythcdrom.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+
 #include "io/mythiowrapper.h"
 #include "Bluray/mythbdiowrapper.h"
 #include "Bluray/mythbdinfo.h"
@@ -15,11 +15,12 @@
 #include <fcntl.h>
 
 // BluRay
-#include "libbluray/bluray.h"
-#if CONFIG_LIBBLURAY_EXTERNAL
-#include "libbluray/log_control.h"
-#include "libbluray/meta_data.h"
+#ifdef HAVE_LIBBLURAY
+#include <libbluray/bluray.h>
+#include <libbluray/log_control.h>
+#include <libbluray/meta_data.h>
 #else
+#include "libbluray/bluray.h"
 #include "util/log_control.h"
 #include "libbluray/bdnav/meta_data.h"
 #endif
@@ -75,7 +76,7 @@ MythBDInfo::MythBDInfo(const QString &Filename)
                     [](void *Handle, void *Buf, int LBA, int NumBlocks) {
                     if (MythFileSeek(*(static_cast<int*>(Handle)), LBA * 2048LL, SEEK_SET) != -1)
                         return static_cast<int>(MythFileRead(*(static_cast<int*>(Handle)), Buf,
-                                                             static_cast<size_t>(NumBlocks * 2048)) / 2048);
+                                                             static_cast<size_t>(NumBlocks) * 2048) / 2048);
                     return -1;
                 });
             }
@@ -137,11 +138,14 @@ void MythBDInfo::GetNameAndSerialNum(BLURAY* BluRay, QString &Name,
         {
             QCryptographicHash crypto(QCryptographicHash::Sha1);
             // Add the clip number to the hash
-            crypto.addData(reinterpret_cast<const char*>(&idx), sizeof(idx));
+            QByteArray ba = QByteArray::fromRawData(reinterpret_cast<const char*>(&idx), sizeof(idx));
+            crypto.addData(ba);
             // then the length of the file
-            crypto.addData(reinterpret_cast<const char*>(&buffersize), sizeof(buffersize));
+            ba = QByteArray::fromRawData(reinterpret_cast<const char*>(&buffersize), sizeof(buffersize));
+            crypto.addData(ba);
             // and then the contents
-            crypto.addData(reinterpret_cast<const char*>(buffer), static_cast<int>(buffersize));
+            ba = QByteArray::fromRawData(reinterpret_cast<const char*>(buffer), buffersize);
+            crypto.addData(ba);
             SerialNum = QString("%1__gen").arg(QString(crypto.result().toBase64()));
             free(buffer);
             LOG(VB_PLAYBACK, LOG_DEBUG, LogPrefix + QString("Generated serial number '%1'")

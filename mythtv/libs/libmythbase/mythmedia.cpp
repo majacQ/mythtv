@@ -7,6 +7,7 @@
 #include <sys/param.h>
 
 // Qt Headers
+#include <QtGlobal>
 #include <QDir>
 #include <QFileInfo>
 #include <QFileInfoList>
@@ -15,13 +16,13 @@
 
 // MythTV headers
 #include "mythmedia.h"
-#include "mythconfig.h"
 #include "mythlogging.h"
 #include "mythmiscutil.h"
 #include "mythsystemlegacy.h"
 #include "exitcodes.h"
 
 #ifdef _WIN32
+#   undef O_NONBLOCK
 #   define O_NONBLOCK 0
 #endif
 
@@ -29,7 +30,7 @@
 
 static const QString PATHTO_PMOUNT("/usr/bin/pmount");
 static const QString PATHTO_PUMOUNT("/usr/bin/pumount");
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
     static const QString PATHTO_MOUNT("/sbin/mount");
 #else
     static const QString PATHTO_MOUNT("/bin/mount");
@@ -37,7 +38,7 @@ static const QString PATHTO_PUMOUNT("/usr/bin/pumount");
 static const QString PATHTO_UNMOUNT("/bin/umount");
 static const QString PATHTO_MOUNTS("/proc/mounts");
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #   define USE_MOUNT_COMMAND
 #endif
 
@@ -61,7 +62,7 @@ const std::array<const QString,3> MythMediaDevice::kMediaErrorStrings
     "MEDIAERR_UNSUPPORTED"
 };
 
-QEvent::Type MythMediaEvent::kEventType =
+const QEvent::Type MythMediaEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 // Force this class to have a vtable so that dynamic_cast works.
@@ -113,7 +114,7 @@ bool MythMediaDevice::performMountCmd(bool DoMount)
 {
     if (DoMount && isMounted())
     {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_DARWIN
         // Not an error - DiskArbitration has already mounted the device.
         // AddDevice calls mount() so onDeviceMounted() can get mediaType.
         onDeviceMounted();
@@ -180,7 +181,9 @@ bool MythMediaDevice::performMountCmd(bool DoMount)
                         QString("Detected MediaType ") + MediaTypeString());
             }
             else
+            {
                 onDeviceUnmounted();
+            }
 
             return true;
         }
@@ -200,7 +203,9 @@ bool MythMediaDevice::performMountCmd(bool DoMount)
                     QString("Detected MediaType ") + MediaTypeString());
         }
         else
+        {
             onDeviceUnmounted();
+        }
 
         return true;
     }
@@ -269,7 +274,7 @@ bool MythMediaDevice::ScanMediaType(const QString &directory, ext_cnt_t &cnt)
 
     d.setFilter(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
     QFileInfoList entries = d.entryInfoList();
-    for (const auto& fi : qAsConst(entries))
+    for (const auto& fi : std::as_const(entries))
     {
         if (fi.isSymLink())
             continue;
@@ -299,15 +304,13 @@ void MythMediaDevice::RegisterMediaExtensions(uint mediatype,
                                               const QString &extensions)
 {
     QStringList exts = extensions.split(",");
-    for (const auto& ext : qAsConst(exts))
+    for (const auto& ext : std::as_const(exts))
         s_ext_to_media[ext] |= mediatype;
 }
 
-MythMediaError MythMediaDevice::eject(bool open_close)
+MythMediaError MythMediaDevice::eject([[maybe_unused]] bool open_close)
 {
-    (void) open_close;
-
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
     QString  command = "diskutil eject " + m_devicePath;
 
     myth_system(command, kMSRunBackground);
@@ -319,7 +322,7 @@ MythMediaError MythMediaDevice::eject(bool open_close)
 
 bool MythMediaDevice::isSameDevice(const QString &path)
 {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_DARWIN
     // The caller may be using a raw device instead of the BSD 'leaf' name
     if (path == "/dev/r" + m_devicePath)
         return true;
@@ -419,7 +422,7 @@ bool MythMediaDevice::findMountPath()
         QStringList deviceNames;
         getSymlinkTarget(deviceName, &deviceNames);
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
         // match short-style BSD node names:
         if (m_devicePath.startsWith("disk"))
             deviceNames << deviceName.mid(5);   // remove 5 chars - /dev/

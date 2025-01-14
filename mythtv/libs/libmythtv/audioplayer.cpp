@@ -1,9 +1,10 @@
 
+#include "libmyth/audio/audiooutput.h"
+#include "libmythui/mythnotificationcenter.h"
+
 #include "audioplayer.h"
-#include "visualisations/videovisual.h"
 #include "mythplayer.h"
-#include "audiooutput.h"
-#include "mythnotificationcenter.h"
+#include "visualisations/videovisual.h"
 
 #define LOC QString("AudioPlayer: ")
 
@@ -452,7 +453,7 @@ void AudioPlayer::AddAudioData(char *buffer, int len,
     if (!m_audioOutput || m_noAudioOut)
         return;
 
-    if (m_parent->PrepareAudioSample(timecode) && !m_noAudioOut)
+    if (m_parent->PrepareAudioSample(timecode))
         m_audioOutput->Drain();
     int samplesize = m_audioOutput->GetBytesPerFrame();
 

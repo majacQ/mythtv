@@ -18,12 +18,13 @@
 #include <linux/videodev2.h>
 
 // MythTV headers
-#include "v4lchannel.h"
+#include "libmythbase/mythdb.h"
+
+#include "cardutil.h"
+#include "channelutil.h"
 #include "frequencies.h"
 #include "tv_rec.h"
-#include "mythdb.h"
-#include "channelutil.h"
-#include "cardutil.h"
+#include "v4lchannel.h"
 
 #define DEBUG_ATTRIB 1
 
@@ -715,7 +716,7 @@ static int get_v4l2_attribute_value(int videofd, int v4l2_attrib)
     }
 
     float mult = 65535.0 / (qctrl.maximum - qctrl.minimum);
-    return std::min(std::max((int)(mult * (ctrl.value - qctrl.minimum)), 0), 65525);
+    return std::clamp((int)(mult * (ctrl.value - qctrl.minimum)), 0, 65525);
 }
 
 static int set_v4l2_attribute_value(int videofd, int v4l2_attrib, int newvalue)
@@ -732,7 +733,7 @@ static int set_v4l2_attribute_value(int videofd, int v4l2_attrib, int newvalue)
     }
 
     float mult = (qctrl.maximum - qctrl.minimum) / 65535.0;
-    ctrl.value = (int)(mult * newvalue + qctrl.minimum);
+    ctrl.value = (int)((mult * newvalue) + qctrl.minimum);
     ctrl.value = std::min(ctrl.value, qctrl.maximum);
     ctrl.value = std::max(ctrl.value, qctrl.minimum);
 
@@ -771,7 +772,7 @@ int V4LChannel::ChangePictureAttribute(
     // make sure we are within bounds (wrap around for hue)
     if (V4L2_CID_HUE == v4l2_attrib)
         new_value &= 0xffff;
-    new_value = std::min(std::max(new_value, 0), 65535);
+    new_value = std::clamp(new_value, 0, 65535);
 
 #if DEBUG_ATTRIB
     LOG(VB_CHANNEL, LOG_DEBUG,

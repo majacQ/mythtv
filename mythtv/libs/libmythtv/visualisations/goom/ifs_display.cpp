@@ -17,10 +17,12 @@ void ifs_update (guint32 * data, const guint32 * back, int width, int height,
 	static std::array<int,4> s_v { 2, 4, 3, 2 };
 	static std::array<int,4> s_col { 2, 4, 3, 2 };
 
-#define MOD_MER 0
-#define MOD_FEU 1
-#define MOD_MERVER 2
-	static int s_mode = MOD_MERVER;
+        enum MODE : std::uint8_t {
+            MOD_MER    = 0,
+            MOD_FEU    = 1,
+            MOD_MERVER = 2
+        };
+	static MODE s_mode = MOD_MERVER;
 	static int s_justChanged = 0;
 	static int s_cycle = 0;
 	int     cycle10 = 0;
@@ -65,15 +67,15 @@ void ifs_update (guint32 * data, const guint32 * back, int width, int height,
 	emms();/*__asm__ __volatile__ ("emms");*/
 #else
 	for (int i = 0; i < nbpt; i += increment) {
-		int     x = (int) points[i].x & 0x7fffffff;
-		int     y = (int) points[i].y & 0x7fffffff;
+		int     x = points[i].x & 0x7fffffff;
+		int     y = points[i].y & 0x7fffffff;
 
 		if ((x < width) && (y < height)) {
-			int     pos = x + (int) (y * width);
+			int     pos = x + (y * width);
 			int     tra = 0;
-			unsigned char *bra = (unsigned char *) &back[pos];
-			unsigned char *dra = (unsigned char *) &data[pos];
-			unsigned char *cra = (unsigned char *) &couleursl;
+			auto *bra = (unsigned char *) &back[pos];
+			auto *dra = (unsigned char *) &data[pos];
+			auto *cra = (unsigned char *) &couleursl;
 
 			for (int j = 0; j < 4; j++) {
 				tra = *cra;

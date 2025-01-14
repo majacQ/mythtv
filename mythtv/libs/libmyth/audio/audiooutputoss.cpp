@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -9,14 +10,14 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "config.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythtimer.h"
+
+#include "audiooutputoss.h"
 
 #define LOC      QString("AOOSS: ")
-
-#include "mythcorecontext.h"
-#include "audiooutputoss.h"
-#include "mythtimer.h"
-#include "mythdate.h"
 
 AudioOutputOSS::AudioOutputOSS(const AudioSettings &settings) :
     AudioOutputBase(settings)
@@ -122,6 +123,7 @@ bool AudioOutputOSS::OpenDevice()
             }
             VBERRENO(QString("Error opening audio device (%1)")
                          .arg(m_mainDevice));
+            return false;
         }
         if (m_audioFd < 0)
             usleep(50us);
@@ -211,7 +213,9 @@ bool AudioOutputOSS::OpenDevice()
                    "accurately! audio/video sync will be bad, continuing...");
     }
     else
+    {
         VBERRENO("Unable to get audio card capabilities");
+    }
 
     // Setup volume control
     if (m_internalVol)
@@ -353,10 +357,7 @@ void AudioOutputOSS::SetVolumeChannel(int channel, int volume)
         return;
     }
 
-    if (volume > 100)
-        volume = 100;
-    if (volume < 0)
-        volume = 0;
+    volume = std::clamp(volume, 0, 100);
 
     if (m_mixerFd >= 0)
     {

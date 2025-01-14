@@ -1,10 +1,11 @@
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythcorecontext.h"
+
 #include "mythscreenstack.h"
 #include "mythmainwindow.h"
 #include "mythscreentype.h"
 #include "mythpainter.h"
-#include "mythevent.h"
 
-#include <cassert>
 #include <chrono>
 
 #include <QCoreApplication>
@@ -38,8 +39,9 @@ MythScreenStack::~MythScreenStack()
 
 void MythScreenStack::EnableEffects(void)
 {
-    m_doTransitions = (GetPainter()->SupportsAlpha() &&
-                       GetPainter()->SupportsAnimation());
+    m_doTransitions = GetMythDB()->GetBoolSetting("SmoothTransitions", true) &&
+                      GetPainter()->SupportsAlpha() &&
+                      GetPainter()->SupportsAnimation();
 }
 
 int MythScreenStack::TotalScreens(void) const
@@ -142,7 +144,7 @@ void MythScreenStack::PopScreen(MythScreenType *screen, bool allowFade,
 
     if (!m_children.isEmpty())
     {
-        for (auto *draw : qAsConst(m_drawOrder))
+        for (auto *draw : std::as_const(m_drawOrder))
         {
             if (draw != screen && !draw->IsDeleting())
             {
@@ -237,7 +239,7 @@ void MythScreenStack::RecalculateDrawOrder(void)
     if (m_children.isEmpty())
         return;
 
-    for (auto *screen : qAsConst(m_children))
+    for (auto *screen : std::as_const(m_children))
     {
         if (screen->IsFullscreen())
             m_drawOrder.clear();
@@ -261,7 +263,7 @@ void MythScreenStack::DoNewFadeTransition(void)
 
     if (m_newTop->IsFullscreen())
     {
-        for (auto *draw : qAsConst(m_drawOrder))
+        for (auto *draw : std::as_const(m_drawOrder))
         {
             if (!draw->IsDeleting())
                 draw->AdjustAlpha(1, -kFadeVal);
@@ -270,7 +272,9 @@ void MythScreenStack::DoNewFadeTransition(void)
         m_drawOrder.push_back(m_newTop);
     }
     else
+    {
         RecalculateDrawOrder();
+    }
 }
 
 void MythScreenStack::CheckNewFadeTransition(void)
@@ -313,7 +317,7 @@ void MythScreenStack::CheckDeletes(bool force)
         {
             bool found = false;
 
-            for (const auto *test : qAsConst(m_drawOrder))
+            for (const auto *test : std::as_const(m_drawOrder))
             {
                 if (*it == test)
                 {
@@ -363,7 +367,7 @@ QString MythScreenStack::GetLocation(bool fullPath) const
     if (fullPath)
     {
         QString path;
-        for (auto *child : qAsConst(m_children))
+        for (auto *child : std::as_const(m_children))
         {
             if (!child->IsDeleting())
             {
@@ -379,7 +383,7 @@ QString MythScreenStack::GetLocation(bool fullPath) const
     if (m_topScreen)
         return m_topScreen->objectName();
 
-    return QString();
+    return {};
 }
 
 MythPainter* MythScreenStack::GetPainter(void)

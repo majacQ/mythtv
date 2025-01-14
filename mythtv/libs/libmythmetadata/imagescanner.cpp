@@ -1,7 +1,7 @@
 #include "imagescanner.h"
 
-#include "mythlogging.h"
-#include "mythcorecontext.h"  // for events
+#include "libmythbase/mythcorecontext.h"  // for gCoreContext
+#include "libmythbase/mythlogging.h"
 
 #include "imagemetadata.h"
 
@@ -241,7 +241,7 @@ void ImageScanThread<DBFS>::SyncSubTree(const QFileInfo &dirInfo, int parentId,
                                   int devId, const QString &base)
 {
     // Ignore excluded dirs
-    if (MATCHES(m_exclusions, dirInfo.fileName()))
+    if (m_exclusions.match(dirInfo.fileName()).hasMatch())
     {
         LOG(VB_FILE, LOG_INFO,
             QString("Excluding dir %1").arg(dirInfo.absoluteFilePath()));
@@ -268,7 +268,7 @@ void ImageScanThread<DBFS>::SyncSubTree(const QFileInfo &dirInfo, int parentId,
 
     // Sync its contents
     QFileInfoList entries = dir.entryInfoList();
-    for (const auto & fileInfo : qAsConst(entries))
+    for (const auto & fileInfo : std::as_const(entries))
     {
         if (!IsScanning())
         {
@@ -446,7 +446,7 @@ void ImageScanThread<DBFS>::SyncFile(const QFileInfo &fileInfo, int devId,
                                const QString &base, int parentId)
 {
     // Ignore excluded files
-    if (MATCHES(m_exclusions, fileInfo.fileName()))
+    if (m_exclusions.match(fileInfo.fileName()).hasMatch())
     {
         LOG(VB_FILE, LOG_INFO,
             QString("Excluding file %1").arg(fileInfo.absoluteFilePath()));
@@ -541,10 +541,10 @@ template <class DBFS>
 void ImageScanThread<DBFS>::CountTree(QDir &dir)
 {
     QFileInfoList entries = dir.entryInfoList();
-    for (const auto & fileInfo : qAsConst(entries))
+    for (const auto & fileInfo : std::as_const(entries))
     {
         // Ignore excluded dirs/files
-        if (MATCHES(m_exclusions, fileInfo.fileName()))
+        if (m_exclusions.match(fileInfo.fileName()).hasMatch())
             continue;
 
         if (fileInfo.isFile())
@@ -578,7 +578,7 @@ void ImageScanThread<DBFS>::CountFiles(const QStringList &paths)
     excPattern.replace(",", "|");   // Convert list to OR's
 
     QString pattern = QString("^(%1)$").arg(excPattern);
-    m_exclusions = REGEXP(pattern);
+    m_exclusions = QRegularExpression(pattern);
 
     LOG(VB_FILE, LOG_DEBUG, QString("Exclude regexp is \"%1\"").arg(pattern));
 
@@ -589,7 +589,7 @@ void ImageScanThread<DBFS>::CountFiles(const QStringList &paths)
 
     // Use global image filters
     QDir dir = m_dir;
-    for (const auto& sgDir : qAsConst(paths))
+    for (const auto& sgDir : std::as_const(paths))
     {
         // Ignore missing dirs
         if (dir.cd(sgDir))

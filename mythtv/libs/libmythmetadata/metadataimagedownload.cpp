@@ -7,23 +7,24 @@
 #include <utility>
 
 // myth
-#include "mythcorecontext.h"
-#include "mythuihelper.h"
-#include "mythdirs.h"
-#include "storagegroup.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythui/mythuihelper.h"
+
 #include "metadataimagedownload.h"
-#include "remotefile.h"
-#include "mythdownloadmanager.h"
-#include "mythlogging.h"
-#include "mythdate.h"
 
-QEvent::Type ImageDLEvent::kEventType =
+const QEvent::Type ImageDLEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
-QEvent::Type ImageDLFailureEvent::kEventType =
+const QEvent::Type ImageDLFailureEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
-QEvent::Type ThumbnailDLEvent::kEventType =
+const QEvent::Type ThumbnailDLEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 MetadataImageDownload::~MetadataImageDownload()
@@ -105,7 +106,9 @@ void MetadataImageDownload::run()
                            new ThumbnailDLEvent(thumb));
         }
         else
+        {
             delete thumb;
+        }
     }
 
     while (true)
@@ -220,7 +223,9 @@ void MetadataImageDownload::run()
                     onMaster = true;
                 }
                 else
+                {
                     exists = RemoteFile::Exists(finalfile);
+                }
 
                 if (!exists || lookup->GetAllowOverwrites())
                 {
@@ -231,7 +236,9 @@ void MetadataImageDownload::run()
                         RemoteFile::DeleteFile(finalfile);
                     }
                     else if (exists)
+                    {
                         QFile::remove(resolvedFN);
+                    }
 
                     LOG(VB_GENERAL, LOG_INFO,
                         QString("Metadata Image Download: %1 -> %2")
@@ -390,9 +397,13 @@ QString getDownloadFilename(VideoArtworkType type, MetadataLookup *lookup,
     }
     else if (lookup->GetType() == kMetadataVideo ||
              lookup->GetType() == kMetadataRecording)
+    {
         title = lookup->GetInetref();
+    }
     else if (lookup->GetType() == kMetadataGame)
+    {
         title = QString("%1 (%2)").arg(lookup->GetTitle(), lookup->GetSystem());
+    }
 
     if (tracknum > 0)
         inter = QString(" Track %1").arg(QString::number(tracknum));

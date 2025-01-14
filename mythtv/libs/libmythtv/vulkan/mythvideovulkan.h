@@ -2,14 +2,14 @@
 #define MYTHVULKANVIDEO_H
 
 // MythTV
+#include "libmythui/vulkan/mythrendervulkan.h"
+
 #include "mythframe.h"
-#include "videoouttypes.h"
 #include "mythvideogpu.h"
-#include "vulkan/mythrendervulkan.h"
+#include "videoouttypes.h"
 
 // Std
 #include <vector>
-using std::vector;
 
 class MythPainterVulkan;
 class MythVideoVulkan;
@@ -39,7 +39,7 @@ class MythVideoVulkan : public MythVideoGPU, public MythVulkanObject
     bool    SetupFrameFormat (VideoFrameType InputType, VideoFrameType OutputType, QSize Size,
                               VkCommandBuffer CmdBuffer);
 
-    vector<MythVideoTextureVulkan*> m_inputTextures;
+    std::vector<MythVideoTextureVulkan*> m_inputTextures;
 };
 
 #endif

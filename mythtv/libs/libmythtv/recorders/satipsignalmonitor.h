@@ -10,9 +10,11 @@ class SatIPStreamHandler;
 
 class SatIPSignalMonitor : public DTVSignalMonitor
 {
+    Q_DECLARE_TR_FUNCTIONS(SatIPSignalMonitor);
+
   public:
     SatIPSignalMonitor(int db_cardnum, SatIPChannel* channel,
-                      bool release_stream, uint64_t flags = 0);
+                       bool release_stream, uint64_t flags = 0);
     ~SatIPSignalMonitor() override;
 
     void Stop(void) override; // SignalMonitor

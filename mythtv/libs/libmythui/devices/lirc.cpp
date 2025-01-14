@@ -3,13 +3,23 @@
 #include "lirc.h"
 
 // C headers
-#include <cstdio>
-#include <cerrno>
-#include <cstdlib>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 // C++ headers
 #include <algorithm>
+#include <cerrno>
 #include <chrono> // for milliseconds
+#include <cstdio>
+#include <cstdlib>
 #include <thread> // for sleep_for
 #include <vector>
 
@@ -20,24 +30,23 @@
 #include <QStringList>
 
 // MythTV headers
-#include "mythdb.h"
-#include "mythsystemlegacy.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystemlegacy.h"
+
 #include "lircevent.h"
 #include "lirc_client.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <sys/un.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include "mythlogging.h"
-
 #define LOC      QString("LIRC: ")
+
+#if !defined(__suseconds_t)
+#ifdef Q_OS_MACOS
+using __suseconds_t = __darwin_suseconds_t;
+#else
+using __suseconds_t = long int;
+#endif
+#endif
+static constexpr __suseconds_t k100Milliseconds {static_cast<__suseconds_t>(100 * 1000)};
 
 class LIRCPriv
 {
@@ -166,8 +175,11 @@ bool LIRC::Init(void)
     if (m_lircdDevice.startsWith('/'))
     {
         // Connect the unix socket
+        struct sockaddr_un addr {};
+        addr.sun_family = AF_UNIX;
+        static constexpr int max_copy = sizeof(addr.sun_path) - 1;
         QByteArray dev = m_lircdDevice.toLocal8Bit();
-        if (dev.size() > 107)
+        if (dev.size() > max_copy)
         {
             LOG(vtype, LOG_ERR, LOC +
                 QString("m_lircdDevice '%1'").arg(m_lircdDevice) +
@@ -185,9 +197,7 @@ bool LIRC::Init(void)
             return false;
         }
 
-        struct sockaddr_un addr {};
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, dev.constData(),107);
+        strncpy(addr.sun_path, dev.constData(), max_copy);
 
         int ret = ::connect(lircd_socket, (struct sockaddr*) &addr,
                             sizeof(addr));
@@ -445,7 +455,7 @@ void LIRC::run(void)
         FD_SET(d->m_lircState->lirc_lircd, &readfds);
 
         // the maximum time select() should wait
-        struct timeval timeout {1, 100 * 1000}; // 1 second, 100 ms
+        struct timeval timeout {1, k100Milliseconds}; // 1 second, 100 ms
 
         int ret = select(d->m_lircState->lirc_lircd + 1, &readfds, nullptr, nullptr,
                          &timeout);
@@ -462,7 +472,7 @@ void LIRC::run(void)
             continue;
 
         QList<QByteArray> codes = GetCodes();
-        for (const auto & code : qAsConst(codes))
+        for (const auto & code : std::as_const(codes))
             Process(code);
     }
 #if 0

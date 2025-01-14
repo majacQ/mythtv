@@ -18,10 +18,10 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <iostream>
 
-#include "mheg/dsmcc.h"
+#include "libmythtv/mheg/dsmcc.h"
 
 class TestMhegDsmcc : public QObject
 {

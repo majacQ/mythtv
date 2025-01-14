@@ -34,19 +34,21 @@
 #include <QFile>
 
 // MythTV headers
-#include "mythcontext.h"
-#include "mythdbcon.h"
-#include "mythlogging.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythlogging.h"
 #include "dtvconfparser.h"
 #include "channelutil.h"
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define PARSE_SKIP(VAR) do { \
     if (it == tokens.end()) return false; \
     ++it; } while(false)
 
 #define PARSE_CONF(VAR) do { \
-    if (it == tokens.end() || !(VAR).ParseConf(*it++)) \
-        return false; } while(false)
+    if (it == tokens.end()) return false; \
+    if (!(VAR).ParseConf(*it)) return false; \
+    it++; } while(false)
 
 #define PARSE_STR(VAR) do { \
     if (it != tokens.end()) (VAR) = *it++; else return false; } while(false)
@@ -58,6 +60,7 @@
 #define PARSE_UINT_1000(VAR) do { \
     if (it != tokens.end()) \
          (VAR) = (*it++).toUInt() * 1000ULL; else return false; } while(false)
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 
 QString DTVChannelInfo::toString() const
@@ -71,7 +74,7 @@ DTVConfParser::return_t DTVConfParser::Parse(void)
 
     QFile file(m_filename);
     if (!file.open(QIODevice::ReadOnly))
-        return ERROR_OPEN;
+        return return_t::ERROR_OPEN;
 
     bool ok = true;
     QTextStream stream(&file);
@@ -83,12 +86,7 @@ DTVConfParser::return_t DTVConfParser::Parse(void)
         if (line.startsWith("#"))
             continue;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList list = line.split(":", QString::SkipEmptyParts);
-#else
         QStringList list = line.split(":", Qt::SkipEmptyParts);
-#endif
-
         if (list.empty())
             continue;
 
@@ -99,11 +97,7 @@ DTVConfParser::return_t DTVConfParser::Parse(void)
         {
             channelNo = str.mid(1).toInt();
             line = stream.readLine();
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            list = line.split(":", QString::SkipEmptyParts);
-#else
             list = line.split(":", Qt::SkipEmptyParts);
-#endif
         }
 
         if (list.size() < 4)
@@ -113,23 +107,31 @@ DTVConfParser::return_t DTVConfParser::Parse(void)
 
         if ((str == "T") || (str == "C") || (str == "S"))
         {
-            if (((m_type == OFDM) && (str == "T")) ||
-                ((m_type == QPSK || m_type == DVBS2) && (str == "S")) ||
-                ((m_type == QAM) && (str == "C")))
+            if (((m_type == cardtype_t::OFDM) && (str == "T")) ||
+                ((m_type == cardtype_t::QPSK || m_type == cardtype_t::DVBS2) && (str == "S")) ||
+                ((m_type == cardtype_t::QAM) && (str == "C")))
                 ok &= ParseVDR(list, channelNo);
         }
-        else if (m_type == OFDM)
+        else if (m_type == cardtype_t::OFDM)
+        {
             ok &= ParseConfOFDM(list);
-        else if (m_type == ATSC)
+        }
+        else if (m_type == cardtype_t::ATSC)
+        {
             ok &= ParseConfATSC(list);
-        else if (m_type == QPSK || m_type == DVBS2)
+        }
+        else if (m_type == cardtype_t::QPSK || m_type == cardtype_t::DVBS2)
+        {
             ok &= ParseConfQPSK(list);
-        else if (m_type == QAM)
+        }
+        else if (m_type == cardtype_t::QAM)
+        {
             ok &= ParseConfQAM(list);
+        }
     }
     file.close();
 
-    return (ok) ? OK : ERROR_PARSE;
+    return (ok) ? return_t::OK : return_t::ERROR_PARSE;
 }
 
 bool DTVConfParser::ParseConfOFDM(const QStringList &tokens)
@@ -311,7 +313,7 @@ void DTVConfParser::AddChannel(const DTVMultiplex &mux, DTVChannelInfo &chan)
         }
     }
 
-    m_channels.push_back(DTVTransport(mux));
+    m_channels.emplace_back(mux);
     m_channels.back().channels.push_back(chan);
 
     LOG(VB_GENERAL, LOG_INFO, "Imported channel: " + chan.toString() +

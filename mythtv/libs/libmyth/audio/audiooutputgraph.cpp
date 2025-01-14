@@ -1,3 +1,8 @@
+// Std
+#include <climits>
+#include <cmath>
+#include <cstdint>
+
 // Qt
 #include <QtGlobal>
 #include <QImage>
@@ -6,16 +11,12 @@
 #include <QMutexLocker>
 
 // MythTV
-#include "audiooutputgraph.h"
-#include "mythlogging.h"
-#include "mythpainter.h"
-#include "mythimage.h"
-#include "compat.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythimage.h"
+#include "libmythui/mythpainter.h"
 
-// Std
-#include <climits>
-#include <cmath>
-#include <cstdint>
+#include "audiooutputgraph.h"
 
 using namespace std::chrono_literals;
 
@@ -23,17 +24,17 @@ using namespace std::chrono_literals;
 
 const int kBufferMilliSecs = 500;
 
-class AudioOutputGraph::Buffer : public QByteArray
+class AudioOutputGraph::AOBuffer : public QByteArray
 {
   public:
-    Buffer() = default;
+    AOBuffer() = default;
 
     void SetMaxSamples(uint16_t Samples)    { m_maxSamples = Samples; }
     void SetSampleRate(uint16_t SampleRate) { m_sampleRate = SampleRate; }
-    static inline int BitsPerChannel() { return sizeof(short) * CHAR_BIT; }
-    inline int Channels() const { return m_channels; }
-    inline std::chrono::milliseconds Next() const  { return m_tcNext; }
-    inline std::chrono::milliseconds First() const { return m_tcFirst; }
+    static int BitsPerChannel() { return sizeof(short) * CHAR_BIT; }
+    int Channels() const { return m_channels; }
+    std::chrono::milliseconds Next() const  { return m_tcNext; }
+    std::chrono::milliseconds First() const { return m_tcFirst; }
 
     using Range = std::pair<std::chrono::milliseconds, std::chrono::milliseconds>;
     Range Avail(std::chrono::milliseconds Timecode) const
@@ -71,7 +72,7 @@ class AudioOutputGraph::Buffer : public QByteArray
         resize(0);
     }
 
-    void Append(const void * _Buffer, unsigned long Length, std::chrono::milliseconds Timecode,
+    void Append(const void * Buffer, unsigned long Length, std::chrono::milliseconds Timecode,
                 int Channels, int Bits)
     {
         if (m_bits != Bits || m_channels != Channels)
@@ -87,7 +88,7 @@ class AudioOutputGraph::Buffer : public QByteArray
 
         if (qAbs((Timecode - m_tcNext).count()) <= 1)
         {
-            Append(_Buffer, Length, Bits);
+            Append(Buffer, Length, Bits);
             m_tcNext = tcNext;
         }
         else if (Timecode >= m_tcFirst && tcNext <= m_tcNext)
@@ -101,7 +102,7 @@ class AudioOutputGraph::Buffer : public QByteArray
                 .arg(m_tcNext.count()).arg(Timecode.count()));
 
             Resize(Channels, Bits);
-            Append(_Buffer, Length, Bits);
+            Append(Buffer, Length, Bits);
             m_tcFirst = Timecode;
             m_tcNext = tcNext;
         }
@@ -117,31 +118,31 @@ class AudioOutputGraph::Buffer : public QByteArray
     const int16_t* Data16(Range Available) const
     {
         auto start = MS2Samples(Available.first - m_tcFirst);
-        return reinterpret_cast<const int16_t*>(constData() + (static_cast<uint>(start) * BytesPerSample()));
+        return reinterpret_cast<const int16_t*>(constData() + (static_cast<ptrdiff_t>(start) * BytesPerSample()));
     }
 
   protected:
-    inline uint BytesPerSample() const
+    uint BytesPerSample() const
     {
         return static_cast<uint>(m_channels * ((m_bits + 7) / 8));
     }
 
-    inline unsigned Bytes2Samples(unsigned Bytes) const
+    unsigned Bytes2Samples(unsigned Bytes) const
     {
         return  (m_channels && m_bits) ? Bytes / BytesPerSample() : 0;
     }
 
-    inline std::chrono::milliseconds Samples2MS(unsigned Samples) const
+    std::chrono::milliseconds Samples2MS(unsigned Samples) const
     {
         return m_sampleRate ? std::chrono::milliseconds((Samples * 1000UL + m_sampleRate - 1) / m_sampleRate) : 0ms; // round up
     }
 
-    inline int MS2Samples(std::chrono::milliseconds Msecs) const
+    int MS2Samples(std::chrono::milliseconds Msecs) const
     {
         return Msecs > 0ms ? static_cast<int>((Msecs.count() * m_sampleRate) / 1000) : 0; // NB round down
     }
 
-    void Append(const void * _Buffer, unsigned long Length, int Bits)
+    void Append(const void * Buffer, unsigned long Length, int Bits)
     {
         switch (Bits)
         {
@@ -151,14 +152,14 @@ class AudioOutputGraph::Buffer : public QByteArray
                 auto count = Length;
                 auto n = size();
                 resize(n + static_cast<int>(sizeof(int16_t) * count));
-                const auto * src = reinterpret_cast<const uchar*>(_Buffer);
+                const auto * src = reinterpret_cast<const uchar*>(Buffer);
                 auto * dst = reinterpret_cast<int16_t*>(data() + n);
                 while (count--)
                     *dst++ = static_cast<int16_t>((static_cast<int16_t>(*src++) - CHAR_MAX) << (16 - CHAR_BIT));
             }
             break;
           case 16:
-            append(reinterpret_cast<const char*>(_Buffer), static_cast<int>(Length));
+            append(reinterpret_cast<const char*>(Buffer), static_cast<int>(Length));
             break;
           case 32:
             // 32bit float to 16bit signed
@@ -167,14 +168,14 @@ class AudioOutputGraph::Buffer : public QByteArray
                 auto n = size();
                 resize(n + static_cast<int>(sizeof(int16_t) * count));
                 const float f((1 << 15) - 1);
-                const auto * src = reinterpret_cast<const float*>(_Buffer);
+                const auto * src = reinterpret_cast<const float*>(Buffer);
                 auto * dst = reinterpret_cast<int16_t*>(data() + n);
                 while (count--)
                     *dst++ = static_cast<int16_t>(f * (*src++));
             }
             break;
           default:
-            append(reinterpret_cast<const char*>(_Buffer), static_cast<int>(Length));
+            append(reinterpret_cast<const char*>(Buffer), static_cast<int>(Length));
             break;
         }
     }
@@ -199,7 +200,7 @@ class AudioOutputGraph::Buffer : public QByteArray
 };
 
 AudioOutputGraph::AudioOutputGraph() :
-    m_buffer(new AudioOutputGraph::Buffer())
+    m_buffer(new AudioOutputGraph::AOBuffer())
 {
 }
 
@@ -232,11 +233,11 @@ void AudioOutputGraph::prepare()
 {
 }
 
-void AudioOutputGraph::add(const void * _Buffer, unsigned long Length,
+void AudioOutputGraph::add(const void * Buffer, unsigned long Length,
                            std::chrono::milliseconds Timecode, int Channnels, int Bits)
 {
     QMutexLocker lock(&m_mutex);
-    m_buffer->Append(_Buffer, Length, Timecode, Channnels, Bits);
+    m_buffer->Append(Buffer, Length, Timecode, Channnels, Bits);
 }
 
 void AudioOutputGraph::Reset()
@@ -249,7 +250,7 @@ void AudioOutputGraph::Reset()
 MythImage* AudioOutputGraph::GetImage(std::chrono::milliseconds Timecode) const
 {
     QMutexLocker lock(&m_mutex);
-    Buffer::Range avail = m_buffer->Avail(Timecode);
+    AOBuffer::Range avail = m_buffer->Avail(Timecode);
 
     LOG(VB_PLAYBACK, LOG_INFO, LOC +
         QString("GetImage for timecode %1 using [%2..%3] available [%4..%5]")
@@ -260,7 +261,7 @@ MythImage* AudioOutputGraph::GetImage(std::chrono::milliseconds Timecode) const
     if (width <= 0)
         return nullptr;
 
-    const unsigned range = 1U << AudioOutputGraph::Buffer::BitsPerChannel();
+    const unsigned range = 1U << AudioOutputGraph::AOBuffer::BitsPerChannel();
     const auto threshold = 20 * log10(1.0 / range); // 16bit=-96.3296dB => ~6dB/bit
     auto height = static_cast<int>(-ceil(threshold)); // 96
     if (height <= 0)
@@ -274,7 +275,7 @@ MythImage* AudioOutputGraph::GetImage(std::chrono::milliseconds Timecode) const
     if (data >= max)
         return nullptr;
 
-    if ((data + (channels * width)) >= max)
+    if ((data + (channels * static_cast<ptrdiff_t>(width))) >= max)
     {
         LOG(VB_GENERAL, LOG_WARNING, LOC + "Buffer overflow. Clipping samples.");
         width = static_cast<int>(max - data) / channels;
@@ -292,11 +293,15 @@ MythImage* AudioOutputGraph::GetImage(std::chrono::milliseconds Timecode) const
         auto avg = qAbs(left) + qAbs(right);
         double db = 20 * log10(static_cast<double>(avg ? avg : 1) / range);
         auto idb = static_cast<int>(ceil(db));
-        auto rgb = idb <= m_dBsilence ? qRgb(255, 255, 255) :
-                   idb <= m_dBquiet   ? qRgb(  0, 255, 255) :
-                   idb <= m_dBLoud    ? qRgb(  0, 255,   0) :
-                   idb <= m_dbMax     ? qRgb(255, 255,   0) :
-                                        qRgb(255,   0,   0);
+        auto rgb { qRgb(255,   0,   0) };
+        if (idb <= m_dBsilence)
+            rgb = qRgb(255, 255, 255);
+        else if (idb <= m_dBquiet)
+            rgb = qRgb(  0, 255, 255);
+        else if (idb <= m_dBLoud)
+            rgb = qRgb(  0, 255,   0);
+        else if (idb <= m_dbMax)
+            rgb = qRgb(255, 255,   0);
 
         int v = height - static_cast<int>(height * (db / threshold));
         if (v >= height)

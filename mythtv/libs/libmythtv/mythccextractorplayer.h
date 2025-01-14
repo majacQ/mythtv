@@ -15,7 +15,7 @@
 
 class SRTWriter;
 
-enum sub_types
+enum sub_types : std::uint8_t
 {
     kSubCC608,
     kSubCC708,
@@ -128,7 +128,7 @@ class MTV_PUBLIC MythCCExtractorPlayer : public MythPlayer
     void IngestSubtitle(QList<OneSubtitle> &list, const QStringList &content) const;
     static void IngestSubtitle(QList<OneSubtitle> &list, const OneSubtitle &content);
 
-    enum { kProcessNormal = 0, kProcessFinalize = 1 };
+    enum : std::uint8_t { kProcessNormal = 0, kProcessFinalize = 1 };
     void Ingest608Captions(void);
     void Process608Captions(uint flags);
 
@@ -136,7 +136,7 @@ class MTV_PUBLIC MythCCExtractorPlayer : public MythPlayer
     void Ingest708Caption(uint streamId, uint serviceIdx, uint windowIdx,
                           uint start_row, uint start_column,
                           const CC708Window &win,
-                          const vector<CC708String*> &content);
+                          const std::vector<CC708String*> &content);
     void Process708Captions(uint flags);
 
     void IngestTeletext(void);
@@ -166,9 +166,9 @@ class MTV_PUBLIC MythCCExtractorPlayer : public MythPlayer
     QHash<uint, WindowsOnService > m_cc708Windows;
 
     /// Keeps track for decoding time to make timestamps for subtitles.
-    std::chrono::milliseconds  m_curTime;
-    uint64_t m_myFramesPlayed;
-    bool    m_showProgress;
+    std::chrono::milliseconds  m_curTime {0ms};
+    uint64_t m_myFramesPlayed {0};
+    bool    m_showProgress    {false};
     QString m_fileName;
     QDir    m_workingDir;
     QString m_baseName;

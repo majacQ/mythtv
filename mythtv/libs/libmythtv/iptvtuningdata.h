@@ -2,6 +2,8 @@
 #ifndef IPTV_TUNING_DATA_H
 #define IPTV_TUNING_DATA_H
 
+#include <array>
+
 // Qt headers
 #include <QApplication>
 #include <QString>
@@ -11,15 +13,15 @@
 #include <QUrl>
 
 // MythTV headers
-#include "mythtvexp.h"
-#include "mythlogging.h"
-#include "mythsingledownload.h"
-#include "recorders/HLS/HLSReader.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsingledownload.h"
+#include "libmythtv/mythtvexp.h"
+#include "libmythtv/recorders/HLS/HLSReader.h"
 
 class MTV_PUBLIC IPTVTuningData
 {
   public:
-    enum FECType
+    enum FECType : std::uint8_t
     {
         kNone,
         kRFC2733,
@@ -27,7 +29,7 @@ class MTV_PUBLIC IPTVTuningData
         kSMPTE2022,
     };
 
-    enum IPTVType
+    enum IPTVType : std::uint8_t
     {
         kData = 1,
         kRFC2733_1,
@@ -38,7 +40,7 @@ class MTV_PUBLIC IPTVTuningData
         kSMPTE2022_2,
     };
 
-    enum IPTVProtocol
+    enum IPTVProtocol : std::uint8_t
     {
         inValid = 0,
         udp,
@@ -145,7 +147,7 @@ class MTV_PUBLIC IPTVTuningData
             return GetFECURL0();
         if (2 == i)
             return GetFECURL1();
-        return QUrl();
+        return {};
     }
     uint GetBitrate(uint i) const { return m_bitrate[i]; }
 
@@ -157,12 +159,12 @@ class MTV_PUBLIC IPTVTuningData
             return "data";
         switch (m_fecType)
         {
-            case kNone: return QString();
+            case kNone: return {};
             case kRFC2733: return QString("rfc2733-%1").arg(i);
             case kRFC5109: return QString("rfc5109-%1").arg(i);
             case kSMPTE2022: return QString("smpte2022-%1").arg(i);
         }
-        return QString();
+        return {};
     }
 
     static uint GetURLCount(void) { return 3; }
@@ -235,28 +237,13 @@ class MTV_PUBLIC IPTVTuningData
             return false;
         }
 
-        QString url = m_dataUrl.toString();
-
-        // check url is valid for a playlist before downloading (see trac ticket #12856)
-        if(url.endsWith(".m3u8", Qt::CaseInsensitive) ||
-           url.endsWith(".m3u", Qt::CaseInsensitive))
-        {
-            LOG(VB_RECORD, LOG_INFO, QString("IsHLSPlaylist url ends with either .m3u8 or .m3u %1").arg(url));
-        }
-        else
-        {
-            // not a valid playlist so just return false
-            LOG(VB_RECORD, LOG_INFO, QString("IsHLSPlaylist url does not end with either .m3u8 or .m3u %1").arg(url));
-            return false;
-        }
-
-        QByteArray buffer;
-
         MythSingleDownload downloader;
+        QString url = m_dataUrl.toString();
+        QByteArray buffer;
         downloader.DownloadURL(url, &buffer, 5s, 0, 10000);
         if (buffer.isEmpty())
         {
-            LOG(VB_GENERAL, LOG_ERR, QString("IsHLSPlaylist - Open Failed: %1\n\t\t\t%2")
+            LOG(VB_GENERAL, LOG_ERR, QString("IsHLSPlaylist - Open Failed:%1 url:%2")
                 .arg(downloader.ErrorString(), url));
             return false;
         }

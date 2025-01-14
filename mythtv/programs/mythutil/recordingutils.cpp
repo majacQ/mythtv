@@ -9,36 +9,16 @@
 #include <QScopedPointer>
 
 // libmyth* includes
-#include "exitcodes.h"
-#include "mythlogging.h"
-#include "remoteutil.h"
-#include "remotefile.h"
-#include "mythsystem.h"
-#include "mythdirs.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsystem.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/stringutil.h"
 
 // Local includes
 #include "recordingutils.h"
-
-static QString formatSize(int64_t sizeKB, int prec)
-{
-    if (sizeKB>1024*1024*1024) // Terabytes
-    {
-        double sizeGB = sizeKB/(1024*1024*1024.0);
-        return QString("%1 TB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024*1024) // Gigabytes
-    {
-        double sizeGB = sizeKB/(1024*1024.0);
-        return QString("%1 GB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024) // Megabytes
-    {
-        double sizeMB = sizeKB/1024.0;
-        return QString("%1 MB").arg(sizeMB, 0, 'f', (sizeMB>10)?0:prec);
-    }
-    // Kilobytes
-    return QString("%1 KB").arg(sizeKB);
-}
 
 static QString CreateProgramInfoString(const ProgramInfo &pginfo)
 {
@@ -57,7 +37,11 @@ static QString CreateProgramInfoString(const ProgramInfo &pginfo)
     if (!pginfo.GetSubtitle().isEmpty())
     {
         extra = QString(" ~ ") + pginfo.GetSubtitle();
-        int maxll = std::max(static_cast<int>(title.length()), 20);
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        int maxll = std::max(title.length(), 20);
+#else
+        int maxll = std::max(title.length(), 20LL);
+#endif
         if (extra.length() > maxll)
             extra = extra.left(maxll - 3) + "...";
     }
@@ -208,7 +192,7 @@ static int CheckRecordings(const MythUtilCommandLineParser &cmdline)
         {
             std::cout << qPrintable(CreateProgramInfoString(*p)) << std::endl;
             std::cout << qPrintable(p->GetPlaybackURL()) << std::endl;
-            std::cout << "File size is " << qPrintable(formatSize(p->GetFilesize(), 2)) << std::endl;
+            std::cout << "File size is " << qPrintable(StringUtil::formatBytes(p->GetFilesize(), 2)) << std::endl;
             std::cout << "-------------------------------------------------------------------" << std::endl;
         }
     }

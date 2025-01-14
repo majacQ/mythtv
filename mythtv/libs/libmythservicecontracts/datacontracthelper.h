@@ -4,7 +4,7 @@
 //
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -144,7 +144,7 @@ inline void DeleteListContents( QVariantList &list )
 template< class T >
 void CopyListContents( QObject *pParent, QVariantList &dst, const QVariantList &src )
 {
-    for (const auto& vValue : qAsConst(src))
+    for (const auto& vValue : std::as_const(src))
     {
         if ( vValue.canConvert< QObject* >())
         {

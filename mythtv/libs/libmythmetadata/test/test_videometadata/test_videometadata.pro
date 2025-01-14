@@ -6,10 +6,7 @@ using_opengl: QT += opengl
 
 TEMPLATE = app
 TARGET = test_videometadata
-DEPENDPATH += . ../.. ../../../libmythbase ../../../libmythtv ../../../libmyth
-DEPENDPATH += ../../../libmythui
-INCLUDEPATH += . ../.. ../../../libmythbase ../../../libmythtv ../../../libmyth
-INCLUDEPATH += ../../../libmythui ../../../libmythservicecontracts
+INCLUDEPATH += ../../..
 
 LIBS += -L../../../libmythbase -lmythbase-$$LIBVERSION
 LIBS += -L../.. -lmythmetadata-$$LIBVERSION
@@ -44,10 +41,10 @@ QMAKE_LFLAGS += -Wl,$$_RPATH_$(PWD)/../../../libmythservicecontracts
 QMAKE_LFLAGS += -Wl,$$_RPATH_$(PWD)/../../../libmythtv
 QMAKE_LFLAGS += -Wl,$$_RPATH_$(PWD)/../../../libmythfreemheg
 
-!using_libexiv_external {
+!using_system_libexiv2 {
     LIBS += -L../../../../external/libexiv2 -lmythexiv2-0.28
     QMAKE_LFLAGS += -Wl,$$_RPATH_$(PWD)/../../../../external/libexiv2 -lexpat
-    freebsd: LIBS += -lprocstat
+    freebsd: LIBS += -lprocstat -liconv
     darwin: LIBS += -liconv -lz
 }
 

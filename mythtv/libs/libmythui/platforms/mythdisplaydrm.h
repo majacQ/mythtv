@@ -5,8 +5,8 @@
 #include <QObject>
 
 // MythTV
-#include "platforms/mythdrmdevice.h"
-#include "mythdisplay.h"
+#include "libmythui/mythdisplay.h"
+#include "libmythui/platforms/mythdrmdevice.h"
 
 class MUI_PUBLIC MythDisplayDRM : public MythDisplay
 {
@@ -37,7 +37,7 @@ class MUI_PUBLIC MythDisplayDRM : public MythDisplay
 
   private:
     MythDRMPtr m_device;
-    QMap<uint64_t, int> m_modeMap { };
+    QMap<uint64_t, int> m_modeMap;
 };
 
 #endif

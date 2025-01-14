@@ -7,21 +7,24 @@
 #include <QStringList>
 
 // MythTV headers
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythupnp/ssdp.h"
+
 #include "cardutil.h"
-#include "mythlogging.h"
-#include "mythtimer.h"
 #include "satiputils.h"
-#include "ssdp.h"
 
 #define LOC QString("SatIP: ")
 
-static constexpr std::chrono::milliseconds SEARCH_TIME_MS { 3s };
-#define SATIP_URI "urn:ses-com:device:SatIPServer:1"
+namespace {
+    const QString SATIP_URI = "urn:ses-com:device:SatIPServer:1";
+    constexpr std::chrono::milliseconds SEARCH_TIME_MS { 3s };
+}
 
 QStringList SatIP::probeDevices(void)
 {
-    const std::chrono::milliseconds milliSeconds = SEARCH_TIME_MS;
-    auto seconds = duration_cast<std::chrono::seconds>(milliSeconds);
+    const std::chrono::milliseconds totalSearchTime = SEARCH_TIME_MS;
+    auto seconds = duration_cast<std::chrono::seconds>(totalSearchTime);
 
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("Using UPNP to search for Sat>IP servers (%1 secs)")
         .arg(seconds.count()));
@@ -31,10 +34,10 @@ QStringList SatIP::probeDevices(void)
     MythTimer totalTime; totalTime.start();
     MythTimer searchTime; searchTime.start();
 
-    while (totalTime.elapsed() < milliSeconds)
+    while (totalTime.elapsed() < totalSearchTime)
     {
         std::this_thread::sleep_for(25ms);
-        std::chrono::milliseconds ttl = milliSeconds - totalTime.elapsed();
+        std::chrono::milliseconds ttl = totalSearchTime - totalTime.elapsed();
         if (searchTime.elapsed() > 249ms && ttl > 1s)
         {
             auto ttl_s = duration_cast<std::chrono::seconds>(ttl);
@@ -45,10 +48,10 @@ QStringList SatIP::probeDevices(void)
         }
     }
 
-    return SatIP::doUPNPsearch();
-};
+    return SatIP::doUPNPsearch(true);
+}
 
-QStringList SatIP::doUPNPsearch(void)
+QStringList SatIP::doUPNPsearch(bool loginfo)
 {
     QStringList result;
 
@@ -57,13 +60,16 @@ QStringList SatIP::doUPNPsearch(void)
     if (!satipservers)
     {
         LOG(VB_GENERAL, LOG_INFO, LOC + "No UPnP Sat>IP servers found");
-        return QStringList();
+        return {};
     }
 
     int count = satipservers->Count();
-    if (count)
+    if (count > 0)
     {
-        LOG(VB_GENERAL, LOG_INFO, LOC + QString("Found %1 possible Sat>IP servers").arg(count));
+        if (loginfo)
+        {
+            LOG(VB_GENERAL, LOG_INFO, LOC + QString("Found %1 possible Sat>IP servers").arg(count));
+        }
     }
     else
     {
@@ -73,7 +79,7 @@ QStringList SatIP::doUPNPsearch(void)
     EntryMap map;
     satipservers->GetEntryMap(map);
 
-    for (auto *BE : qAsConst(map))
+    for (auto *BE : std::as_const(map))
     {
         QString friendlyName = BE->GetFriendlyName();
         UPnpDeviceDesc *desc = BE->GetDeviceDesc();
@@ -94,7 +100,7 @@ QStringList SatIP::doUPNPsearch(void)
             {
                 QStringList caps = attrib.m_sValue.split(",");
 
-                for (const auto& cap : caps)
+                for (const auto& cap : std::as_const(caps))
                 {
                     QStringList tuner = cap.split("-");
 
@@ -111,7 +117,10 @@ QStringList SatIP::doUPNPsearch(void)
                                                  QString::number(i),
                                                  tuner.at(0));
                         result << device;
-                        LOG(VB_GENERAL, LOG_INFO, LOC + QString("Found %1").arg(device));
+                        if (loginfo)
+                        {
+                            LOG(VB_GENERAL, LOG_INFO, LOC + QString("Found %1").arg(device));
+                        }
                     }
                 }
             }
@@ -123,13 +132,28 @@ QStringList SatIP::doUPNPsearch(void)
     satipservers = nullptr;
 
     return result;
-};
+}
+
+QStringList SatIP::findServers(void)
+{
+    QStringList devs;
+    SSDPCacheEntries *satipservers = SSDP::Find(SATIP_URI);
+    if (satipservers && satipservers->Count() > 0)
+    {
+        devs = SatIP::doUPNPsearch(false);
+    }
+    else
+    {
+        devs = SatIP::probeDevices();
+    }
+    return devs;
+}
 
 QString SatIP::findDeviceIP(const QString& deviceuuid)
 {
-    QStringList devs = SatIP::probeDevices();
+    QStringList devs = SatIP::findServers();
 
-    for (const auto& dev : devs)
+    for (const auto& dev : std::as_const(devs))
     {
         QStringList devinfo = dev.split(" ");
         const QString& id = devinfo.at(0);
@@ -147,31 +171,31 @@ CardUtil::INPUT_TYPES SatIP::toDVBInputType(const QString& deviceid)
     QStringList dev = deviceid.split(":");
     if (dev.length() < 3)
     {
-        return CardUtil::ERROR_UNKNOWN;
+        return CardUtil::INPUT_TYPES::ERROR_UNKNOWN;
     }
 
     QString type = dev.at(2).toUpper();
     if (type == "DVBC")
     {
-        return CardUtil::DVBC;
+        return CardUtil::INPUT_TYPES::DVBC;
     }
     if (type == "DVBC2")
     {
-        return CardUtil::DVBC; // DVB-C2 is not supported yet.
+        return CardUtil::INPUT_TYPES::DVBC; // DVB-C2 is not supported yet.
     }
     if (type == "DVBT")
     {
-        return CardUtil::DVBT;
+        return CardUtil::INPUT_TYPES::DVBT;
     }
     if (type == "DVBT2")
     {
-        return CardUtil::DVBT2;
+        return CardUtil::INPUT_TYPES::DVBT2;
     }
     if (type == "DVBS2")
     {
-        return CardUtil::DVBS2;
+        return CardUtil::INPUT_TYPES::DVBS2;
     }
-    return CardUtil::ERROR_UNKNOWN;
+    return CardUtil::INPUT_TYPES::ERROR_UNKNOWN;
 }
 
 int SatIP::toTunerType(const QString& deviceid)

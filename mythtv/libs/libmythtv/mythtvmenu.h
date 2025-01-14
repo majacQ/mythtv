@@ -8,21 +8,21 @@
 // MythTV
 #include "mythtvexp.h"
 
-enum MenuCategory
+enum MenuCategory : std::uint8_t
 {
     kMenuCategoryItem,
     kMenuCategoryItemlist,
     kMenuCategoryMenu
 };
 
-enum MenuShowContext
+enum MenuShowContext : std::uint8_t
 {
     kMenuShowActive,
     kMenuShowInactive,
     kMenuShowAlways
 };
 
-enum MenuCurrentContext
+enum MenuCurrentContext : std::uint8_t
 {
     kMenuCurrentDefault,
     kMenuCurrentActive,
@@ -33,7 +33,7 @@ enum MenuCurrentContext
 // and stashed inside of a TV object. They are used to find the
 // original menu again, instead of serializing/deserializing the
 // entire MythTVMenu object to/from a QVariant.
-enum MenuTypeId
+enum MenuTypeId : std::uint8_t
 {
     kMenuIdUnknown,
     kMenuIdPlayback,
@@ -54,13 +54,13 @@ class MythTVMenuItemContext
                    bool IsMenu, const QString& TextArg) const;
 
     MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
-                          QString Name, MenuCurrentContext Current, bool Display);
+                          QString Name, MenuCurrentContext Current, bool Visible);
     MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
                           MenuShowContext Context, MenuCurrentContext Current,
-                          QString Action, QString ActionText, bool Display);
+                          QString Action, QString ActionText, bool Visible);
     MythTVMenuItemContext(const MythTVMenu& Menu, const QDomNode& Node,
                           MenuShowContext Context, MenuCurrentContext Current,
-                          QString Action, bool Display);
+                          QString Action, bool Visible);
 
     const MythTVMenu&  m_menu;
     const QDomNode&    m_node;
@@ -70,7 +70,7 @@ class MythTVMenuItemContext
     MenuCurrentContext m_currentContext { kMenuCurrentDefault };
     const QString      m_action;
     const QString      m_actionText;
-    bool               m_doDisplay      { false };
+    bool               m_visible        { false };
 };
 
 class MythTVMenuItemDisplayer
@@ -98,7 +98,7 @@ class MTV_PUBLIC MythTVMenu
     QString     Translate(const QString& Text) const;
     bool        Show(const QDomNode& Node, const QDomNode& Selected,
                      MythTVMenuItemDisplayer& Displayer, MythOSDDialogData* Menu,
-                     bool Display = true) const;
+                     bool Visible = true) const;
     QString     GetName() const;
     const char* GetTranslationContext() const;
     const QString& GetKeyBindingContext() const;

@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+// Qt
 #include <QStringList>
 #include <QDateTime>
 #include <QMultiMap>
@@ -17,11 +18,11 @@
 #include <QMap>
 #include <QSet>
 
-#include "jobqueue.h"
-#include "tv_play.h"
-
-#include "mythscreentype.h"
-#include "metadatafactory.h"
+// MythTV
+#include "libmythmetadata/metadatafactory.h"
+#include "libmythtv/jobqueue.h"
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythscreentype.h"
 
 // mythfrontend
 #include "schedulecommon.h"
@@ -51,13 +52,11 @@ using ProgramMap = QMap<QString,ProgramList>;
 using Str2StrMap = QMap<QString,QString>;
 using PlaybackBoxCb = void (PlaybackBox::*)();
 
-static constexpr int kMaxJobs {7};
+static constexpr size_t kMaxJobs {7};
 
-enum {
-    kArtworkFanTimeout    = 300,
-    kArtworkBannerTimeout = 50,
-    kArtworkCoverTimeout  = 50,
-};
+static constexpr uint16_t kArtworkFanTimeout    { 300 };
+static constexpr uint8_t  kArtworkBannerTimeout {  50 };
+static constexpr uint8_t  kArtworkCoverTimeout  {  50 };
 
 class PlaybackBox : public ScheduleCommon
 {
@@ -67,7 +66,7 @@ class PlaybackBox : public ScheduleCommon
 
   public:
     // ViewType values cannot change; they are stored in the database.
-    enum ViewType {
+    enum ViewType : std::uint8_t {
         TitlesOnly = 0,
         TitlesCategories = 1,
         TitlesCategoriesRecGroups = 2,
@@ -75,17 +74,17 @@ class PlaybackBox : public ScheduleCommon
         Categories = 4,
         CategoriesRecGroups = 5,
         RecGroups = 6,
-        ViewTypes,                  // placeholder value, not in database
+        ViewTypes = 7,              // placeholder value, not in database
     };
 
     // Sort function when TitlesOnly. Values are stored in database.
-    enum ViewTitleSort {
+    enum ViewTitleSort : std::uint8_t {
         TitleSortAlphabetical = 0,
         TitleSortRecPriority = 1,
-        TitleSortMethods,           // placeholder value, not in database
+        TitleSortMethods = 2,       // placeholder value, not in database
     };
 
-    enum ViewMask {
+    enum ViewMask : std::uint16_t {
         VIEW_NONE       =  0x0000,
         VIEW_TITLES     =  0x0001,
         VIEW_CATEGORIES =  0x0002,
@@ -97,23 +96,23 @@ class PlaybackBox : public ScheduleCommon
         VIEW_WATCHED    =  0x8000
     };
 
-    enum DeletePopupType
+    enum DeletePopupType : std::uint8_t
     {
         kDeleteRecording,
         kStopRecording,
         kForceDeleteRecording,
     };
 
-    enum DeleteFlags
+    enum DeleteFlags : std::uint8_t
     {
-        kNoFlags       = 0x00,
+        kNoDelFlags    = 0x00,
         kForgetHistory = 0x01,
         kForce         = 0x02,
         kIgnore        = 0x04,
         kAllRemaining  = 0x08,
     };
 
-    enum killStateType
+    enum killStateType : std::uint8_t
     {
         kNvpToPlay,
         kNvpToStop,
@@ -147,8 +146,8 @@ class PlaybackBox : public ScheduleCommon
     void ItemLoaded(MythUIButtonListItem *item);
     void selected(MythUIButtonListItem *item);
     void updateRecGroup(MythUIButtonListItem *sel_item);
-    void PlayFromBookmarkOrProgStart(MythUIButtonListItem *item);
-    void PlayFromBookmarkOrProgStart() { PlayFromBookmarkOrProgStart(nullptr); }
+    void PlayFromAnyMark(MythUIButtonListItem *item);
+    void PlayFromAnyMark() { PlayFromAnyMark(nullptr); }
     void PlayFromBookmark(MythUIButtonListItem *item);
     void PlayFromBookmark() { PlayFromBookmark(nullptr); }
     void PlayFromBeginning(MythUIButtonListItem *item);
@@ -157,6 +156,7 @@ class PlaybackBox : public ScheduleCommon
     void PlayFromLastPlayPos() { PlayFromLastPlayPos(nullptr); }
     void deleteSelected(MythUIButtonListItem *item);
     void ClearBookmark();
+    void ClearLastPlayPos();
     void SwitchList(void);
 
     void ShowGroupPopup(void);
@@ -194,7 +194,7 @@ class PlaybackBox : public ScheduleCommon
     void askDelete();
     void Undelete(void);
     void Delete(PlaybackBox::DeleteFlags flags);
-    void Delete() { Delete(kNoFlags); }
+    void Delete() { Delete(kNoDelFlags); }
     void DeleteForgetHistory(void)      { Delete(kForgetHistory); }
     void DeleteForce(void)              { Delete(kForce);         }
     void DeleteIgnore(void)             { Delete(kIgnore);        }
@@ -338,8 +338,7 @@ class PlaybackBox : public ScheduleCommon
     void HandlePreviewEvent(const QStringList &list);
     void HandleRecordingRemoveEvent(uint recordingID);
     void HandleRecordingAddEvent(const ProgramInfo &evinfo);
-    void HandleUpdateProgramInfoEvent(const ProgramInfo &evinfo);
-    void HandleUpdateProgramInfoFileSizeEvent(uint recordingID, uint64_t filesize);
+    void HandleUpdateItemEvent(uint recordingId, uint flags);
 
     void ScheduleUpdateUIList(void);
     void ShowMenu(void) override; // MythScreenType
@@ -362,6 +361,9 @@ class PlaybackBox : public ScheduleCommon
     MythUIText *m_noRecordingsText            {nullptr};
 
     MythUIImage *m_previewImage               {nullptr};
+
+    MythUIProgressBar *m_recordedProgress     {nullptr};
+    MythUIProgressBar *m_watchedProgress      {nullptr};
 
     QString      m_artHostOverride;
     constexpr static int kNumArtImages = 3;
@@ -447,7 +449,7 @@ class PlaybackBox : public ScheduleCommon
 
     // Network Control Variables //////////////////////////////////////////////
     mutable QMutex      m_ncLock;
-    deque<QString>      m_networkControlCommands;
+    std::deque<QString> m_networkControlCommands;
 
     // Other
     TV                 *m_player              {nullptr};
@@ -462,6 +464,7 @@ class PlaybackBox : public ScheduleCommon
     bool                m_groupSelected       {false};
     bool                m_passwordEntered     {false};
 
+    bool                m_alwaysShowWatchedProgress {false};
     // This class caches the contents of the jobqueue table to avoid excessive
     // DB queries each time the PBB selection changes (currently 4 queries per
     // displayed item).  The cache remains valid for 15 seconds

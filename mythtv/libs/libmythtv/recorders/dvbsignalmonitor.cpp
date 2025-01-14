@@ -1,8 +1,8 @@
 // -*- Mode: c++ -*-
 
 #include <cerrno>
-#include <cstring>
 #include <cmath>
+#include <cstring>
 
 #include <unistd.h>
 
@@ -10,20 +10,19 @@
 #include <QCoreApplication>
 
 // MythTV headers
-#include "mythcontext.h"
-#include "mythdbcon.h"
-#include "dvbsignalmonitor.h"
-#include "dvbchannel.h"
-#include "dvbstreamdata.h"
-#include "atscstreamdata.h"
-#include "mpegtables.h"
-#include "atsctables.h"
-#include "cardutil.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdbcon.h"
 
-#include "dvbtypes.h"
+#include "cardutil.h"
 #include "dvbchannel.h"
 #include "dvbrecorder.h"
+#include "dvbsignalmonitor.h"
 #include "dvbstreamhandler.h"
+#include "dvbtypes.h"
+#include "mpeg/atscstreamdata.h"
+#include "mpeg/atsctables.h"
+#include "mpeg/dvbstreamdata.h"
+#include "mpeg/mpegtables.h"
 
 #define LOC QString("DVBSigMon[%1](%2): ") \
             .arg(m_inputid).arg(m_channel->GetDevice())
@@ -91,26 +90,68 @@ DVBSignalMonitor::DVBSignalMonitor(int db_cardnum, DVBChannel* _channel,
     // in practice, however this is correct for the 4.0 DVB API
     m_signalStrength.SetRange(0, 65535);
 
+    // Determine the signal monitoring capabilities from the card and
+    // do not use the capabilities that are not present.
     uint64_t rmflags = 0;
+    bool mok = false;
 
-#define DVB_IO(FLAG, METHOD, MSG) \
-  do { if (HasFlags(FLAG)) { bool mok; _channel->METHOD(&mok); \
-          if (!mok) { \
-              LOG(VB_GENERAL, LOG_WARNING, LOC+"Cannot "+(MSG)+ENO); \
-              rmflags |= (FLAG); } \
-          else { \
-              LOG(VB_CHANNEL, LOG_INFO, LOC + "Can " + (MSG)); } } } while (false)
+    auto log_message = [&mok](const QString& loc, const QString& msg)
+    { 
+        if (mok)
+            LOG(VB_CHANNEL, LOG_INFO, loc + "Can " + msg);
+        else
+            LOG(VB_GENERAL, LOG_WARNING, loc + "Cannot " + msg + ENO);
+    };
 
-    DVB_IO(kSigMon_WaitForSig, GetSignalStrength,
-           "measure Signal Strength");
-    DVB_IO(kDVBSigMon_WaitForSNR, GetSNR,
-           "measure S/N");
-    DVB_IO(kDVBSigMon_WaitForBER, GetBitErrorRate,
-           "measure Bit Error Rate");
-    DVB_IO(kDVBSigMon_WaitForUB, GetUncorrectedBlockCount,
-           "count Uncorrected Blocks");
+    auto log_message_channel = [&mok](const QString& loc, const QString& msg)
+    {
+        if (mok)
+            LOG(VB_CHANNEL, LOG_INFO, loc + "Can " + msg);
+        else
+            LOG(VB_CHANNEL, LOG_WARNING, loc + "Cannot " + msg + ENO);
+    };
 
-#undef DVB_IO
+    auto update_rmflags = [&mok, &rmflags](uint64_t flag)
+    {
+        if (!mok)
+            rmflags |= flag;
+    };
+
+    // Signal strength
+    auto flag = kSigMon_WaitForSig;
+    if (HasFlags(flag))
+    {
+        _channel->GetSignalStrength(&mok);
+        update_rmflags(flag);
+        log_message(LOC, "measure Signal Strength");
+    }
+
+    // Signal/Noise ratio
+    flag = kDVBSigMon_WaitForSNR;
+    if (HasFlags(flag))
+    {
+        _channel->GetSNR(&mok);
+        update_rmflags(flag);
+        log_message(LOC, "measure S/N");
+    }
+
+    // Bit error rate
+    flag = kDVBSigMon_WaitForBER;
+    if (HasFlags(flag))
+    {
+        _channel->GetBitErrorRate(&mok);
+        update_rmflags(flag);
+        log_message_channel(LOC, "measure Bit Error Rate");
+    }
+
+    // Uncorrected block count
+    flag = kDVBSigMon_WaitForUB;
+    if (HasFlags(flag))
+    {
+        _channel->GetUncorrectedBlockCount(&mok);
+        update_rmflags(flag);
+        log_message_channel(LOC, "count Uncorrected Blocks");
+    }
 
     RemoveFlags(rmflags);
 
@@ -286,7 +327,9 @@ void DVBSignalMonitor::UpdateValues(void)
             m_streamHandler->RetuneMonitor();
         }
         else
+        {
             RemoveFlags(SignalMonitor::kDVBSigMon_WaitForPos);
+        }
     }
 
     bool wasLocked = false;

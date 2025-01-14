@@ -8,16 +8,12 @@
 #include <QStringList>
 #include <QCoreApplication>
 
-// libmythbase
-#include "mythtvexp.h"
-
-// libmyth
-#include "programinfo.h"
-
-// libmythtv
-#include "programtypes.h"
-#include "recordinginfo.h"
-#include "recordingtypes.h"
+// MythTV
+#include "libmythbase/programinfo.h"
+#include "libmythbase/programtypes.h"
+#include "libmythbase/recordingtypes.h"
+#include "libmythtv/mythtvexp.h"
+#include "libmythtv/recordinginfo.h"
 
 /** \class RecordingRule
  *  \brief Internal representation of a recording rule, mirrors the record
@@ -44,7 +40,9 @@ class MTV_PUBLIC RecordingRule
     bool LoadByProgram(const ProgramInfo* proginfo);
     bool LoadBySearch(RecSearchType lsearch, const QString& textname, const QString& forwhat,
                       QString joininfo = "", ProgramInfo *pginfo = nullptr);
-    bool LoadTemplate(const QString& category, const QString& categoryType = "Default");
+    bool LoadTemplate(const QString& title,
+                      const QString& category = "Default",
+                      const QString& categoryType = "Default");
 
     bool ModifyPowerSearchByID(int rid, const QString& textname, QString forwhat,
                                QString joininfo = "");
@@ -97,8 +95,8 @@ class MTV_PUBLIC RecordingRule
     uint                   m_episode            {0};
 
     // Associated data for rule types
-    int                    m_channelid          {0};
     QString                m_station;     /// callsign?
+    int                    m_channelid          {0};
     /// Time for timeslot rules
     QTime                  m_findtime;
     int                    m_findid;
@@ -115,6 +113,7 @@ class MTV_PUBLIC RecordingRule
     RecordingDupMethodType m_dupMethod          {kDupCheckSubThenDesc};
     RecordingDupInType     m_dupIn              {kDupsInAll};
     unsigned               m_filter             {0};
+    AutoExtendType         m_autoExtend         {AutoExtendType::None};
 
     // Storage Options
     // TODO: These should all be converted to integer IDs instead

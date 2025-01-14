@@ -1,13 +1,18 @@
 #ifndef AVFECODER_H_
 #define AVFECODER_H_
 
+// C++ headers
 #include <cstdint>
 
+// QT headers
 #include <QObject>
 
+// MythTV headers
+#include <libmyth/audio/audiooutputsettings.h>
+#include <libmythtv/mythavutil.h>
+
+// Mythmusic Headers
 #include "decoder.h"
-#include "mythavutil.h"
-#include <audiooutputsettings.h>
 #include "remoteavformatcontext.h"
 
 class QTimer;
@@ -46,15 +51,16 @@ class avfDecoder : public QObject, public Decoder
 
     QString m_devicename;
 
-    AVInputFormat *m_inputFormat          {nullptr};
+    const AVInputFormat *m_inputFormat    {nullptr};
     RemoteAVFormatContext *m_inputContext {nullptr};
     AVCodecContext *m_audioDec            {nullptr};
-    MythCodecMap m_codecMap               {};
+    MythCodecMap m_codecMap;
 
     bool m_inputIsFile                    {false};
 
     QTimer *m_mdataTimer                  {nullptr};
     QString m_lastMetadata;
+    QString m_lastMetadataParsed;
 
     int m_errCode                         {0};
 };

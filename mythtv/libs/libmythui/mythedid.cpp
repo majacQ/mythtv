@@ -1,5 +1,5 @@
 // MythTV
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "mythedid.h"
 
 // Qt
@@ -8,19 +8,19 @@
 // Std
 #include <cmath>
 
-#define DESCRIPTOR_ALPHANUMERIC_STRING 0xFE
-#define DESCRIPTOR_PRODUCT_NAME 0xFC
-#define DESCRIPTOR_RANGE_LIMITS 0xFD
-#define DESCRIPTOR_SERIAL_NUMBER 0xFF
-#define DATA_BLOCK_OFFSET 0x36
-#define SERIAL_OFFSET     0x0C
-#define VERSION_OFFSET    0x12
-#define DISPLAY_OFFSET    0x14
-#define WIDTH_OFFSET      0x15
-#define HEIGHT_OFFSET     0x16
-#define GAMMA_OFFSET      0x17
-#define FEATURES_OFFSET   0x18
-#define EXTENSIONS_OFFSET 0x7E
+//static constexpr uint8_t DESCRIPTOR_ALPHANUMERIC_STRING { 0xFE };
+static constexpr uint8_t DESCRIPTOR_PRODUCT_NAME          { 0xFC };
+static constexpr uint8_t DESCRIPTOR_RANGE_LIMITS          { 0xFD };
+static constexpr uint8_t DESCRIPTOR_SERIAL_NUMBER         { 0xFF };
+static constexpr size_t DATA_BLOCK_OFFSET                 { 0x36 };
+static constexpr size_t SERIAL_OFFSET                     { 0x0C };
+static constexpr size_t VERSION_OFFSET                    { 0x12 };
+//static constexpr size_t DISPLAY_OFFSET                  { 0x14 };
+static constexpr size_t WIDTH_OFFSET                      { 0x15 };
+static constexpr size_t HEIGHT_OFFSET                     { 0x16 };
+static constexpr size_t GAMMA_OFFSET                      { 0x17 };
+static constexpr size_t FEATURES_OFFSET                   { 0x18 };
+static constexpr size_t EXTENSIONS_OFFSET                 { 0x7E };
 
 #define LOC QString("EDID: ")
 
@@ -132,9 +132,9 @@ static QString ParseEdidString(const quint8* data, bool Replace)
     // different values for serialNumber from QScreen
     if (Replace)
     {
-        for (int i = 0; i < buffer.count(); ++i) {
-            if (buffer[i] < '\040' || buffer[i] > '\176')
-                buffer[i] = '-';
+        for (auto && i : buffer) {
+            if (i < '\040' || i > '\176')
+                i = '-';
         }
     }
     return QString::fromLatin1(buffer.trimmed());
@@ -274,9 +274,9 @@ bool MythEDID::ParseBaseBlock(const quint8* Data)
                  qFuzzyCompare(m_gamma + 1.0F, 2.20F + 1.0F);
 
     // Parse blocks
-    for (uint i = 0; i < 5; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
-        uint offset = DATA_BLOCK_OFFSET + i * 18;
+        size_t offset = DATA_BLOCK_OFFSET + (i * 18);
         if (Data[offset] == 0 || Data[offset + 1] == 0 || Data[offset + 2] == 0)
             ParseDisplayDescriptor(Data, offset);
         else
@@ -322,7 +322,7 @@ void MythEDID::ParseDisplayDescriptor(const quint8* Data, uint Offset)
     }
 }
 
-void MythEDID::ParseDetailedTimingDescriptor(const quint8* Data, uint Offset)
+void MythEDID::ParseDetailedTimingDescriptor(const quint8* Data, size_t Offset)
 {
     // We're only really interested in a more accurate display size
     auto width = Data[Offset + 12] + ((Data[Offset + 14] & 0xF0) << 4);
@@ -337,7 +337,7 @@ void MythEDID::ParseDetailedTimingDescriptor(const quint8* Data, uint Offset)
     }
 }
 
-bool MythEDID::ParseCTA861(const quint8* Data, uint Offset)
+bool MythEDID::ParseCTA861(const quint8* Data, size_t Offset)
 {
     if (Offset >= m_size)
         return false;
@@ -354,7 +354,7 @@ bool MythEDID::ParseCTA861(const quint8* Data, uint Offset)
     return result;
 }
 
-bool MythEDID::ParseCTABlock(const quint8* Data, uint Offset)
+bool MythEDID::ParseCTABlock(const quint8* Data, size_t Offset)
 {
     uint length = Data[Offset] & 0x1F;
     uint type  = (Data[Offset] & 0xE0) >> 5;
@@ -371,7 +371,7 @@ bool MythEDID::ParseCTABlock(const quint8* Data, uint Offset)
     return true;
 }
 
-bool MythEDID::ParseVSDB(const quint8* Data, uint Offset, uint Length)
+bool MythEDID::ParseVSDB(const quint8* Data, size_t Offset, size_t Length)
 {
     if (Offset + 3 >= m_size)
         return false;
@@ -452,7 +452,7 @@ bool MythEDID::ParseVSDB(const quint8* Data, uint Offset, uint Length)
     return true;
 }
 
-bool MythEDID::ParseExtended(const quint8* Data, uint Offset, uint Length)
+bool MythEDID::ParseExtended(const quint8* Data, size_t Offset, size_t Length)
 {
     if (Offset + 1 >= m_size)
         return false;
@@ -510,7 +510,7 @@ void MythEDID::Debug() const
     }
 
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("Version:1.%1 Size:%2 Exensions:%3")
-            .arg(m_minorVersion).arg(m_size).arg(m_size / 128 -1));
+            .arg(m_minorVersion).arg(m_size).arg((m_size / 128) - 1));
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("Gamma:%1 sRGB:%2")
             .arg(static_cast<double>(m_gamma)).arg(m_sRGB));
     LOG(VB_GENERAL, LOG_INFO, LOC + "Display chromaticity:-");

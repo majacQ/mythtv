@@ -3,15 +3,21 @@
 
 #include <utility>
 
+#ifdef HAVE_LIBBLURAY
+#include <libbluray/bluray.h>
+#else
+#include "libbluray/bluray.h"
+#endif
+
 // Qt headers
+#include <QCoreApplication> // for Q_DECLARE_TR_FUNCTIONS
 #include <QList>
 #include <QPair>
 #include <QString>
 
 // MythTV headers
-#include "mythtypes.h"
+#include "libmythbase/mythtypes.h"
 #include "mythmetaexp.h"
-#include "libbluray/bluray.h"
 
 using BlurayTitles = QList< QPair < uint,QString > >;
 

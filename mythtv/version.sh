@@ -80,15 +80,15 @@ else
     esac
 fi
 
-if ! echo "${SOURCE_VERSION}" | egrep -i "v[0-9]+.*"   ; then
+if ! echo "${SOURCE_VERSION}" | grep -Ei "v[0-9]+.*"   ; then
     # Invalid version - use SRC_VERSION file
     echo "WARNING: Invalid source version ${SOURCE_VERSION}, must start with v and a number, will use SRC_VERSION file instead"
     . $GITTREEDIR/SRC_VERSION
 fi
 
 src_vn=`echo "${SOURCE_VERSION}" | sed "s/^[Vv]// ; s/-.*// ; s/\..*//"`
-MYTH_BINARY_VERSION=`grep "#define *MYTH_BINARY_VERSION" libs/libmythbase/mythversion.h \
-  | sed 's/#define// ; s/MYTH_BINARY_VERSION// ; s/ //g ; s/"//g'`
+MYTH_BINARY_VERSION=`grep -m 1 "MYTHTV_BINARY_VERSION" configure \
+  | sed 's/.*"\(.*\)".*/\1/'`
 
 bin_vn=`echo $MYTH_BINARY_VERSION | sed 's/\..*//'`
 
@@ -98,9 +98,10 @@ if ! test $src_vn -eq $bin_vn ; then
 fi
 
 cat > .vers.new <<EOF
-#ifndef MYTH_SOURCE_VERSION
-#define MYTH_SOURCE_VERSION "${SOURCE_VERSION}"
-#define MYTH_SOURCE_PATH    "${BRANCH}"
+#ifndef MYTH_SOURCE_VERSION_H
+#define MYTH_SOURCE_VERSION_H
+static constexpr const char* MYTH_SOURCE_VERSION { "${SOURCE_VERSION}" };
+static constexpr const char* MYTH_SOURCE_PATH    { "${BRANCH}" };
 #endif
 EOF
 

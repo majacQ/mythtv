@@ -4,7 +4,7 @@
 // Qt headers
 
 // MythTV headers
-#include "mthread.h"
+#include <libmythbase/mthread.h>
 
 // zm
 #include "zmdefines.h"
@@ -26,7 +26,7 @@ class AlarmNotifyThread : public MThread
     void run(void) override; // MThread
 
   private:
-    volatile bool m_stop;
+    volatile bool m_stop{false};
 };
 
 #endif // ALARMNOTIFYTHREAD_H

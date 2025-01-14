@@ -10,12 +10,13 @@
 #include <QWaitCondition>
 
 // MythTV headers
-#include "audiooutput.h"
-#include "mythlogging.h"
-#include "mthread.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythlogging.h"
 
+#include "audiooutput.h"
 #include "samplerate.h"
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #define VBAUDIO(str)   LOG(VB_AUDIO, LOG_INFO, LOC + (str))
 #define VBAUDIOTS(str) LOG(VB_AUDIO | VB_TIMESTAMP, LOG_INFO, LOC + (str))
 #define VBGENERAL(str) LOG(VB_GENERAL, LOG_INFO, LOC + (str))
@@ -23,6 +24,7 @@
 #define VBWARN(str)    LOG(VB_GENERAL, LOG_WARNING, LOC + (str))
 #define VBERRENO(str)  Error(LOC + (str) + ": " + ENO)
 #define VBERRNOCONST(str)   LOG(VB_GENERAL, LOG_ERR, LOC + (str) + ": " + ENO)
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 namespace soundtouch {
 class SoundTouch;
@@ -37,7 +39,7 @@ public:
     AsyncLooseLock() = default;
     void Clear() { m_head = m_tail = 0; }
     void Ref() { m_head++; }
-    bool TestAndDeref() { bool r = false; if ((r=(m_head != m_tail))) m_tail++; return r; }
+    bool TestAndDeref() { bool r = (m_head != m_tail); if (r) m_tail++; return r; }
 private:
     int m_head {0};
     int m_tail {0};
@@ -203,7 +205,7 @@ class AudioOutputBase : public AudioOutput, public MThread
 
     int               m_configuredChannels         {0};
     int               m_maxChannels                {0};
-    enum
+    enum : std::int8_t
     {
         QUALITY_DISABLED = -1,
         QUALITY_LOW      =  0,
@@ -282,17 +284,17 @@ class AudioOutputBase : public AudioOutput, public MThread
 
     // All actual buffers
     SRC_DATA          m_srcData                           {};
-    uint              m_memoryCorruptionTest0             {0xdeadbeef};
+    [[maybe_unused]] uint m_memoryCorruptionTest0         {0xdeadbeef};
     alignas(16) std::array<float,kAudioSRCInputSize> m_srcInBuf {};
-    uint              m_memoryCorruptionTest1             {0xdeadbeef};;
+    [[maybe_unused]] uint m_memoryCorruptionTest1         {0xdeadbeef};;
     float            *m_srcOut                            {nullptr};
     int               m_kAudioSRCOutputSize               {0};
-    uint              m_memoryCorruptionTest2             {0xdeadbeef};;
+    [[maybe_unused]] uint m_memoryCorruptionTest2         {0xdeadbeef};;
     /**
      * main audio buffer
      */
     std::array<uchar,kAudioRingBufferSize> m_audioBuffer  {0};
-    uint              m_memoryCorruptionTest3             {0xdeadbeef};;
+    [[maybe_unused]] uint m_memoryCorruptionTest3         {0xdeadbeef};;
     bool              m_configureSucceeded                {false};
     std::chrono::milliseconds m_lengthLastData            {0ms};
 

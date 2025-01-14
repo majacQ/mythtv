@@ -1,6 +1,7 @@
 #include "playbackbox.h"
 
 // C++
+#include <algorithm>
 #include <array>
 
 // QT
@@ -11,43 +12,45 @@
 #include <QMap>
 
 // MythTV
-#include "mythnotificationcenter.h"     // for ShowNotificationError, etc
-#include "mythuimetadataresults.h"
-#include "previewgeneratorqueue.h"
-#include "mythprogressdialog.h"
-#include "mythuiprogressbar.h"
-#include "mythuibuttonlist.h"
-#include "mythcorecontext.h"
-#include "mythmainwindow.h"             // for GetMythMainWindow, etc
-#include "mythscreenstack.h"            // for MythScreenStack
-#include "mythuistatetype.h"
-#include "mythuicheckbox.h"
-#include "mythuitextedit.h"
-#include "recordingtypes.h"
-#include "mythuiactions.h"              // for ACTION_1
-#include "mythuispinbox.h"
-#include "mythdialogbox.h"
-#include "recordinginfo.h"
-#include "recordingrule.h"
-#include "programtypes.h"               // for AudioProps, SubtitleTypes, etc
-#include "mythuibutton.h"
-#include "mythlogging.h"
-#include "mythuiimage.h"
-#include "programinfo.h"
-#include "mythuitext.h"
-#include "tv_actions.h"                 // for ACTION_LISTRECORDEDEPISODES, etc
-#include "mythdbcon.h"
-#include "mythevent.h"                  // for MythEvent, etc
-#include "playgroup.h"
-#include "mythdb.h"
-#include "mythdate.h"
-#include "tv.h"
-
 #ifdef _MSC_VER
-#  include "compat.h"                   // for random
+#  include "libmythbase/compat.h"               // for random
 #endif
+#include "libmythbase/mconcurrent.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythevent.h"              // for MythEvent, etc
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/programtypes.h"           // for AudioProps, SubtitleTypes, etc
+#include "libmythbase/recordingtypes.h"
+#include "libmythbase/stringutil.h"
+#include "libmythmetadata/mythuimetadataresults.h"
+#include "libmythtv/playgroup.h"
+#include "libmythtv/previewgeneratorqueue.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythtv/tv.h"
+#include "libmythtv/tv_actions.h"               // for ACTION_LISTRECORDEDEPISODES, etc
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"           // for GetMythMainWindow, etc
+#include "libmythui/mythnotificationcenter.h"   // for ShowNotificationError, etc
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythscreenstack.h"          // for MythScreenStack
+#include "libmythui/mythuiactions.h"            // for ACTION_1
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuicheckbox.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuiprogressbar.h"
+#include "libmythui/mythuispinbox.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuitextedit.h"
 
-//  Mythfrontend
+//  MythFrontend
 #include "playbackboxlistitem.h"
 
 #define LOC      QString("PlaybackBox: ")
@@ -214,13 +217,14 @@ static PlaybackBox::ViewMask m_viewMaskToggle(PlaybackBox::ViewMask mask,
 }
 
 static QString construct_sort_title(
-    QString title, PlaybackBox::ViewMask viewmask,
+    QString title, const QString& sortTitle, PlaybackBox::ViewMask viewmask,
     PlaybackBox::ViewTitleSort sortType, int recpriority)
 {
     if (title.isEmpty())
         return title;
 
-    QString sTitle = title;
+    QString sTitle = sortTitle.isEmpty()
+        ? title : sortTitle + " - " + title;
 
     if (viewmask == PlaybackBox::VIEW_TITLES &&
             sortType == PlaybackBox::TitleSortRecPriority)
@@ -382,8 +386,6 @@ void * PlaybackBox::RunPlaybackBox(void * player, bool showTV)
 PlaybackBox::PlaybackBox(MythScreenStack *parent, const QString& name,
                          TV *player, bool /*showTV*/)
     : ScheduleCommon(parent, name),
-      // Artwork Variables
-      m_artHostOverride(),
       // Recording Group settings
       m_groupDisplayName(ProgramInfo::i18n("All Programs")),
       m_recGroup("All Programs"),
@@ -464,6 +466,8 @@ PlaybackBox::PlaybackBox(MythScreenStack *parent, const QString& name,
 
     fillRecGroupPasswordCache();
 
+    m_alwaysShowWatchedProgress = gCoreContext->GetBoolSetting("AlwaysShowWatchedProgress", false);
+
     // misc setup
     gCoreContext->addListener(this);
 
@@ -501,6 +505,8 @@ bool PlaybackBox::Create()
     m_noRecordingsText = dynamic_cast<MythUIText *> (GetChild("norecordings"));
 
     m_previewImage = dynamic_cast<MythUIImage *>(GetChild("preview"));
+    m_recordedProgress = dynamic_cast<MythUIProgressBar *>(GetChild("recordedprogressbar"));
+    m_watchedProgress = dynamic_cast<MythUIProgressBar *>(GetChild("watchedprogressbar"));
     m_artImage[kArtworkFanart] = dynamic_cast<MythUIImage*>(GetChild("fanart"));
     m_artImage[kArtworkBanner] = dynamic_cast<MythUIImage*>(GetChild("banner"));
     m_artImage[kArtworkCoverart]= dynamic_cast<MythUIImage*>(GetChild("coverart"));
@@ -532,7 +538,7 @@ bool PlaybackBox::Create()
     connect(m_recordingList, &MythUIButtonList::itemSelected,
             this, &PlaybackBox::ItemSelected);
     connect(m_recordingList, &MythUIButtonList::itemClicked,
-            this, qOverload<>(&PlaybackBox::PlayFromBookmarkOrProgStart));
+            this, qOverload<>(&PlaybackBox::PlayFromAnyMark));
     connect(m_recordingList, &MythUIButtonList::itemVisible,
             this, &PlaybackBox::ItemVisible);
     connect(m_recordingList, &MythUIButtonList::itemLoaded,
@@ -850,6 +856,8 @@ void PlaybackBox::UpdateUIListItem(MythUIButtonListItem *item,
     {
         InfoMap infoMap;
 
+        pginfo->CalculateProgress(pginfo->QueryLastPlayPos());
+
         pginfo->ToMap(infoMap);
         infoMap["group"] = m_groupDisplayName;
         ResetMap(m_currentMap);
@@ -871,6 +879,11 @@ void PlaybackBox::UpdateUIListItem(MythUIButtonListItem *item,
             m_previewImage->SetFilename(oldimgfile);
             m_previewImage->Load(true, true);
         }
+
+        if (m_recordedProgress)
+            m_recordedProgress->Set(0, 100, pginfo->GetRecordedPercent());
+        if (m_watchedProgress)
+            m_watchedProgress->Set(0, 100, pginfo->GetWatchedPercent());
 
         // Handle artwork
         QString arthost;
@@ -1029,6 +1042,11 @@ void PlaybackBox::ItemVisible(MythUIButtonListItem *item)
     // Flagging status (queued, running, no, yes)
     item->DisplayState(extract_commflag_state(*pginfo), "commflagged");
 
+    const auto watchedPercent = pginfo->GetWatchedPercent();
+    const bool showProgress = watchedPercent && (m_alwaysShowWatchedProgress || !pginfo->IsWatched());
+    item->SetProgress1(0, showProgress ? 100 : 0, watchedPercent);
+    item->SetProgress2(0, 100, pginfo->GetRecordedPercent());
+
     MythUIButtonListItem *sel_item = item->parent()->GetItemCurrent();
     if ((item != sel_item) && item->GetImageFilename("preview").isEmpty() &&
         (asAvailable == pginfo->GetAvailableStatus()))
@@ -1068,14 +1086,14 @@ void PlaybackBox::HandlePreviewEvent(const QStringList &list)
         return;
     }
 
-    uint          recordingID  = list[0].toUInt();
-    const QString previewFile  = list[1];
-    const QString message      = list[2];
+    uint           recordingID  = list[0].toUInt();
+    const QString& previewFile  = list[1];
+    const QString& message      = list[2];
 
     bool found = false;
     for (uint i = 4; i < (uint) list.size(); i++)
     {
-        QString token = list[i];
+        const QString& token = list[i];
         QSet<QString>::iterator it = m_previewTokens.find(token);
         if (it != m_previewTokens.end())
         {
@@ -1367,7 +1385,7 @@ void PlaybackBox::UpdateUIRecGroupList(void)
     QStringList::iterator it = m_recGroups.begin();
     for (; it != m_recGroups.end(); (++it), (++idx))
     {
-        QString key = (*it);
+        const QString& key = (*it);
         QString tmp = (key == "All Programs") ? "All" : key;
         QString name = ProgramInfo::i18n(tmp);
 
@@ -1394,7 +1412,7 @@ void PlaybackBox::UpdateUIGroupList(const QStringList &groupPreferences)
         QStringList::iterator it;
         for (it = m_titleList.begin(); it != m_titleList.end(); ++it)
         {
-            QString groupname = (*it);
+            const QString& groupname = (*it);
 
             auto *item = new MythUIButtonListItem(m_groupList, "",
                                          QVariant::fromValue(groupname.toLower()));
@@ -1690,7 +1708,8 @@ bool PlaybackBox::UpdateUILists(void)
     bool isAllProgsGroup   = (m_recGroup == "All Programs");
     QMap<QString, QString> sortedList;
     QMap<int, QString> searchRule;
-    QMap<int, int> recidEpisodes;
+    QMap<int, QDateTime> recidLastEventTime;
+    QMap<int, ProgramInfo*> recidWatchListProgram;
 
     m_programInfoCache.Refresh();
 
@@ -1766,7 +1785,9 @@ bool PlaybackBox::UpdateUILists(void)
             }
             // Filter by recgroup
             else if (!isAllProgsGroup && pRecgroup != m_recGroup)
+            {
                 continue;
+            }
 
             if (p->GetTitle().isEmpty())
                 p->SetTitle(tr("_NO_TITLE_"));
@@ -1795,7 +1816,7 @@ bool PlaybackBox::UpdateUILists(void)
             if ((m_viewMask & VIEW_TITLES) && (!isLiveTVProg || isLiveTvGroup))
             {
                 sTitle = construct_sort_title(
-                            p->GetSortTitle(), m_viewMask, titleSort,
+                            p->GetTitle(), p->GetSortTitle(), m_viewMask, titleSort,
                             p->GetRecordingPriority());
                 sTitle = sTitle.toLower();
 
@@ -1837,6 +1858,13 @@ bool PlaybackBox::UpdateUILists(void)
             if ((m_viewMask & VIEW_WATCHLIST) &&
                 !isLiveTVProg && pRecgroup != "Deleted")
             {
+                int rid = p->GetRecordingRuleID();
+                auto letIt = recidLastEventTime.find(rid);
+                if (letIt == recidLastEventTime.end() || *letIt < p->GetLastModifiedTime())
+                {
+                    recidLastEventTime[rid] = p->GetLastModifiedTime();
+                }
+
                 if (m_watchListAutoExpire && !p->IsAutoExpirable())
                 {
                     p->SetRecordingPriority2(wlExpireOff);
@@ -1852,13 +1880,19 @@ bool PlaybackBox::UpdateUILists(void)
                 }
                 else
                 {
-                    if (p->GetRecordingRuleID())
-                        recidEpisodes[p->GetRecordingRuleID()] += 1;
-                    if (recidEpisodes[p->GetRecordingRuleID()] == 1 ||
-                            (p->GetRecordingRuleID() == 0U))
+                    auto wlpIt = recidWatchListProgram.find(rid);
+                    if (wlpIt == recidWatchListProgram.end())
                     {
-                        m_progLists[m_watchGroupLabel].push_front(p);
-                        m_progLists[m_watchGroupLabel].setAutoDelete(false);
+                        recidWatchListProgram[rid] = p;
+                    }
+                    else if(comp_season(p, *wlpIt) > 0)
+                    {
+                        (*wlpIt)->SetRecordingPriority2(wlEarlier);
+                        LOG(VB_FILE, LOG_INFO,
+                            QString("Not the earliest:  %1")
+                            .arg((*wlpIt)->GetTitle()));
+
+                        recidWatchListProgram[rid] = p;
                     }
                     else
                     {
@@ -1869,6 +1903,16 @@ bool PlaybackBox::UpdateUILists(void)
                     }
                 }
             }
+        }
+
+        if ((m_viewMask & VIEW_WATCHLIST) && !recidWatchListProgram.empty())
+        {
+            for (auto *p : std::as_const(recidWatchListProgram))
+            {
+                m_progLists[m_watchGroupLabel].push_back(p);
+            }
+
+            m_progLists[m_watchGroupLabel].setAutoDelete(false);
         }
     }
 
@@ -1949,50 +1993,26 @@ bool PlaybackBox::UpdateUILists(void)
 
     if (!m_progLists[m_watchGroupLabel].empty())
     {
-        QDateTime now = MythDate::current();
-        int baseValue = m_watchListMaxAge * 2 / 3;
-
-        QMap<int, int> recType;
-        QMap<int, int> maxEpisodes;
-        QMap<int, int> avgDelay;
-        QMap<int, int> spanHours;
-        QMap<int, int> delHours;
-        QMap<int, int> nextHours;
-
         MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("SELECT recordid, type, maxepisodes, avg_delay, "
-                      "next_record, last_record, last_delete FROM record;");
+        query.prepare("SELECT recordid, last_delete FROM record;");
 
         if (query.exec())
         {
             while (query.next())
             {
                 int recid = query.value(0).toInt();
-                recType[recid] = query.value(1).toInt();
-                maxEpisodes[recid] = query.value(2).toInt();
-                avgDelay[recid] = query.value(3).toInt();
 
-                QDateTime next_record =
-                    MythDate::as_utc(query.value(4).toDateTime());
-                QDateTime last_record =
-                    MythDate::as_utc(query.value(5).toDateTime());
                 QDateTime last_delete =
-                    MythDate::as_utc(query.value(6).toDateTime());
+                    MythDate::as_utc(query.value(1).toDateTime());
 
-                // Time between the last and next recordings
-                spanHours[recid] = 1000;
-                if (last_record.isValid() && next_record.isValid())
-                    spanHours[recid] =
-                        last_record.secsTo(next_record) / 3600 + 1;
-
-                // Time since the last episode was deleted
-                delHours[recid] = 1000;
                 if (last_delete.isValid())
-                    delHours[recid] = last_delete.secsTo(now) / 3600 + 1;
-
-                // Time until the next recording if any
-                if (next_record.isValid())
-                    nextHours[recid] = now.secsTo(next_record) / 3600 + 1;
+                {
+                    auto it = recidLastEventTime.find(recid);
+                    if (it != recidLastEventTime.end() && last_delete > *it)
+                    {
+                        recidLastEventTime[recid] = last_delete;
+                    }
+                }
             }
         }
 
@@ -2000,173 +2020,8 @@ bool PlaybackBox::UpdateUILists(void)
         while (pit != m_progLists[m_watchGroupLabel].end())
         {
             int recid = (*pit)->GetRecordingRuleID();
-            int avgd =  avgDelay[recid];
 
-            if (avgd == 0)
-                avgd = 100;
-
-            // Set the intervals beyond range if there is no record entry
-            if (spanHours[recid] == 0)
-            {
-                spanHours[recid] = 1000;
-                delHours[recid] = 1000;
-            }
-
-            // add point equal to baseValue for each additional episode
-            if (!(*pit)->GetRecordingRuleID() || maxEpisodes[recid] > 0)
-                (*pit)->SetRecordingPriority2(0);
-            else
-            {
-                (*pit)->SetRecordingPriority2(
-                    (recidEpisodes[(*pit)->GetRecordingRuleID()] - 1) *
-                    baseValue);
-            }
-
-            // add points every 3hr leading up to the next recording
-            if (nextHours[recid] > 0 && nextHours[recid] < baseValue * 3)
-            {
-                (*pit)->SetRecordingPriority2(
-                    (*pit)->GetRecordingPriority2() +
-                    (baseValue * 3 - nextHours[recid]) / 3);
-            }
-
-            int hrs = (*pit)->GetScheduledEndTime().secsTo(now) / 3600;
-            if (hrs < 1)
-                hrs = 1;
-
-            // add points for a new recording that decrease each hour
-            if (hrs < 42)
-            {
-                (*pit)->SetRecordingPriority2(
-                    (*pit)->GetRecordingPriority2() + 42 - hrs);
-            }
-
-            // add points for how close the recorded time of day is to 'now'
-            (*pit)->SetRecordingPriority2(
-                (*pit)->GetRecordingPriority2() + abs((hrs % 24) - 12) * 2);
-
-            // Daily
-            if (spanHours[recid] < 50 ||
-                recType[recid] == kDailyRecord)
-            {
-                if (delHours[recid] < m_watchListBlackOut.count() / 6)
-                {
-                    (*pit)->SetRecordingPriority2(wlDeleted);
-                    LOG(VB_FILE, LOG_INFO,
-                        QString("Recently deleted daily:  %1")
-                            .arg((*pit)->GetTitle()));
-                    pit = m_progLists[m_watchGroupLabel].erase(pit);
-                    continue;
-                }
-
-                LOG(VB_FILE, LOG_INFO, QString("Daily interval:  %1")
-                    .arg((*pit)->GetTitle()));
-
-                if (maxEpisodes[recid] > 0)
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        (baseValue / 2) + (hrs / 24));
-                }
-                else
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        (baseValue / 5) + hrs);
-                }
-            }
-            // Weekly
-            else if (nextHours[recid] ||
-                     recType[recid] == kWeeklyRecord)
-
-            {
-                if (delHours[recid] < m_watchListBlackOut.count() - 4)
-                {
-                    (*pit)->SetRecordingPriority2(wlDeleted);
-                    LOG(VB_FILE, LOG_INFO,
-                        QString("Recently deleted weekly:  %1")
-                            .arg((*pit)->GetTitle()));
-                    pit = m_progLists[m_watchGroupLabel].erase(pit);
-                    continue;
-                }
-
-                LOG(VB_FILE, LOG_INFO, QString("Weekly interval: %1")
-                    .arg((*pit)->GetTitle()));
-
-                if (maxEpisodes[recid] > 0)
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        (baseValue / 2) + (hrs / 24));
-                }
-                else
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        (baseValue / 3) + (baseValue * hrs / 24 / 4));
-                }
-            }
-            // Not recurring
-            else
-            {
-                if (delHours[recid] < (m_watchListBlackOut.count() * 2) - 4)
-                {
-                    (*pit)->SetRecordingPriority2(wlDeleted);
-                    pit = m_progLists[m_watchGroupLabel].erase(pit);
-                    continue;
-                }
-
-                // add points for a new Single or final episode
-                if (hrs < 36)
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        baseValue * (36 - hrs) / 36);
-                }
-
-                if (avgd != 100)
-                {
-                    if (maxEpisodes[recid] > 0)
-                    {
-                        (*pit)->SetRecordingPriority2(
-                            (*pit)->GetRecordingPriority2() +
-                            (baseValue / 2) + (hrs / 24));
-                    }
-                    else
-                    {
-                        (*pit)->SetRecordingPriority2(
-                            (*pit)->GetRecordingPriority2() +
-                            (baseValue / 3) + (baseValue * hrs / 24 / 4));
-                    }
-                }
-                else if ((hrs / 24) < m_watchListMaxAge)
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        hrs / 24);
-                }
-                else
-                {
-                    (*pit)->SetRecordingPriority2(
-                        (*pit)->GetRecordingPriority2() +
-                        m_watchListMaxAge);
-                }
-            }
-
-            // Factor based on the average time shift delay.
-            // Scale the avgd range of 0 thru 200 hours to 133% thru 67%
-            int delaypct = avgd / 3 + 67;
-
-            if (avgd < 100)
-            {
-                (*pit)->SetRecordingPriority2(
-                    (*pit)->GetRecordingPriority2() * (200 - delaypct) / 100);
-            }
-            else if (avgd > 100)
-            {
-                (*pit)->SetRecordingPriority2(
-                    (*pit)->GetRecordingPriority2() * 100 / delaypct);
-            }
+            (*pit)->SetRecordingPriority2(recidLastEventTime[recid].toSecsSinceEpoch()/60);
 
             LOG(VB_FILE, LOG_INFO, QString(" %1  %2  %3")
                     .arg(MythDate::toString((*pit)->GetScheduledStartTime(),
@@ -2176,6 +2031,7 @@ bool PlaybackBox::UpdateUILists(void)
 
             ++pit;
         }
+
         std::stable_sort(m_progLists[m_watchGroupLabel].begin(),
                          m_progLists[m_watchGroupLabel].end(),
                          comp_recpriority2_less_than);
@@ -2218,8 +2074,7 @@ bool PlaybackBox::UpdateUILists(void)
             }
 
             m_recGroupIdx = m_recGroups.indexOf(m_recGroup);
-            if (m_recGroupIdx < 0)
-                m_recGroupIdx = 0;
+            m_recGroupIdx = std::max(m_recGroupIdx, 0);
         }
     }
 
@@ -2227,7 +2082,7 @@ bool PlaybackBox::UpdateUILists(void)
     UpdateUIGroupList(groupSelPref);
     UpdateUsageUI();
 
-    for (uint id : qAsConst(m_playList))
+    for (uint id : std::as_const(m_playList))
     {
         ProgramInfo *pginfo = FindProgramInUILists(id);
         if (!pginfo)
@@ -2254,7 +2109,7 @@ void PlaybackBox::playSelectedPlaylist(bool Random)
         QList<uint> tmp = m_playList;
         while (!tmp.isEmpty())
         {
-            uint i = MythRandom() % tmp.size();
+            unsigned int i = MythRandom(0, tmp.size() - 1);
             m_playListPlay.append(tmp[i]);
             tmp.removeAll(tmp[i]);
         }
@@ -2268,7 +2123,7 @@ void PlaybackBox::playSelectedPlaylist(bool Random)
         this, new MythEvent("PLAY_PLAYLIST"));
 }
 
-void PlaybackBox::PlayFromBookmarkOrProgStart(MythUIButtonListItem *item)
+void PlaybackBox::PlayFromAnyMark(MythUIButtonListItem *item)
 {
     if (!item)
         item = m_recordingList->GetItemCurrent();
@@ -2280,7 +2135,7 @@ void PlaybackBox::PlayFromBookmarkOrProgStart(MythUIButtonListItem *item)
 
     const bool ignoreBookmark = false;
     const bool ignoreProgStart = false;
-    const bool ignoreLastPlayPos = true;
+    const bool ignoreLastPlayPos = false;
     const bool underNetworkControl = false;
     if (pginfo)
         PlayX(*pginfo, ignoreBookmark, ignoreProgStart, ignoreLastPlayPos,
@@ -2373,6 +2228,13 @@ void PlaybackBox::ClearBookmark()
         pginfo->SaveBookmark(0);
 }
 
+void PlaybackBox::ClearLastPlayPos()
+{
+    ProgramInfo *pginfo = GetCurrentProgram();
+    if (pginfo)
+        pginfo->SaveLastPlayPos(0);
+}
+
 void PlaybackBox::StopSelected(void)
 {
     ProgramInfo *pginfo = GetCurrentProgram();
@@ -2451,7 +2313,7 @@ void PlaybackBox::selected(MythUIButtonListItem *item)
     if (!item)
         return;
 
-    PlayFromBookmarkOrProgStart(item);
+    PlayFromAnyMark(item);
 }
 
 void PlaybackBox::popupClosed(const QString& which, int result)
@@ -2493,7 +2355,9 @@ void PlaybackBox::popupClosed(const QString& which, int result)
         }
     }
     else
+    {
         m_doToggleMenu = true;
+    }
 }
 
 void PlaybackBox::ShowGroupPopup()
@@ -2573,11 +2437,11 @@ bool PlaybackBox::Play(
         ignoreProgStart = true;
 
     uint flags =
-        (inPlaylist          ? kStartTVInPlayList       : kStartTVNoFlags) |
-        (underNetworkControl ? kStartTVByNetworkCommand : kStartTVNoFlags) |
-        (!ignoreLastPlayPos  ? kStartTVAllowLastPlayPos : kStartTVNoFlags) |
-        (ignoreProgStart     ? kStartTVIgnoreProgStart  : kStartTVNoFlags) |
-        (ignoreBookmark      ? kStartTVIgnoreBookmark   : kStartTVNoFlags);
+        (inPlaylist          ? kStartTVInPlayList        : kStartTVNoFlags) |
+        (underNetworkControl ? kStartTVByNetworkCommand  : kStartTVNoFlags) |
+        (ignoreLastPlayPos   ? kStartTVIgnoreLastPlayPos : kStartTVNoFlags) |
+        (ignoreProgStart     ? kStartTVIgnoreProgStart   : kStartTVNoFlags) |
+        (ignoreBookmark      ? kStartTVIgnoreBookmark    : kStartTVNoFlags);
 
     playCompleted = TV::StartTV(&tvrec, flags);
 
@@ -2588,14 +2452,6 @@ bool PlaybackBox::Play(
     {
         QCoreApplication::postEvent(
             this, new MythEvent("PLAY_PLAYLIST"));
-    }
-    else
-    {
-        // User may have saved or deleted a bookmark
-        // requiring update of bookmark icon..
-        ProgramInfo *pginfo = m_programInfoCache.GetRecordingInfo(tvrec.GetRecordingID());
-        if (pginfo)
-            UpdateUIListItem(pginfo, true);
     }
 
     if (m_needUpdate)
@@ -2667,9 +2523,11 @@ void PlaybackBox::ShowDeletePopup(DeletePopupType type)
     }
 
     ProgramInfo *delItem = nullptr;
-    if (m_delList.empty() && (delItem = GetCurrentProgram()))
+    if (m_delList.empty())
     {
-        push_onto_del(m_delList, *delItem);
+        delItem = GetCurrentProgram();
+        if (delItem != nullptr)
+            push_onto_del(m_delList, *delItem);
     }
     else if (m_delList.size() >= 3)
     {
@@ -2827,8 +2685,10 @@ MythMenu* PlaybackBox::createPlaylistMenu(void)
         }
     }
     else
+    {
         menu->AddItem(tr("Toggle playlist for this recording"),
                       qOverload<>(&PlaybackBox::togglePlayListItem));
+    }
 
     menu->AddItem(tr("Storage Options"), nullptr, createPlaylistStorageMenu());
     menu->AddItem(tr("Job Options"), nullptr, createPlaylistJobMenu());
@@ -3013,7 +2873,9 @@ void PlaybackBox::DisplayPopupMenu(void)
         connect(m_menuDialog, &MythDialogBox::Closed, this, &PlaybackBox::popupClosed);
     }
     else
+    {
         delete m_menuDialog;
+    }
 }
 
 void PlaybackBox::ShowMenu()
@@ -3043,7 +2905,9 @@ void PlaybackBox::ShowMenu()
             }
         }
         else
+        {
             ShowGroupPopup();
+        }
     }
 }
 
@@ -3056,19 +2920,20 @@ MythMenu* PlaybackBox::createPlayFromMenu()
     QString title = tr("Play Options") + CreateProgramInfoString(*pginfo);
 
     auto *menu = new MythMenu(title, this, "slotmenu");
-
-    if (pginfo->IsBookmarkSet())
-        menu->AddItem(tr("Play from bookmark"),
-                      qOverload<>(&PlaybackBox::PlayFromBookmark));
-
-    if (pginfo->QueryLastPlayPos())
+    bool hasLastPlay = pginfo->IsLastPlaySet();
+    bool hasBookMark = pginfo->IsBookmarkSet();
+    if (hasLastPlay)
         menu->AddItem(tr("Play from last played position"),
                       qOverload<>(&PlaybackBox::PlayFromLastPlayPos));
-
+    if (hasBookMark)
+        menu->AddItem(tr("Play from bookmark"),
+                      qOverload<>(&PlaybackBox::PlayFromBookmark));
     menu->AddItem(tr("Play from beginning"),
                   qOverload<>(&PlaybackBox::PlayFromBeginning));
-
-    if (pginfo->IsBookmarkSet())
+    if (hasLastPlay)
+        menu->AddItem(tr("Clear last played position"),
+                      &PlaybackBox::ClearLastPlayPos);
+    if (hasBookMark)
         menu->AddItem(tr("Clear bookmark"), &PlaybackBox::ClearBookmark);
 
     return menu;
@@ -3177,8 +3042,8 @@ MythMenu* PlaybackBox::createJobMenu()
         if (!add[i])
             continue;
 
-        QString stop_desc  = desc[i*2+0];
-        QString start_desc = desc[i*2+1];
+        QString stop_desc  = desc[(i*2)+0];
+        QString start_desc = desc[(i*2)+1];
 
         if (start_desc.toUInt())
         {
@@ -3191,10 +3056,10 @@ MythMenu* PlaybackBox::createJobMenu()
         bool running = JobQueue::IsJobQueuedOrRunning(
             kJobs[i], pginfo->GetChanID(), pginfo->GetRecordingStartTime());
 
-        MythMenu *submenu = ((kJobs[i] == JOB_TRANSCODE) && running)
+        MythMenu *submenu = ((kJobs[i] == JOB_TRANSCODE) && !running)
             ? createTranscodingProfilesMenu() : nullptr;
         menu->AddItem((running) ? stop_desc : start_desc,
-                      kMySlots[i * 2 + (running ? 0 : 1)], submenu);
+                      kMySlots[(i * 2) + (running ? 0 : 1)], submenu);
     }
 
     return menu;
@@ -3259,11 +3124,12 @@ void PlaybackBox::changeProfileAndTranscode(int id)
 
 void PlaybackBox::ShowActionPopup(const ProgramInfo &pginfo)
 {
-    QString label =
-        (asFileNotFound == pginfo.GetAvailableStatus()) ?
-        tr("Recording file cannot be found") :
-        (asZeroByte     == pginfo.GetAvailableStatus()) ?
-        tr("Recording file contains no data") :
+    QString label;
+    if (asFileNotFound == pginfo.GetAvailableStatus())
+        label = tr("Recording file cannot be found");
+    else if (asZeroByte == pginfo.GetAvailableStatus())
+        label = tr("Recording file contains no data");
+    else
         tr("Recording Options");
 
     m_popupMenu = new MythMenu(label + CreateProgramInfoString(pginfo), this, "actionmenu");
@@ -3287,7 +3153,8 @@ void PlaybackBox::ShowActionPopup(const ProgramInfo &pginfo)
 
         m_popupMenu->AddItem(tr("Recording Options"), nullptr, createRecordingMenu());
 
-        if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0)
+        if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0 ||
+            m_groupList->GetItemCurrent()->GetData().toString() == m_watchGroupLabel)
         {
             m_popupMenu->AddItem(tr("List Recorded Episodes"),
                                  &PlaybackBox::ShowRecordedEpisodes);
@@ -3314,11 +3181,11 @@ void PlaybackBox::ShowActionPopup(const ProgramInfo &pginfo)
 
     if (!sameProgram)
     {
-        if (pginfo.IsBookmarkSet() || pginfo.QueryLastPlayPos())
+        if (pginfo.IsBookmarkSet() || pginfo.IsLastPlaySet())
             m_popupMenu->AddItem(tr("Play from..."), nullptr, createPlayFromMenu());
         else
             m_popupMenu->AddItem(tr("Play"),
-                                 qOverload<>(&PlaybackBox::PlayFromBookmarkOrProgStart));
+                                 qOverload<>(&PlaybackBox::PlayFromAnyMark));
     }
 
     if (!m_player)
@@ -3342,9 +3209,9 @@ void PlaybackBox::ShowActionPopup(const ProgramInfo &pginfo)
     if ((pginfo.GetRecordingStatus() == RecStatus::Recording ||
          pginfo.GetRecordingStatus() == RecStatus::Tuning ||
          pginfo.GetRecordingStatus() == RecStatus::Failing) &&
-        (!(sameProgram &&
-           (tvstate == kState_WatchingLiveTV ||
-            tvstate == kState_WatchingRecording))))
+        (!sameProgram ||
+           (tvstate != kState_WatchingLiveTV &&
+            tvstate != kState_WatchingRecording)))
     {
         m_popupMenu->AddItem(tr("Stop Recording"), &PlaybackBox::askStop);
     }
@@ -3358,7 +3225,8 @@ void PlaybackBox::ShowActionPopup(const ProgramInfo &pginfo)
     m_popupMenu->AddItem(tr("Recording Options"), nullptr, createRecordingMenu());
     m_popupMenu->AddItem(tr("Job Options"), nullptr, createJobMenu());
 
-    if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0)
+    if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0 ||
+        m_groupList->GetItemCurrent()->GetData().toString() == m_watchGroupLabel)
     {
         m_popupMenu->AddItem(tr("List Recorded Episodes"),
                              &PlaybackBox::ShowRecordedEpisodes);
@@ -3530,7 +3398,7 @@ void PlaybackBox::doBeginLookup()
 
 void PlaybackBox::doPlaylistJobQueueJob(int jobType, int jobFlags)
 {
-    for (const uint pbs : qAsConst(m_playList))
+    for (const uint pbs : std::as_const(m_playList))
     {
         ProgramInfo *tmpItem = FindProgramInUILists(pbs);
         if (tmpItem &&
@@ -3565,7 +3433,7 @@ void PlaybackBox::stopPlaylistJobQueueJob(int jobType)
                 jobType, tmpItem->GetChanID(),
                 tmpItem->GetRecordingStartTime(), JOB_STOP);
 
-            if ((jobType & JOB_COMMFLAG) && (tmpItem))
+            if (jobType & JOB_COMMFLAG)
             {
                 tmpItem->SetEditing(false);
                 tmpItem->SetFlagging(false);
@@ -3589,7 +3457,7 @@ void PlaybackBox::PlaylistDelete(bool forgetHistory)
     QString forceDeleteStr("0");
 
     QStringList list;
-    for (int id : qAsConst(m_playList))
+    for (int id : std::as_const(m_playList))
     {
         ProgramInfo *tmpItem = FindProgramInUILists(id);
         if (tmpItem && tmpItem->QueryIsDeleteCandidate())
@@ -3698,7 +3566,7 @@ ProgramInfo *PlaybackBox::FindProgramInUILists(uint recordingID,
     for (uint i = 0; i < 2; i++)
     {
         auto it = _it[i];
-        auto end = _end[i];
+        const auto& end = _end[i];
         for (; it != end; ++it)
         {
             if ((*it)->GetRecordingID() == recordingID)
@@ -3784,7 +3652,7 @@ void PlaybackBox::togglePlayListTitle(void)
 {
     QString groupname = m_groupList->GetItemCurrent()->GetData().toString();
 
-    for (auto *pl : qAsConst(m_progLists[groupname]))
+    for (auto *pl : std::as_const(m_progLists[groupname]))
     {
         if (pl && (pl->GetAvailableStatus() == asAvailable))
             togglePlayListItem(pl);
@@ -3949,7 +3817,7 @@ bool PlaybackBox::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; ++i)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == ACTION_1 || action == "HELP")
@@ -4010,23 +3878,30 @@ bool PlaybackBox::keyPressEvent(QKeyEvent *event)
         }
         else if (action == ACTION_LISTRECORDEDEPISODES)
         {
-            if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0)
+            if (m_groupList->GetItemPos(m_groupList->GetItemCurrent()) == 0 ||
+                m_groupList->GetItemCurrent()->GetData().toString() == m_watchGroupLabel)
                 ShowRecordedEpisodes();
             else
                 ShowAllRecordings();
         }
         else if (action == "CHANGERECGROUP")
+        {
             showGroupFilter();
+        }
         else if (action == "CHANGEGROUPVIEW")
+        {
             showViewChanger();
+        }
         else if (action == "EDIT")
+        {
             EditScheduled();
+        }
         else if (m_titleList.size() > 1)
         {
             if (action == "DELETE")
                 deleteSelected(m_recordingList->GetItemCurrent());
             else if (action == ACTION_PLAYBACK)
-                PlayFromBookmarkOrProgStart();
+                PlayFromAnyMark();
             else if (action == "DETAILS" || action == "INFO")
                 ShowDetails();
             else if (action == "CUSTOMEDIT")
@@ -4043,7 +3918,9 @@ bool PlaybackBox::keyPressEvent(QKeyEvent *event)
                 handled = false;
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -4065,7 +3942,7 @@ void PlaybackBox::customEvent(QEvent *event)
         if (resultid == "transcode" && dce->GetResult() >= 0)
             changeProfileAndTranscode(dce->GetData().toInt());
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
@@ -4084,7 +3961,11 @@ void PlaybackBox::customEvent(QEvent *event)
             {
                 ProgramInfo evinfo(me->ExtraDataList());
                 if (evinfo.HasPathname() || evinfo.GetChanID())
-                    HandleUpdateProgramInfoEvent(evinfo);
+                 {
+                     uint32_t flags = m_programInfoCache.Update(evinfo);
+                     if (flags != ProgramInfoCache::PIC_NO_ACTION)
+                         HandleUpdateItemEvent(evinfo.GetRecordingID(), flags);
+                 }
             }
             else if (recordingID && (tokens[1] == "ADD"))
             {
@@ -4132,18 +4013,19 @@ void PlaybackBox::customEvent(QEvent *event)
         else if (message.startsWith("UPDATE_FILE_SIZE"))
         {
             QStringList tokens = message.simplified().split(" ");
-            bool ok = false;
-            uint recordingID = 0;
-            uint64_t filesize = 0ULL;
             if (tokens.size() >= 3)
             {
-                recordingID = tokens[1].toUInt();
-                filesize   = tokens[2].toLongLong(&ok);
-            }
-            if (recordingID && ok)
-            {
-
-                HandleUpdateProgramInfoFileSizeEvent(recordingID, filesize);
+                bool ok = false;
+                uint recordingID  = tokens[1].toUInt();
+                uint64_t filesize = tokens[2].toLongLong(&ok);
+                if (ok)
+                {
+                    // Delegate to background thread
+                    MConcurrent::run("UpdateFileSize", &m_programInfoCache,
+                                     &ProgramInfoCache::UpdateFileSize,
+                                     recordingID, filesize,
+                                     ProgramInfoCache::PIC_NONE);
+                }
             }
         }
         else if (message == "UPDATE_UI_LIST")
@@ -4155,6 +4037,18 @@ void PlaybackBox::customEvent(QEvent *event)
                 UpdateUILists();
                 m_helper.ForceFreeSpaceUpdate();
             }
+        }
+        else if (message.startsWith("UPDATE_UI_ITEM"))
+        {
+            QStringList tokens = message.simplified().split(" ");
+            if (tokens.size() < 3)
+                return;
+
+            uint recordingID  = tokens[1].toUInt();
+            auto flags = static_cast<ProgramInfoCache::UpdateState>(tokens[2].toUInt());
+
+            if (flags != ProgramInfoCache::PIC_NO_ACTION)
+                HandleUpdateItemEvent(recordingID, flags);
         }
         else if (message == "UPDATE_USAGE_UI")
         {
@@ -4383,7 +4277,9 @@ void PlaybackBox::customEvent(QEvent *event)
         }
     }
     else
+    {
         ScheduleCommon::customEvent(event);
+    }
 }
 
 void PlaybackBox::HandleRecordingRemoveEvent(uint recordingID)
@@ -4469,35 +4365,21 @@ void PlaybackBox::HandleRecordingAddEvent(const ProgramInfo &evinfo)
     ScheduleUpdateUIList();
 }
 
-void PlaybackBox::HandleUpdateProgramInfoEvent(const ProgramInfo &evinfo)
+void PlaybackBox::HandleUpdateItemEvent(uint recordingID, uint flags)
 {
-    QString old_recgroup = m_programInfoCache.GetRecGroup(
-        evinfo.GetRecordingID());
-
-    if (!m_programInfoCache.Update(evinfo))
-        return;
-
-    // If the recording group has changed, reload lists from the recently
-    // updated cache; if not, only update UI for the updated item
-    if (evinfo.GetRecordingGroup() == old_recgroup)
+    // Changing recording group full reload
+    if (flags & ProgramInfoCache::PIC_RECGROUP_CHANGED)
     {
-        ProgramInfo *dst = FindProgramInUILists(evinfo);
-        if (dst)
-            UpdateUIListItem(dst, true);
-        return;
+        ScheduleUpdateUIList();
     }
-
-    ScheduleUpdateUIList();
-}
-
-void PlaybackBox::HandleUpdateProgramInfoFileSizeEvent(uint recordingID,
-                                                       uint64_t filesize)
-{
-    m_programInfoCache.UpdateFileSize(recordingID, filesize);
-
-    ProgramInfo *dst = FindProgramInUILists(recordingID);
-    if (dst)
-        UpdateUIListItem(dst, false);
+    else
+    {
+        ProgramInfo *pginfo = FindProgramInUILists(recordingID);
+        if (pginfo == nullptr)
+            return;
+        bool genPreview = (flags & ProgramInfoCache::PIC_MARK_CHANGED);
+        UpdateUIListItem(pginfo, genPreview);
+    }
 }
 
 void PlaybackBox::ScheduleUpdateUIList(void)
@@ -4526,7 +4408,9 @@ void PlaybackBox::showViewChanger(void)
         m_popupStack->AddScreen(viewPopup);
     }
     else
+    {
         delete viewPopup;
+    }
 }
 
 void PlaybackBox::saveViewChanges()
@@ -4607,7 +4491,9 @@ void PlaybackBox::showGroupFilter(void)
                 dispGroup = tr("Unknown");
             }
             else if (dispGroup == tr("Unknown"))
+            {
                 unknownCount += items;
+            }
 
             if ((!m_recGroupType.contains(dispGroup)) &&
                 (dispGroup != tr("Unknown")))
@@ -4657,7 +4543,9 @@ void PlaybackBox::showGroupFilter(void)
         m_popupStack->AddScreen(recGroupPopup);
     }
     else
+    {
         delete recGroupPopup;
+    }
 }
 
 void PlaybackBox::groupSelectorClosed(void)
@@ -4755,7 +4643,9 @@ void PlaybackBox::ShowRecGroupChanger(bool use_playlist)
             pginfo = FindProgramInUILists(m_playList[0]);
     }
     else
+    {
         pginfo = GetCurrentProgram();
+    }
 
     if (!pginfo)
         return;
@@ -4801,7 +4691,9 @@ void PlaybackBox::ShowRecGroupChanger(bool use_playlist)
         m_popupStack->AddScreen(rgChanger);
     }
     else
+    {
         delete rgChanger;
+    }
 }
 
 /// \brief Used to change the play group of a program or playlist.
@@ -4816,7 +4708,9 @@ void PlaybackBox::ShowPlayGroupChanger(bool use_playlist)
             pginfo = FindProgramInUILists(m_playList[0]);
     }
     else
+    {
         pginfo = GetCurrentProgram();
+    }
 
     if (!pginfo)
         return;
@@ -4825,7 +4719,7 @@ void PlaybackBox::ShowPlayGroupChanger(bool use_playlist)
     QStringList displayNames("Default");
 
     QStringList list = PlayGroup::GetNames();
-    for (const auto& name : qAsConst(list))
+    for (const auto& name : std::as_const(list))
     {
         displayNames.push_back(name);
         groupNames.push_back(name);
@@ -4844,7 +4738,9 @@ void PlaybackBox::ShowPlayGroupChanger(bool use_playlist)
         m_popupStack->AddScreen(pgChanger);
     }
     else
+    {
         delete pgChanger;
+    }
 }
 
 void PlaybackBox::doPlaylistExpireSetting(bool turnOn)
@@ -4896,7 +4792,9 @@ void PlaybackBox::showMetadataEditor()
         mainStack->AddScreen(editMetadata);
     }
     else
+    {
         delete editMetadata;
+    }
 }
 
 void PlaybackBox::saveRecMetadata(const QString &newTitle,
@@ -4936,14 +4834,14 @@ void PlaybackBox::saveRecMetadata(const QString &newTitle,
         QString episode;
         if (newSeason > 0 || newEpisode > 0)
         {
-            season = format_season_and_episode(newSeason, 1);
-            episode = format_season_and_episode(newEpisode, 1);
+            season  = StringUtil::intToPaddedString(newSeason,  1);
+            episode = StringUtil::intToPaddedString(newEpisode, 1);
             seasone = QString("s%1e%2")
-                .arg(format_season_and_episode(newSeason, 2),
-                     format_season_and_episode(newEpisode, 2));
+                            .arg(StringUtil::intToPaddedString(newSeason,  2),
+                                 StringUtil::intToPaddedString(newEpisode, 2));
             seasonx = QString("%1x%2")
-                .arg(format_season_and_episode(newSeason, 1),
-                     format_season_and_episode(newEpisode, 2));
+                            .arg(StringUtil::intToPaddedString(newSeason,  1),
+                                 StringUtil::intToPaddedString(newEpisode, 2));
         }
 
         item->SetText(tempSubTitle, "titlesubtitle");
@@ -4998,7 +4896,7 @@ void PlaybackBox::setRecGroup(QString newRecGroup)
 
     if (m_opOnPlaylist)
     {
-        for (int id : qAsConst(m_playList))
+        for (int id : std::as_const(m_playList))
         {
             ProgramInfo *p = FindProgramInUILists(id);
             if (!p)
@@ -5091,7 +4989,9 @@ void PlaybackBox::showRecGroupPasswordChanger(void)
         m_popupStack->AddScreen(pwChanger);
     }
     else
+    {
         delete pwChanger;
+    }
 }
 
 void PlaybackBox::SetRecGroupPassword(const QString &newPassword)
@@ -5307,10 +5207,10 @@ void PasswordChange::SendResult()
 
 RecMetadataEdit::RecMetadataEdit(MythScreenStack *lparent, ProgramInfo *pginfo)
   : MythScreenType(lparent, "recmetadataedit"),
-    m_progInfo(pginfo)
+    m_progInfo(pginfo),
+    m_metadataFactory(new MetadataFactory(this))
 {
     m_popupStack = GetMythMainWindow()->GetStack("popup stack");
-    m_metadataFactory = new MetadataFactory(this);
 }
 
 bool RecMetadataEdit::Create()
@@ -5452,7 +5352,7 @@ void RecMetadataEdit::QueryComplete(MetadataLookup *lookup)
     m_episodeSpin->SetValue(lookup->GetEpisode());
     if (!lookup->GetSubtitle().isEmpty())
     {
-        m_descriptionEdit->SetText(lookup->GetSubtitle());
+        m_subtitleEdit->SetText(lookup->GetSubtitle());
     }
     if (!lookup->GetDescription().isEmpty())
     {
@@ -5599,7 +5499,7 @@ void PlaybackBox::PbbJobQueue::Update()
         QMap<int, JobQueueEntry> jobs;
         JobQueue::GetJobsInQueue(jobs, JOB_LIST_ALL);
         m_jobs.clear();
-        for (const auto& job : qAsConst(jobs))
+        for (const auto& job : std::as_const(jobs))
         {
             m_jobs.insert(qMakePair(job.chanid, job.recstartts), job);
         }

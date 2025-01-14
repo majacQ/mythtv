@@ -20,26 +20,27 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
+// Std
+#include <cmath>
+
 // Qt
 #include <QApplication>
 
 // MythtTV
-#include "mythconfig.h"
-#include "mythmiscutil.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythui/mythmainwindow.h"
 #include "mythplayer.h"
-#include "mythcorecontext.h"
-#include "mythmainwindow.h"
 #include "mythvideobounds.h"
-
-// Std
-#include <cmath>
 
 #define LOC QString("VideoBounds: ")
 
-#define SCALED_RECT(SRC, SCALE) QRect{ static_cast<int>((SRC).left()   * (SCALE)), \
-                                       static_cast<int>((SRC).top()    * (SCALE)), \
-                                       static_cast<int>((SRC).width()  * (SCALE)), \
-                                       static_cast<int>((SRC).height() * (SCALE)) }
+static inline QRect SCALED_RECT(QRect src, qreal scale)
+{ return {static_cast<int>(src.left()   * scale),
+          static_cast<int>(src.top()    * scale),
+          static_cast<int>(src.width()  * scale),
+          static_cast<int>(src.height() * scale) }; }
 
 static float fix_aspect(float raw);
 static float snap(float value, float snapto, float diff);
@@ -220,7 +221,7 @@ void MythVideoBounds::ApplyDBScaleAndMove(void)
     if (m_dbVertScale > 0)
     {
         // Veritcal overscan. Move the Y start point in original image.
-        float tmp = 1.0F - 2.0F * m_dbVertScale;
+        float tmp = 1.0F - (2.0F * m_dbVertScale);
         m_videoRect.moveTop(qRound(m_videoRect.height() * m_dbVertScale));
         m_videoRect.setHeight(qRound(m_videoRect.height() * tmp));
 
@@ -247,7 +248,7 @@ void MythVideoBounds::ApplyDBScaleAndMove(void)
         // Vertical underscan. Move the starting Y point in the display window.
         // Use the abolute value of scan factor.
         float vscanf = fabs(m_dbVertScale);
-        float tmp = 1.0F - 2.0F * vscanf;
+        float tmp = 1.0F - (2.0F * vscanf);
 
         m_displayVideoRect.moveTop(qRound(m_displayVisibleRect.height() * vscanf) + m_displayVisibleRect.top());
         m_displayVideoRect.setHeight(qRound(m_displayVisibleRect.height() * tmp));
@@ -274,7 +275,7 @@ void MythVideoBounds::ApplyDBScaleAndMove(void)
     // Horizontal.. comments, same as vertical...
     if (m_dbHorizScale > 0)
     {
-        float tmp = 1.0F - 2.0F * m_dbHorizScale;
+        float tmp = 1.0F - (2.0F * m_dbHorizScale);
         m_videoRect.moveLeft(qRound(m_videoDispDim.width() * m_dbHorizScale));
         m_videoRect.setWidth(qRound(m_videoDispDim.width() * tmp));
 
@@ -294,7 +295,7 @@ void MythVideoBounds::ApplyDBScaleAndMove(void)
     else if (m_dbHorizScale < 0)
     {
         float hscanf = fabs(m_dbHorizScale);
-        float tmp = 1.0F - 2.0F * hscanf;
+        float tmp = 1.0F - (2.0F * hscanf);
 
         m_displayVideoRect.moveLeft(qRound(m_displayVisibleRect.width() * hscanf) + m_displayVisibleRect.left());
         m_displayVideoRect.setWidth(qRound(m_displayVisibleRect.width() * tmp));
@@ -359,25 +360,25 @@ void MythVideoBounds::ApplyLetterboxing(void)
     if (nomatch_with_fill && (disp_aspect > m_videoAspectOverride))
     {
         int pixNeeded = qRound(((disp_aspect / m_videoAspectOverride) * static_cast<float>(m_displayVideoRect.height())));
-        m_displayVideoRect.moveTop(m_displayVideoRect.top() + (m_displayVideoRect.height() - pixNeeded) / 2);
+        m_displayVideoRect.moveTop(m_displayVideoRect.top() + ((m_displayVideoRect.height() - pixNeeded) / 2));
         m_displayVideoRect.setHeight(pixNeeded);
     }
     else if (nomatch_with_fill)
     {
         int pixNeeded = qRound(((m_videoAspectOverride / disp_aspect) * static_cast<float>(m_displayVideoRect.width())));
-        m_displayVideoRect.moveLeft(m_displayVideoRect.left() + (m_displayVideoRect.width() - pixNeeded) / 2);
+        m_displayVideoRect.moveLeft(m_displayVideoRect.left() + ((m_displayVideoRect.width() - pixNeeded) / 2));
         m_displayVideoRect.setWidth(pixNeeded);
     }
     else if (nomatch_without_fill && (disp_aspect > m_videoAspectOverride))
     {
         int pixNeeded = qRound(((m_videoAspectOverride / disp_aspect) * static_cast<float>(m_displayVideoRect.width())));
-        m_displayVideoRect.moveLeft(m_displayVideoRect.left() + (m_displayVideoRect.width() - pixNeeded) / 2);
+        m_displayVideoRect.moveLeft(m_displayVideoRect.left() + ((m_displayVideoRect.width() - pixNeeded) / 2));
         m_displayVideoRect.setWidth(pixNeeded);
     }
     else if (nomatch_without_fill)
     {
         int pixNeeded = qRound(((disp_aspect / m_videoAspectOverride) * static_cast<float>(m_displayVideoRect.height())));
-        m_displayVideoRect.moveTop(m_displayVideoRect.top() + (m_displayVideoRect.height() - pixNeeded) / 2);
+        m_displayVideoRect.moveTop(m_displayVideoRect.top() + ((m_displayVideoRect.height() - pixNeeded) / 2));
         m_displayVideoRect.setHeight(pixNeeded);
     }
 
@@ -832,13 +833,21 @@ void MythVideoBounds::Zoom(ZoomDirection Direction)
             m_manualHorizScale -= zf;
     }
     else if (kZoomUp    == Direction && (m_manualMove.y() < +kManualZoomMaxMove))
+    {
         m_manualMove.setY(m_manualMove.y() + 1);
+    }
     else if (kZoomDown  == Direction && (m_manualMove.y() > -kManualZoomMaxMove))
+    {
         m_manualMove.setY(m_manualMove.y() - 1);
+    }
     else if (kZoomLeft  == Direction && (m_manualMove.x() < +kManualZoomMaxMove))
+    {
         m_manualMove.setX(m_manualMove.x() + 2);
+    }
     else if (kZoomRight == Direction && (m_manualMove.x() > -kManualZoomMaxMove))
+    {
         m_manualMove.setX(m_manualMove.x() - 2);
+    }
 
     m_manualVertScale = snap(m_manualVertScale, 1.0F, zf / 2);
     m_manualHorizScale = snap(m_manualHorizScale, 1.0F, zf / 2);

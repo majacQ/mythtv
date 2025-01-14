@@ -6,13 +6,13 @@
 //
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #include <QDomDocument>
 
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "servicehost.h"
 #include "wsdl.h"
 #include "xsd.h"
@@ -31,7 +31,7 @@ QVariant MethodInfo::Invoke( Service *pService, const QStringMap &reqParams ) co
     QStringMap            lowerParams;
 
     if (!pService)
-        throw;
+        throw QString("Invalid argument to MethodInfo::Invoke. pService in nullptr");
 
      // Change params to lower case for case-insensitive comparison
     for (auto it = reqParams.cbegin(); it != reqParams.cend(); ++it)
@@ -109,7 +109,8 @@ QVariant MethodInfo::Invoke( Service *pService, const QStringMap &reqParams ) co
                 LOG(VB_GENERAL, LOG_ERR,
                     QString("MethodInfo::Invoke - Type unknown '%1'")
                         .arg(sParamType));
-                throw;
+                throw QString("MethodInfo::Invoke - Type unknown '%1'")
+                          .arg(sParamType);
             }
 
             types[nIdx+1] = nId;
@@ -206,13 +207,12 @@ QVariant MethodInfo::Invoke( Service *pService, const QStringMap &reqParams ) co
 
 ServiceHost::ServiceHost(const QMetaObject &metaObject,
                          const QString     &sExtensionName,
-                         const QString     &sBaseUrl,
+                               QString      sBaseUrl,
                          const QString     &sSharePath )
-            : HttpServerExtension ( sExtensionName,   sSharePath )
+            : HttpServerExtension ( sExtensionName,   sSharePath ),
+              m_sBaseUrl(std::move(sBaseUrl)),
+              m_oMetaObject(metaObject)
 {
-    m_oMetaObject = metaObject;
-    m_sBaseUrl    = sBaseUrl;
-
     // ----------------------------------------------------------------------
     // Create an instance of the service so custom types get registered.
     // ----------------------------------------------------------------------

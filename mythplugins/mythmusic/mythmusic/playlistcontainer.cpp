@@ -1,10 +1,11 @@
-// MythTV
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <compat.h>
-#include <mythlogging.h>
-
+// C/C++
 #include <utility>
+
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/compat.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythlogging.h>
 
 // mythmusic
 #include "playlist.h"
@@ -126,7 +127,7 @@ void PlaylistContainer::describeYourself(void) const
 {
     //    Debugging
     m_activePlaylist->describeYourself();
-    for (const auto & playlist : qAsConst(*m_allPlaylists))
+    for (const auto & playlist : std::as_const(*m_allPlaylists))
         playlist->describeYourself();
 }
 
@@ -214,12 +215,12 @@ void PlaylistContainer::copyToActive(int index)
     copy_from->copyTracks(m_activePlaylist, true);
 }
 
-void PlaylistContainer::renamePlaylist(int index, QString new_name)
+void PlaylistContainer::renamePlaylist(int index, const QString& new_name)
 {
     Playlist *list_to_rename = getPlaylist(index);
     if (list_to_rename)
     {
-        list_to_rename->setName(std::move(new_name));
+        list_to_rename->setName(new_name);
         list_to_rename->changed();
     }
 }
@@ -286,7 +287,7 @@ QStringList PlaylistContainer::getPlaylistNames(void)
 {
     QStringList res;
 
-    for (const auto & playlist : qAsConst(*m_allPlaylists))
+    for (const auto & playlist : std::as_const(*m_allPlaylists))
     {
         res.append(playlist->getName());
     }

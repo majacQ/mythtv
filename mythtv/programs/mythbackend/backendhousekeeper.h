@@ -1,16 +1,8 @@
 #ifndef BACKENDHOUSEKEEPER_H_
 #define BACKENDHOUSEKEEPER_H_
 
-#include "housekeeper.h"
-#include "mythsystemlegacy.h"
-
-class LogCleanerTask : public DailyHouseKeeperTask
-{
-  public:
-    LogCleanerTask(void) : DailyHouseKeeperTask("LogClean", kHKGlobal) {};
-    bool DoRun(void) override; // HouseKeeperTask
-};
-
+#include "libmythbase/housekeeper.h"
+#include "libmythbase/mythsystemlegacy.h"
 
 class CleanupTask : public DailyHouseKeeperTask
 {

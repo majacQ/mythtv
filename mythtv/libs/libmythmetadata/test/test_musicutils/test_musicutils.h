@@ -18,10 +18,11 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 #include <iostream>
-#include "musicmetadata.h"
-#include "musicutils.h"
+
+#include "libmythmetadata/musicmetadata.h"
+#include "libmythmetadata/musicutils.h"
 
 class TestMusicUtils : public QObject
 {

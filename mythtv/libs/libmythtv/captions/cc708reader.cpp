@@ -3,10 +3,11 @@
 
 #include <cstdlib>
 
-#include "mythlogging.h"
-#include "decoderbase.h"
-#include "mythplayer.h"
+#include "libmythbase/mythlogging.h"
+
 #include "captions/cc708reader.h"
+#include "decoders/decoderbase.h"
+#include "mythplayer.h"
 
 #define LOC QString("CC708Reader: ")
 #define CHECKENABLED if (!m_enabled) return
@@ -60,11 +61,6 @@ void CC708Reader::DefineWindow(
     int row_lock,         int column_lock,
     int pen_style,        int window_style)
 {
-    if (m_parent && m_parent->GetDecoder())
-    {
-        StreamInfo si(-1, 0, 0, service_num, 0, false, false);
-        m_parent->GetDecoder()->InsertTrack(kTrackTypeCC708, si);
-    }
 
     CHECKENABLED;
 

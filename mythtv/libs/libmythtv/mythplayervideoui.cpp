@@ -1,9 +1,10 @@
 // MythTV
-#include "mythlogging.h"
-#include "tv_play.h"
-#include "interactivetv.h"
-#include "mythvideooutgpu.h"
+#include "libmythbase/mythlogging.h"
+
+#include "mheg/interactivetv.h"
 #include "mythplayervideoui.h"
+#include "mythvideooutgpu.h"
+#include "tv_play.h"
 
 #define LOC QString("PlayerVideo: ")
 
@@ -68,7 +69,7 @@ bool MythPlayerVideoUI::InitVideo()
     connect(video, &MythVideoOutputGPU::PictureAttributesUpdated,
                                                   this, &MythPlayerVideoUI::PictureAttributesUpdated);
     connect(video, &MythVideoBounds::UpdateOSDMessage,
-                                                  this, QOverload<const QString&>::of(&MythPlayerVideoUI::UpdateOSDMessage));
+                                                  this, qOverload<const QString&>(&MythPlayerVideoUI::UpdateOSDMessage));
     connect(video, &MythVideoBounds::VideoBoundsStateChanged,
                                                   m_tv, &TV::VideoBoundsStateChanged);
     connect(m_tv,  &TV::ChangeOSDPositionUpdates, this,  &MythPlayerVideoUI::ChangeOSDPositionUpdates);

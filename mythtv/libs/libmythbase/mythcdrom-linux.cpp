@@ -12,11 +12,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <QtGlobal>
 #include <QDateTime>
 
 #include "mythcdrom.h"
 #include "mythcdrom-linux.h"
-#include "mythconfig.h"      // for HAVE_BIGENDIAN
 #include "mythlogging.h"
 #include "mythdate.h"
 
@@ -24,7 +24,7 @@
 
 // On a mixed-mode disc (audio+data), set this to 0 to mount the data portion:
 #ifndef ASSUME_WANT_AUDIO
-#define ASSUME_WANT_AUDIO 1
+#define ASSUME_WANT_AUDIO 1 // NOLINT(cppcoreguidelines-macro-usage)
 #endif
 
 
@@ -44,7 +44,7 @@ extern "C" {
 struct CDROMeventStatus
 {
     uint16_t m_dataLen[2];
-#if HAVE_BIGENDIAN
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
     uint8_t  m_nea               : 1;
     uint8_t  m_reserved1         : 4;
     uint8_t  m_notificationClass : 3;
@@ -54,7 +54,7 @@ struct CDROMeventStatus
     uint8_t  m_nea               : 1;
 #endif
     uint8_t  m_suppEventClass;
-#if HAVE_BIGENDIAN
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
     uint8_t  m_reserved2         : 4;
     uint8_t  m_mediaEventCode    : 4;
     uint8_t  m_reserved3         : 6;
@@ -74,7 +74,7 @@ struct CDROMeventStatus
 // and this is returned by GPCMD_READ_DISC_INFO
 struct CDROMdiscInfo {
     uint16_t m_discInformationLength;
-#if HAVE_BIGENDIAN
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
     uint8_t  m_reserved1         : 3;
     uint8_t  m_erasable          : 1;
     uint8_t  m_borderStatus      : 2;
@@ -89,7 +89,7 @@ struct CDROMdiscInfo {
     uint8_t  m_nSessionsLsb;
     uint8_t  m_firstTrackLsb;
     uint8_t  m_lastTrackLsb;
-#if HAVE_BIGENDIAN
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
     uint8_t  m_didV              : 1;
     uint8_t  m_dbcV              : 1;
     uint8_t  m_uru               : 1;
@@ -115,7 +115,7 @@ struct CDROMdiscInfo {
 // end of kernel structures.
 };
 
-enum CDROMdiscStatus
+enum CDROMdiscStatus : std::uint8_t
 {
     MEDIA_IS_EMPTY      = 0x0,
     MEDIA_IS_APPENDABLE = 0x1,

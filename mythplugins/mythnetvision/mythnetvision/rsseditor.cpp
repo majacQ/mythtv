@@ -1,25 +1,26 @@
-#include <QDomDocument>
+// Qt
 #include <QDateTime>
+#include <QDomDocument>
 #include <QImageReader>
 
 // MythTV headers
-#include <mythuibutton.h>
-#include <mythuibuttonlist.h>
-#include <mythuitextedit.h>
-#include <mythuicheckbox.h>
-#include <mythuifilebrowser.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythuiimage.h>
-#include <mythuitext.h>
-#include <mythdate.h>
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdirs.h>
-#include <netutils.h>
-#include <rssparse.h>
-#include <mythdownloadmanager.h>
-#include <mythsorthelper.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythbase/mythsorthelper.h>
+#include <libmythbase/netutils.h>
+#include <libmythbase/rssparse.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuifilebrowser.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // RSS headers
 #include "rsseditor.h"
@@ -37,7 +38,7 @@ namespace
         QStringList ret;
 
         QList<QByteArray> exts = QImageReader::supportedImageFormats();
-        for (const auto & ext : qAsConst(exts))
+        for (const auto & ext : std::as_const(exts))
             ret.append(QString("*.").append(ext));
 
         return ret;
@@ -195,7 +196,12 @@ void RSSEditPopup::SlotCheckRedirect(QNetworkReply* reply)
 void RSSEditPopup::SlotSave(QNetworkReply* reply)
 {
     QDomDocument document;
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     document.setContent(reply->read(reply->bytesAvailable()), true);
+#else
+    document.setContent(reply->read(reply->bytesAvailable()),
+                        QDomDocument::ParseOption::UseNamespaceProcessing);
+#endif
 
     QString text = document.toString();
 
@@ -283,7 +289,9 @@ void RSSEditPopup::SelectImagePopup(const QString &prefix,
         popupStack->AddScreen(fb);
     }
     else
+    {
         delete fb;
+    }
 }
 
 void RSSEditPopup::customEvent(QEvent *levent)
@@ -391,7 +399,7 @@ bool RSSEditor::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "DELETE" && GetFocusWidget() == m_sites)
@@ -403,7 +411,9 @@ bool RSSEditor::keyPressEvent(QKeyEvent *event)
             SlotEditSite();
         }
         else
+        {
             handled = false;
+        }
     }
 
 
@@ -419,7 +429,7 @@ void RSSEditor::fillRSSButtonList()
 
     m_sites->Reset();
 
-    for (const auto & site : qAsConst(m_siteList))
+    for (const auto & site : std::as_const(m_siteList))
     {
         auto *item = new MythUIButtonListItem(m_sites, site->GetTitle());
         item->SetText(site->GetTitle(), "title");
@@ -479,7 +489,9 @@ void RSSEditor::SlotDeleteSite()
                 this, &RSSEditor::DoDeleteSite);
     }
     else
+    {
         delete confirmdialog;
+    }
 }
 
 void RSSEditor::SlotEditSite()
@@ -501,7 +513,9 @@ void RSSEditor::SlotEditSite()
             mainStack->AddScreen(rsseditpopup);
         }
         else
+        {
             delete rsseditpopup;
+        }
     }
 }
 
@@ -520,7 +534,9 @@ void RSSEditor::SlotNewSite()
         mainStack->AddScreen(rsseditpopup);
     }
     else
+    {
         delete rsseditpopup;
+    }
 }
 
 void RSSEditor::DoDeleteSite(bool remove)

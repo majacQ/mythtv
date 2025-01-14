@@ -6,12 +6,13 @@
 #include <QDir>
 
 // MythTV headers
-#include <mythdate.h>
-#include <mythdb.h>
-#include <mythcontext.h>
-#include <musicmetadata.h>
-#include <metaio.h>
-#include <musicfilescanner.h>
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+
+#include "musicmetadata.h"
+#include "metaio.h"
+#include "musicfilescanner.h"
 
 MusicFileScanner::MusicFileScanner(bool force) : m_forceupdate{force}
 {
@@ -85,7 +86,7 @@ void MusicFileScanner::BuildFileList(QString &directory, MusicLoadedMap &music_f
 
     // Recursively traverse directory
     int newparentid = 0;
-    for (const auto& fi : qAsConst(list))
+    for (const auto& fi : std::as_const(list))
     {
         QString filename = fi.absoluteFilePath();
         if (fi.isDir())
@@ -656,7 +657,8 @@ void MusicFileScanner::SearchDirs(const QStringList &dirList)
             QDateTime dtLastRun = QDateTime::fromString(lastRun, Qt::ISODate);
             if (dtLastRun.isValid())
             {
-                if (MythDate::current() > dtLastRun.addSecs(60*60))
+                static constexpr int64_t kOneHour {60LL * 60};
+                if (MythDate::current() > dtLastRun.addSecs(kOneHour))
                 {
                     LOG(VB_GENERAL, LOG_INFO, "Music file scanner has been running for more than 60 minutes. Lets reset and try again");
                     gCoreContext->SendMessage(QString("MUSIC_SCANNER_ERROR %1 %2").arg(host, "Stalled"));
@@ -804,7 +806,8 @@ void MusicFileScanner::ScanMusic(MusicLoadedMap &music_files)
             for (int x = 0; x < m_startDirs.count(); x++)
             {
                 name = m_startDirs[x] + query.value(0).toString();
-                if ((iter = music_files.find(name)) != music_files.end())
+                iter = music_files.find(name);
+                if (iter != music_files.end())
                     break;
             }
 
@@ -821,7 +824,9 @@ void MusicFileScanner::ScanMusic(MusicLoadedMap &music_files)
                 }
             }
             else
+            {
                 music_files[name].location = MusicFileScanner::kDatabase;
+            }
         }
     }
 }
@@ -860,7 +865,8 @@ void MusicFileScanner::ScanArtwork(MusicLoadedMap &music_files)
             for (int x = 0; x < m_startDirs.count(); x++)
             {
                 name = m_startDirs[x] + query.value(0).toString();
-                if ((iter = music_files.find(name)) != music_files.end())
+                iter = music_files.find(name);
+                if (iter != music_files.end())
                     break;
             }
 

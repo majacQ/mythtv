@@ -5,18 +5,17 @@
 #include <QEvent>
 #include <QIcon>
 
-// myth
-#include "mythlogging.h"
-#include "mythmainwindow.h"
+// MythTV
+#include <libmythbase/mythlogging.h>
+#include <libmythui/mythmainwindow.h>
 
 // mythbrowser
 #include "mythbrowser.h"
 #include "webpage.h"
 
 WebPage::WebPage(MythBrowser *parent, QRect area, const char* name)
+  : m_parent(parent)
 {
-    m_parent = parent;
-
     m_listItem = new MythUIButtonListItem(parent->m_pageList, "", "", false,
                                         MythUIButtonListItem::CantCheck, false);
 
@@ -37,12 +36,10 @@ WebPage::WebPage(MythBrowser *parent, QRect area, const char* name)
 }
 
 WebPage::WebPage(MythBrowser *parent, MythUIWebBrowser *browser)
+  : m_parent(parent),
+    m_browser(browser)
 {
-    m_parent = parent;
-
     m_listItem = new MythUIButtonListItem(parent->m_pageList, "");
-
-    m_browser = browser;
 
     connect(m_browser, &MythUIWebBrowser::loadStarted,
             this, &WebPage::slotLoadStarted);

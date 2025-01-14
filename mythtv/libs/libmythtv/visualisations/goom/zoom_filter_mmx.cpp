@@ -1,17 +1,20 @@
-#include "goom/zoom_filters.h"
+#include <algorithm>
+#include <cstdint>
+
+#include "visualisations/goom/zoom_filters.h"
 
 #ifdef MMX
-#define BUFFPOINTNB 16
-#define BUFFPOINTMASK 0xffff
-#define BUFFINCR 0xff
+static   constexpr uint8_t  BUFFPOINTNB   { 16     };
+//static constexpr uint16_t BUFFPOINTMASK { 0xffff };
+//static constexpr uint8_t  BUFFINCR      { 0xff   };
 
 #include "mmx.h"
 
-#define sqrtperte 16
+//static constexpr uint8_t sqrtperte { 16 };
 // faire : a % sqrtperte <=> a & pertemask
-#define PERTEMASK 0xf
+static constexpr uint8_t PERTEMASK { 0xf };
 // faire : a / sqrtperte <=> a >> PERTEDEC
-#define PERTEDEC 4
+static constexpr uint8_t PERTEDEC { 4 };
 
 extern "C" {
 #include "libavutil/cpu.h"
@@ -49,11 +52,8 @@ void zoom_filter_mmx (int prevX, int prevY,
         int py = brutSmypos +
              (((brutD[myPos2] - brutSmypos)*buffratio) >> BUFFPOINTNB);
 
-        if (px < 0)
-            px = 0;
-
-        if (py < 0)
-            py = 0;
+        px = std::max(px, 0);
+        py = std::max(py, 0);
 
         if ((py>=(int)ay) || (px>=(int)ax)) 
         {
@@ -114,7 +114,7 @@ void zoom_filter_mmx (int prevX, int prevY,
         pmullw_r2r(mm4, mm1);
         pmullw_r2r(mm5, mm2);
         
-        /* ajout des valeurs obtenues de iso8859-15 à la valeur finale */
+        /* ajout des valeurs obtenues de iso8859-15 Ã  la valeur finale */
         paddw_r2r(mm1, mm0);
         paddw_r2r(mm2, mm0);
         
@@ -132,20 +132,15 @@ int zoom_filter_mmx_supported () {
     return 0;
 }
 
-void zoom_filter_mmx (int prevX, int prevY,
-                      const unsigned int *expix1, unsigned int *expix2,
-                      const int *brutS, const int *brutD, int buffratio,
-                      GoomCoefficients &precalCoef)
+void zoom_filter_mmx ([[maybe_unused]] int prevX,
+                      [[maybe_unused]] int prevY,
+                      [[maybe_unused]] const unsigned int *expix1,
+                      [[maybe_unused]] unsigned int *expix2,
+                      [[maybe_unused]] const int *brutS,
+                      [[maybe_unused]] const int *brutD,
+                      [[maybe_unused]] int buffratio,
+                      [[maybe_unused]] const GoomCoefficients &precalCoef)
 {
-    (void)prevX;
-    (void)prevY;
-    (void)expix1;
-    (void)expix2;
-    (void)brutS;
-    (void)brutD;
-    (void)buffratio;
-    (void)precalCoef;
-    return;
 }
 
 #endif

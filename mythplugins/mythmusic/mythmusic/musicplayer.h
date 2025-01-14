@@ -1,12 +1,11 @@
 #ifndef MUSICPLAYER_H_
 #define MUSICPLAYER_H_
 
-// mythtv
-#include <audiooutput.h>
-#include <mythobservable.h>
-
-// libmythmetadata
-#include <musicmetadata.h>
+// MythTV
+#include <libmyth/audio/audiooutput.h>
+#include <libmythbase/mythobservable.h>
+#include <libmythbase/mythpluginexport.h>
+#include <libmythmetadata/musicmetadata.h>
 
 // mythmusic
 #include "decoderhandler.h"
@@ -37,18 +36,18 @@ class MusicPlayerEvent : public MythEvent
         uint m_volume {0};
         bool m_isMuted {false};
 
-        static Type TrackChangeEvent;
-        static Type VolumeChangeEvent;
-        static Type TrackAddedEvent;
-        static Type TrackRemovedEvent;
-        static Type TrackUnavailableEvent;
-        static Type AllTracksRemovedEvent;
-        static Type MetadataChangedEvent;
-        static Type TrackStatsChangedEvent;
-        static Type AlbumArtChangedEvent;
-        static Type CDChangedEvent;
-        static Type PlaylistChangedEvent;
-        static Type PlayedTracksChangedEvent;
+        static const Type kTrackChangeEvent;
+        static const Type kVolumeChangeEvent;
+        static const Type kTrackAddedEvent;
+        static const Type kTrackRemovedEvent;
+        static const Type kTrackUnavailableEvent;
+        static const Type kAllTracksRemovedEvent;
+        static const Type kMetadataChangedEvent;
+        static const Type kTrackStatsChangedEvent;
+        static const Type kAlbumArtChangedEvent;
+        static const Type kCDChangedEvent;
+        static const Type kPlaylistChangedEvent;
+        static const Type kPlayedTracksChangedEvent;
 
     // No implicit copying.
     protected:
@@ -67,7 +66,7 @@ class MusicPlayer : public QObject, public MythObservable
      explicit MusicPlayer(QObject *parent);
     ~MusicPlayer(void) override;
 
-    enum PlayMode
+    enum PlayMode : std::uint8_t
     {
       PLAYMODE_TRACKSPLAYLIST = 0,
       PLAYMODE_TRACKSEDITOR,
@@ -120,6 +119,10 @@ class MusicPlayer : public QObject, public MythObservable
     void canShowPlayer(bool canShow) { m_canShowPlayer = canShow; }
     bool getCanShowPlayer(void) const { return m_canShowPlayer; }
 
+    /// whether we prefer Play Now over Add Tracks
+    static void setPlayNow(bool PlayNow);
+    static bool getPlayNow(void);
+
     Decoder        *getDecoder(void) { return m_decoderHandler ? m_decoderHandler->getDecoder() : nullptr; }
     DecoderHandler *getDecoderHandler(void) { return m_decoderHandler; }
     AudioOutput    *getOutput(void) { return m_output; }
@@ -162,13 +165,13 @@ class MusicPlayer : public QObject, public MythObservable
     void         toMap(InfoMap &infoMap) const;
 
     void         showMiniPlayer(void) const;
-    enum RepeatMode
+    enum RepeatMode : std::uint8_t
     { REPEAT_OFF = 0,
       REPEAT_TRACK, 
       REPEAT_ALL, 
       MAX_REPEAT_MODES 
     };
-    enum ShuffleMode
+    enum ShuffleMode : std::uint8_t
     { SHUFFLE_OFF = 0, 
       SHUFFLE_RANDOM, 
       SHUFFLE_INTELLIGENT,
@@ -177,7 +180,7 @@ class MusicPlayer : public QObject, public MythObservable
       MAX_SHUFFLE_MODES 
     };
 
-    enum ResumeMode
+    enum ResumeMode : std::uint8_t
     { RESUME_OFF,
       RESUME_FIRST,
       RESUME_TRACK,
@@ -264,9 +267,9 @@ Q_DECLARE_METATYPE(MusicPlayer::RepeatMode);
 Q_DECLARE_METATYPE(MusicPlayer::ShuffleMode);
 
 // This global variable contains the MusicPlayer instance for the application
-extern MPUBLIC MusicPlayer *gPlayer;
+extern MPLUGIN_PUBLIC MusicPlayer *gPlayer;
 
  // This stores the last MythMediaDevice that was detected:
-extern MPUBLIC QString gCDdevice;
+extern MPLUGIN_PUBLIC QString gCDdevice;
 
 #endif

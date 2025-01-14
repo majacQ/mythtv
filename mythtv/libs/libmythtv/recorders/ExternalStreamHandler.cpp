@@ -10,6 +10,7 @@
 #include <poll.h>
 #include <sys/ioctl.h>
 #endif
+
 #include <QtGlobal>
 #ifdef Q_OS_ANDROID
 #include <sys/wait.h>
@@ -18,25 +19,28 @@
 // Qt headers
 #include <QString>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 // MythTV headers
-#include "ExternalStreamHandler.h"
+#include "config.h"
+#include "libmythbase/exitcodes.h"
+
 #include "ExternalChannel.h"
+#include "ExternalStreamHandler.h"
 //#include "ThreadedFileWriter.h"
-#include "dtvsignalmonitor.h"
-#include "streamlisteners.h"
-#include "mpegstreamdata.h"
 #include "cardutil.h"
-#include "exitcodes.h"
+#include "dtvsignalmonitor.h"
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/streamlisteners.h"
 
 #define LOC QString("ExternSH[%1](%2): ").arg(m_inputId).arg(m_loc)
 
 ExternIO::ExternIO(const QString & app,
                    const QStringList & args)
-    : m_status(&m_statusBuf, QIODevice::ReadWrite)
+    : m_app(QFileInfo(app)),
+      m_status(&m_statusBuf, QIODevice::ReadWrite)
 {
-    m_app  = QFileInfo(app);
-
     if (!m_app.exists())
     {
         m_error = QString("ExternIO: '%1' does not exist.").arg(app);
@@ -71,7 +75,9 @@ ExternIO::~ExternIO(void)
     delete[] m_buffer;
 }
 
-bool ExternIO::Ready(int fd, std::chrono::milliseconds timeout, const QString & what)
+bool ExternIO::Ready([[maybe_unused]] int fd,
+                     [[maybe_unused]] std::chrono::milliseconds timeout,
+                     [[maybe_unused]] const QString & what)
 {
 #if !defined( USING_MINGW ) && !defined( _MSC_VER )
     std::array<struct pollfd,2> m_poll {};
@@ -150,7 +156,9 @@ int ExternIO::Read(QByteArray & buffer, int maxlen, std::chrono::milliseconds ti
         }
     }
     else
+    {
         m_errCnt = 0;
+    }
 
     if (len == 0)
         return 0;
@@ -164,14 +172,14 @@ int ExternIO::Read(QByteArray & buffer, int maxlen, std::chrono::milliseconds ti
     return len;
 }
 
-QString ExternIO::GetStatus(std::chrono::milliseconds timeout)
+QByteArray ExternIO::GetStatus(std::chrono::milliseconds timeout)
 {
     if (Error())
     {
         LOG(VB_RECORD, LOG_ERR,
             QString("ExternIO::GetStatus: already in error state: '%1'")
             .arg(m_error));
-        return QByteArray();
+        return {};
     }
 
     std::chrono::milliseconds waitfor = m_status.atEnd() ? timeout : 0ms;
@@ -183,14 +191,14 @@ QString ExternIO::GetStatus(std::chrono::milliseconds timeout)
     }
 
     if (m_status.atEnd())
-        return QByteArray();
+        return {};
 
     QString msg = m_status.readLine();
 
     LOG(VB_RECORD, LOG_DEBUG, QString("ExternIO::GetStatus '%1'")
         .arg(msg));
 
-    return msg;
+    return msg.toUtf8();
 }
 
 int ExternIO::Write(const QByteArray & buffer)
@@ -237,16 +245,13 @@ bool ExternIO::Run(void)
 }
 
 /* Return true if the process is not, or is no longer running */
-bool ExternIO::KillIfRunning(const QString & cmd)
+bool ExternIO::KillIfRunning([[maybe_unused]] const QString & cmd)
 {
-#if CONFIG_DARWIN || (__FreeBSD__) || defined(__OpenBSD__)
-    Q_UNUSED(cmd);
+#if defined(Q_OS_DARWIN) || defined(__FreeBSD__) || defined(__OpenBSD__)
     return false;
 #elif defined USING_MINGW
-    Q_UNUSED(cmd);
     return false;
 #elif defined( _MSC_VER )
-    Q_UNUSED(cmd);
     return false;
 #else
     QString grp = QString("pgrep -x -f -- \"%1\" 2>&1 > /dev/null").arg(cmd);
@@ -401,8 +406,12 @@ void ExternIO::Fork(void)
     }
 
     /* Close all open file descriptors except stdin/stdout/stderr */
+#if HAVE_CLOSE_RANGE
+    close_range(3, sysconf(_SC_OPEN_MAX) - 1, 0);
+#else
     for (int i = sysconf(_SC_OPEN_MAX) - 1; i > 2; --i)
         close(i);
+#endif
 
     /* Set the process group id to be the same as the pid of this
      * child process.  This ensures that any subprocesses launched by this
@@ -541,13 +550,9 @@ ExternalStreamHandler::ExternalStreamHandler(const QString & path,
 {
     setObjectName("ExternSH");
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    m_args = path.split(' ',QString::SkipEmptyParts) +
-             logPropagateArgs.split(' ', QString::SkipEmptyParts);
-#else
     m_args = path.split(' ',Qt::SkipEmptyParts) +
              logPropagateArgs.split(' ', Qt::SkipEmptyParts);
-#endif
+    //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     m_app = m_args.first();
     m_args.removeFirst();
 
@@ -672,7 +677,8 @@ void ExternalStreamHandler::run(void)
                         std::this_thread::sleep_for(20s);
                     if (!RestartStream())
                     {
-                        LOG(VB_RECORD, LOG_ERR, LOC + "Failed to restart stream.");
+                        LOG(VB_RECORD, LOG_ERR, LOC +
+                            "Failed to restart stream.");
                         m_bError = true;
                     }
                     continue;
@@ -701,13 +707,18 @@ void ExternalStreamHandler::run(void)
                 }
             }
 
-            if (m_io && (sz = PACKET_SIZE - remainder) > 0)
-                read_len = m_io->Read(buffer, sz, 100ms);
-            else
-                read_len = 0;
+            read_len = 0;
+            if (m_io != nullptr)
+            {
+                sz = PACKET_SIZE - remainder;
+                if (sz > 0)
+                    read_len = m_io->Read(buffer, sz, 100ms);
+            }
         }
         else
+        {
             read_len = 0;
+        }
 
         if (read_len == 0)
         {
@@ -822,7 +833,9 @@ void ExternalStreamHandler::run(void)
             good_data = (len != 0U);
         }
         else if (len == remainder)
+        {
             good_data = false;
+        }
 
         if (good_data)
         {
@@ -864,12 +877,7 @@ bool ExternalStreamHandler::SetAPIVersion(void)
 
     if (ProcessCommand("APIVersion?", result, 10s))
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = result.split(':', QString::SkipEmptyParts);
-#else
         QStringList tokens = result.split(':', Qt::SkipEmptyParts);
-#endif
-
         if (tokens.size() > 1)
             m_apiVersion = tokens[1].toUInt();
         m_apiVersion = std::min(m_apiVersion, static_cast<int>(MAX_API_VERSION));
@@ -877,7 +885,7 @@ bool ExternalStreamHandler::SetAPIVersion(void)
         {
             LOG(VB_RECORD, LOG_ERR, LOC +
                 QString("Bad response to 'APIVersion?' - '%1'. "
-                        "Expecting 1 or 2").arg(result));
+                        "Expecting 1, 2 or 3").arg(result));
             m_apiVersion = 1;
         }
 
@@ -1042,11 +1050,11 @@ void ExternalStreamHandler::CloseApp(void)
 
             QString full_command = QString("%1").arg(m_args.join(" "));
 
-            if (!m_io->KillIfRunning(full_command))
+            if (!ExternIO::KillIfRunning(full_command))
             {
                 // Give it one more chance.
                 std::this_thread::sleep_for(50ms);
-                if (!m_io->KillIfRunning(full_command))
+                if (!ExternIO::KillIfRunning(full_command))
                 {
                     LOG(VB_GENERAL, LOG_ERR,
                         QString("Unable to kill existing '%1'.")
@@ -1066,6 +1074,7 @@ bool ExternalStreamHandler::RestartStream(void)
     bool streaming = (StreamingCount() > 0);
 
     LOG(VB_RECORD, LOG_INFO, LOC + "Restarting stream.");
+    m_damaged = true;
 
     if (streaming)
         StopStreaming();
@@ -1158,7 +1167,9 @@ bool ExternalStreamHandler::StartStreaming(void)
         LOG(VB_RECORD, LOG_INFO, LOC + "Streaming started");
     }
     else
+    {
         LOG(VB_RECORD, LOG_INFO, LOC + "Already streaming");
+    }
 
     m_streamingCnt.ref();
 
@@ -1235,6 +1246,24 @@ bool ExternalStreamHandler::ProcessCommand(const QString & cmd,
 {
     QMutexLocker locker(&m_processLock);
 
+    if (m_apiVersion == 3)
+    {
+        QVariantMap vcmd;
+        QVariantMap vresult;
+        QByteArray  response;
+        QStringList tokens = cmd.split(':');
+        vcmd["command"] = tokens[0];
+        if (tokens.size() > 1)
+            vcmd["value"] = tokens[1];
+
+        LOG(VB_RECORD, LOG_DEBUG, LOC +
+            QString("Arguments: %1").arg(tokens.join("\n")));
+
+        bool r = ProcessJson(vcmd, vresult, response, timeout, retry_cnt);
+        result = QString("%1:%2").arg(vresult["status"].toString(),
+                                      vresult["message"].toString());
+        return r;
+    }
     if (m_apiVersion == 2)
         return ProcessVer2(cmd, result, timeout, retry_cnt);
     if (m_apiVersion == 1)
@@ -1405,11 +1434,7 @@ bool ExternalStreamHandler::ProcessVer2(const QString & command,
             if (!result.isEmpty())
             {
                 raw = result;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                tokens = result.split(':', QString::SkipEmptyParts);
-#else
                 tokens = result.split(':', Qt::SkipEmptyParts);
-#endif
 
                 // Look for result with the serial number of this query
                 if (tokens.size() > 1 && tokens[0].toUInt() >= m_serialNo)
@@ -1497,10 +1522,160 @@ bool ExternalStreamHandler::ProcessVer2(const QString & command,
     return false;
 }
 
+bool ExternalStreamHandler::ProcessJson(const QVariantMap & vmsg,
+                                        QVariantMap & elements,
+                                        QByteArray & response,
+                                        std::chrono::milliseconds timeout,
+                                        uint retry_cnt)
+{
+    for (uint cnt = 0; cnt < retry_cnt; ++cnt)
+    {
+        QVariantMap query(vmsg);
+
+        uint serial = ++m_serialNo;
+        query["serial"] = serial;
+        QString cmd = query["command"].toString();
+
+        QJsonDocument qdoc;
+        qdoc = QJsonDocument::fromVariant(query);
+        QByteArray cmdbuf = qdoc.toJson(QJsonDocument::Compact);
+
+        LOG(VB_RECORD, LOG_DEBUG, LOC +
+            QString("ProcessJson: %1").arg(QString(cmdbuf)));
+
+        if (m_io->Error())
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "External Recorder in bad state: " +
+                m_io->ErrorString());
+            return false;
+        }
+
+        /* Send query */
+        m_io->Write(cmdbuf);
+        m_io->Write("\n");
+
+        MythTimer timer(MythTimer::kStartRunning);
+        while (timer.elapsed() < timeout)
+        {
+            response = m_io->GetStatus(timeout);
+            if (m_io->Error())
+            {
+                LOG(VB_GENERAL, LOG_ERR, LOC +
+                    "Failed to read from External Recorder: " +
+                    m_io->ErrorString());
+                    m_bError = true;
+                return false;
+            }
+
+            if (!response.isEmpty())
+            {
+                QJsonParseError parseError {};
+                QJsonDocument doc;
+
+                doc = QJsonDocument::fromJson(response, &parseError);
+
+                if (parseError.error != QJsonParseError::NoError)
+                {
+                    LOG(VB_GENERAL, LOG_ERR, LOC +
+                        QString("ExternalRecorder returned invalid JSON message: %1: %2\n%3\nfor\n%4")
+                        .arg(parseError.offset)
+                        .arg(parseError.errorString(),
+                             QString(response),
+                             QString(cmdbuf)));
+                }
+                else
+                {
+                    elements = doc.toVariant().toMap();
+                    if (elements.find("serial") == elements.end())
+                        continue;
+
+                    serial = elements["serial"].toInt();
+                    if (serial >= m_serialNo)
+                        break;
+
+                    if (elements.find("status") != elements.end() &&
+                        elements["status"] != "OK")
+                    {
+                        LOG(VB_RECORD, LOG_WARNING, LOC + QString("%1: %2")
+                            .arg(elements["status"].toString(),
+                                 elements["message"].toString()));
+                    }
+                }
+            }
+        }
+
+        if (timer.elapsed() >= timeout)
+        {
+            LOG(VB_RECORD, LOG_ERR, LOC +
+                QString("ProcessJson: Giving up waiting for response for "
+                        "command '%2'").arg(QString(cmdbuf)));
+
+        }
+
+        if (serial > m_serialNo)
+        {
+            LOG(VB_RECORD, LOG_ERR, LOC +
+                QString("ProcessJson: Looking for serial no %1, "
+                        "but received %2 for command '%2'")
+                .arg(QString::number(m_serialNo))
+                .arg(serial)
+                .arg(QString(cmdbuf)));
+        }
+        else if (elements.find("status") == elements.end())
+        {
+            LOG(VB_RECORD, LOG_ERR, LOC +
+                QString("ProcessJson: ExternalRecorder 'status' not found in %1")
+                .arg(QString(response)));
+        }
+        else
+        {
+            QString status = elements["status"].toString();
+            bool okay = (status == "OK");
+            if (okay || status == "WARN" || status == "ERR")
+            {
+                LogLevel_t level = LOG_INFO;
+
+                m_ioErrCnt = 0;
+                if (!okay)
+                    level = LOG_WARNING;
+                else if (cmd == "SendBytes" ||
+                         (cmd == "TuneStatus?" &&
+                          elements["message"] == "InProgress"))
+                    level = LOG_DEBUG;
+
+                LOG(VB_RECORD, level,
+                    LOC + QString("ProcessJson('%1') = %2:%3:%4 took %5ms %6")
+                    .arg(QString(cmdbuf))
+                    .arg(elements["serial"].toInt())
+                    .arg(elements["status"].toString(),
+                         elements["message"].toString(),
+                         QString::number(timer.elapsed().count()),
+                         okay ? "" : "<-- NOTE")
+                    );
+
+                return okay;
+            }
+            LOG(VB_GENERAL, LOG_WARNING, LOC +
+                QString("External Recorder invalid response to '%1': '%2'")
+                .arg(QString(cmdbuf),
+                     QString(response)));
+        }
+
+        if (++m_ioErrCnt > 10)
+        {
+            LOG(VB_GENERAL, LOG_ERR, LOC + "Too many I/O errors.");
+            m_bError = true;
+            break;
+        }
+    }
+
+    return false;
+}
+
 bool ExternalStreamHandler::CheckForError(void)
 {
-    QString result;
-    bool    err = false;
+    QByteArray response;
+    bool       err = false;
 
     QMutexLocker locker(&m_ioLock);
 
@@ -1519,29 +1694,82 @@ bool ExternalStreamHandler::CheckForError(void)
 
     do
     {
-        result = m_io->GetStatus(0ms);
-        if (!result.isEmpty())
+        response = m_io->GetStatus(0ms);
+        if (!response.isEmpty())
         {
-            if (m_apiVersion > 1)
+            if (m_apiVersion > 2)
             {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                QStringList tokens = result.split(':', QString::SkipEmptyParts);
-#else
-                QStringList tokens = result.split(':', Qt::SkipEmptyParts);
-#endif
+                QJsonParseError parseError {};
+                QJsonDocument doc;
+                QVariantMap   elements;
 
-                tokens.removeFirst();
-                result = tokens.join(':');
-                for (int idx = 1; idx < tokens.size(); ++idx)
-                    err |= tokens[idx].startsWith("ERR");
+                doc = QJsonDocument::fromJson(response, &parseError);
+
+                if (parseError.error != QJsonParseError::NoError)
+                {
+                    LOG(VB_GENERAL, LOG_ERR, LOC +
+                        QString("ExternalRecorder returned invalid JSON message: %1: %2\n%3\n")
+                        .arg(parseError.offset)
+                        .arg(parseError.errorString(), QString(response)));
+                }
+                else
+                {
+                    elements = doc.toVariant().toMap();
+                    if (elements.find("command") != elements.end() &&
+                        elements["command"] == "STATUS")
+                    {
+                        LogLevel_t level { LOG_INFO };
+                        QString status = elements["status"].toString();
+                        if (status.startsWith("err", Qt::CaseInsensitive))
+                        {
+                            level = LOG_ERR;
+                            err |= true;
+                        }
+                        else if (status.startsWith("warn",
+                                                   Qt::CaseInsensitive))
+                        {
+                            level = LOG_WARNING;
+                        }
+                        else if (status.startsWith("damage",
+                                                   Qt::CaseInsensitive))
+                        {
+                            level = LOG_WARNING;
+                            m_damaged |= true;
+                        }
+                        LOG(VB_RECORD, level,
+                            LOC + elements["message"].toString());
+                    }
+                }
             }
             else
-                err |= result.startsWith("STATUS:ERR");
+            {
+                QString res = QString(response);
+                if (m_apiVersion == 2)
+                {
+                    QStringList tokens = res.split(':', Qt::SkipEmptyParts);
+                    tokens.removeFirst();
+                    res = tokens.join(':');
+                    for (int idx = 1; idx < tokens.size(); ++idx)
+                    {
+                        err |= tokens[idx].startsWith("ERR",
+                                                      Qt::CaseInsensitive);
+                        m_damaged |= tokens[idx].startsWith("damage",
+                                                           Qt::CaseInsensitive);
+                    }
+                }
+                else
+                {
+                    err |= res.startsWith("STATUS:ERR",
+                                          Qt::CaseInsensitive);
+                    m_damaged |= res.startsWith("STATUS:DAMAGE",
+                                               Qt::CaseInsensitive);
+                }
 
-            LOG(VB_RECORD, (err ? LOG_WARNING : LOG_INFO), LOC + result);
+                LOG(VB_RECORD, (err ? LOG_WARNING : LOG_INFO), LOC + res);
+            }
         }
     }
-    while (!result.isEmpty());
+    while (!response.isEmpty());
 
     return err;
 }

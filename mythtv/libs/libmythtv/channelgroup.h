@@ -39,12 +39,20 @@ class MTV_PUBLIC ChannelGroup
   public:
     // ChannelGroup 
     static ChannelGroupList  GetChannelGroups(bool includeEmpty = true);
+    static ChannelGroupList  GetManualChannelGroups(bool includeEmpty = true);
+    static ChannelGroupList  GetAutomaticChannelGroups(bool includeEmpty = true);
     static bool              ToggleChannel(uint chanid, int changrpid, bool delete_chan);
     static bool              AddChannel(uint chanid, int changrpid);
     static bool              DeleteChannel(uint chanid, int changrpid);
     static int               GetNextChannelGroup(const ChannelGroupList &sorted, int grpid);
+    static bool              InChannelGroupList(const ChannelGroupList &groupList, int grpid);
+    static bool              NotInChannelGroupList(const ChannelGroupList &groupList, int grpid);
     static QString           GetChannelGroupName(int grpid);
     static int               GetChannelGroupId(const QString& changroupname);
+    static void              UpdateChannelGroups(void);
+    static int               AddChannelGroup(const QString &groupName);
+    static bool              RemoveChannelGroup(const QString &groupName);
+    static bool              UpdateChannelGroup(const QString & oldName, const QString & newName);
 
   private:
 

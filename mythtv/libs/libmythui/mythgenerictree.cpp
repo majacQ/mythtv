@@ -4,8 +4,8 @@
 #include "mythuibuttonlist.h"
 
 // Myth headers
-#include "mythlogging.h"
-#include "mythsorthelper.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsorthelper.h"
 
 // QT headers
 #include <algorithm>
@@ -14,7 +14,7 @@ class SortableMythGenericTreeList : public QList<MythGenericTree*>
 {
   public:
     SortableMythGenericTreeList() = default;
-    enum SortType {SORT_STRING=0, SORT_SELECTABLE=1};
+    enum SortType : std::uint8_t {SORT_STRING=0, SORT_SELECTABLE=1};
 
     void SetSortType(SortType stype) { m_sortType = stype; }
     void SetAttributeIndex(int index)
@@ -59,15 +59,13 @@ class SortableMythGenericTreeList : public QList<MythGenericTree*>
 
 ///////////////////////////////////////////////////////
 
-MythGenericTree::MythGenericTree(const QString &a_string, int an_int,
+MythGenericTree::MythGenericTree(QString a_string, int an_int,
                          bool selectable_flag)
+    : m_text(std::move(a_string)),
+      m_int(an_int),
+      m_subnodes(new SortableMythGenericTreeList),
+      m_selectable(selectable_flag)
 {
-    m_subnodes = new SortableMythGenericTreeList;
-
-    m_text = a_string;
-    m_int = an_int;
-    m_selectable = selectable_flag;
-
     ensureSortFields();
 }
 
@@ -296,7 +294,7 @@ MythGenericTree* MythGenericTree::getVisibleChildAt(uint reference) const
     QList<MythGenericTree*> *list = m_subnodes;
 
     uint n = 0;
-    for (auto *child : qAsConst(*list))
+    for (auto *child : std::as_const(*list))
     {
         if (child->IsVisible())
         {
@@ -506,6 +504,9 @@ MythUIButtonListItem *MythGenericTree::CreateListButton(MythUIButtonList *list)
     item->SetTextFromMap(m_strings);
     item->SetImageFromMap(m_imageFilenames);
     item->SetStatesFromMap(m_states);
+    item->SetTextCb(m_textCb.fn, m_textCb.data);
+    item->SetImageCb(m_imageCb.fn, m_imageCb.data);
+    item->SetStateCb(m_stateCb.fn, m_stateCb.data);
 
     if (visibleChildCount() > 0)
         item->setDrawArrow(true);
@@ -545,13 +546,27 @@ void MythGenericTree::SetTextFromMap(const InfoMap &infoMap,
     }
 }
 
+void MythGenericTree::SetTextCb(mgtCbFn fn, void *data)
+{
+    m_textCb.fn = fn;
+    m_textCb.data = data;
+}
+
 QString MythGenericTree::GetText(const QString &name) const
 {
     if (name.isEmpty())
         return m_text;
+
+    if (m_textCb.fn != nullptr)
+    {
+        QString result = m_textCb.fn(name, m_textCb.data);
+        if (!result.isEmpty())
+            return result;
+    }
+
     if (m_strings.contains(name))
         return m_strings[name].text;
-    return QString();
+    return {};
 }
 
 void MythGenericTree::SetImage(const QString &filename, const QString &name)
@@ -566,22 +581,41 @@ void MythGenericTree::SetImageFromMap(const InfoMap &infoMap)
     m_imageFilenames = infoMap;
 }
 
+void MythGenericTree::SetImageCb(mgtCbFn fn, void *data)
+{
+    m_imageCb.fn = fn;
+    m_imageCb.data = data;
+}
+
 QString MythGenericTree::GetImage(const QString &name) const
 {
     if (name.isEmpty())
-        return QString();
+        return {};
+
+    if (m_imageCb.fn != nullptr)
+    {
+        QString result = m_imageCb.fn(name, m_imageCb.data);
+        if (!result.isEmpty())
+            return result;
+    }
 
     InfoMap::const_iterator it = m_imageFilenames.find(name);
     if (it != m_imageFilenames.end())
         return *it;
 
-    return QString();
+    return {};
 }
 
 void MythGenericTree::DisplayStateFromMap(const InfoMap &infoMap)
 {
     m_states.clear();
     m_states = infoMap;
+}
+
+void MythGenericTree::SetStateCb(mgtCbFn fn, void *data)
+{
+    m_stateCb.fn = fn;
+    m_stateCb.data = data;
 }
 
 void MythGenericTree::DisplayState(const QString &state, const QString &name)
@@ -593,11 +627,18 @@ void MythGenericTree::DisplayState(const QString &state, const QString &name)
 QString MythGenericTree::GetState(const QString &name) const
 {
     if (name.isEmpty())
-        return QString();
+        return {};
+
+    if (m_stateCb.fn != nullptr)
+    {
+        QString result = m_stateCb.fn(name, m_stateCb.data);
+        if (!result.isEmpty())
+            return result;
+    }
 
     InfoMap::const_iterator it = m_states.find(name);
     if (it != m_states.end())
         return *it;
 
-    return QString();
+    return {};
 }

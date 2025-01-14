@@ -1,29 +1,27 @@
 #include "xmltvparser.h"
 
+// C++ headers
+#include <cstdlib>
+#include <iostream>
+
 // Qt headers
-#include <QFile>
-#include <QStringList>
 #include <QDateTime>
 #include <QDomDocument>
+#include <QFile>
+#include <QFileInfo>
+#include <QStringList>
 #include <QUrl>
+#include <QXmlStreamReader>
 
-// C++ headers
-#include <iostream>
-#include <cstdlib>
-
-// libmyth headers
-#include "exitcodes.h"
-#include "mythcorecontext.h"
-#include "mythdate.h"
-
-// libmythtv headers
-#include "programinfo.h"
-#include "programdata.h"
-#include "dvbdescriptors.h"
-#include "channelinfo.h"
-
-// libmythmetadata headers
-#include "metadatadownload.h"
+// MythTV headers
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/programinfo.h"
+#include "libmythmetadata/metadatadownload.h"
+#include "libmythtv/channelinfo.h"
+#include "libmythtv/mpeg/dvbdescriptors.h"
+#include "libmythtv/programdata.h"
 
 // filldata headers
 #include "channeldata.h"
@@ -43,9 +41,9 @@ static uint ELFHash(const QByteArray &ba)
     {
         while (*k)
         {
-            uint g = 0;
             h = (h << 4) + *k++;
-            if ((g = (h & 0xf0000000)) != 0)
+            uint g = (h & 0xf0000000);
+            if (g != 0)
                 h ^= g >> 24;
             h &= ~g;
         }
@@ -66,11 +64,7 @@ static void fromXMLTVDate(QString &timestr, QDateTime &dt)
         return;
     }
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList split = timestr.split(" ", QString::SkipEmptyParts);
-#else
     QStringList split = timestr.split(" ", Qt::SkipEmptyParts);
-#endif
     QString ts = split[0];
     QDate tmpDate;
     QTime tmpTime;
@@ -138,9 +132,13 @@ static void fromXMLTVDate(QString &timestr, QDateTime &dt)
             tmpTime = QTime::fromString(tsTime, "HHmmss");
         }
         else if (tsTime.length() == 4)
+        {
             tmpTime = QTime::fromString(tsTime, "HHmm");
+        }
         else if (tsTime.length() == 2)
+        {
             tmpTime = QTime::fromString(tsTime, "HH");
+        }
         if (!tmpTime.isValid())
         {
             // Time part exists, but is (somehow) invalid
@@ -151,7 +149,11 @@ static void fromXMLTVDate(QString &timestr, QDateTime &dt)
         }
     }
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime tmpDT = QDateTime(tmpDate, tmpTime, Qt::UTC);
+#else
+    QDateTime tmpDT = QDateTime(tmpDate, tmpTime, QTimeZone(QTimeZone::UTC));
+#endif
     if (!tmpDT.isValid())
     {
         LOG(VB_XMLTV, LOG_ERR,
@@ -178,7 +180,7 @@ static void fromXMLTVDate(QString &timestr, QDateTime &dt)
     timestr = MythDate::toString(dt, MythDate::kFilename);
 }
 
-static int readNextWithErrorCheck(QXmlStreamReader &xml)
+static bool readNextWithErrorCheck(QXmlStreamReader &xml)
 {
     xml.readNext();
     if (xml.hasError())
@@ -201,6 +203,18 @@ bool XMLTVParser::parseFile(
         LOG(VB_GENERAL, LOG_ERR,
             QString("Error unable to open '%1' for reading.") .arg(filename));
         return false;
+    }
+
+    if (filename != "-")
+    {
+        QFileInfo info(f);
+        if (info.size() == 0)
+        {
+            LOG(VB_GENERAL, LOG_WARNING,
+                QString("File %1 exists but is empty. Did the grabber fail?").arg(filename));
+            f.close();
+            return false;
+        }
     }
 
     QXmlStreamReader xml(&f);
@@ -365,7 +379,10 @@ bool XMLTVParser::parseFile(
                 do
                 {
                     if (!readNextWithErrorCheck(xml))
+                    {
+                        delete pginfo;
                         return false;
+                    }
                     if (xml.name() == QString("title"))
                     {
                         QString text2=xml.readElementText(QXmlStreamReader::SkipChildElements);
@@ -521,7 +538,7 @@ bool XMLTVParser::parseFile(
                             if (xml.isStartElement())
                             {
                                 // Character role in optional role attribute
-                                QString role = xml.attributes()
+                                QString character = xml.attributes()
                                                   .value("role").toString();
                                 QString tagname = xml.name().toString();
                                 if (tagname == "actor")
@@ -532,25 +549,21 @@ bool XMLTVParser::parseFile(
                                     if (guest == "yes")
                                         tagname = "guest_star";
                                 }
-                                QString text2 = xml.readElementText(QXmlStreamReader::SkipChildElements);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                                QStringList roles = role.split("/", QString::SkipEmptyParts);
-#else
-                                QStringList roles = role.split("/", Qt::SkipEmptyParts);
-#endif
-                                if (roles.isEmpty())
+                                QString name = xml.readElementText(QXmlStreamReader::SkipChildElements);
+                                QStringList characters = character.split("/", Qt::SkipEmptyParts);
+                                if (characters.isEmpty())
                                 {
-                                    pginfo->AddPerson(tagname, text2,
-                                                      priority, role);
+                                    pginfo->AddPerson(tagname, name,
+                                                      priority, character);
                                     ++priority;
                                 }
                                 else
                                 {
-                                    for (auto & r : roles)
+                                    for (auto & c : characters)
                                     {
-                                        pginfo->AddPerson(tagname, text2,
+                                        pginfo->AddPerson(tagname, name,
                                                           priority,
-                                                          r.simplified());
+                                                          c.simplified());
                                         ++priority;
                                     }
                                 }
@@ -694,13 +707,13 @@ bool XMLTVParser::parseFile(
                                 pginfo->m_inetref = inetref;
                             }
                         }
-                        else if ((system == "thetvdb.com") && (m_tvGrabberPath.endsWith(QString("/ttvdb.py"))))
+                        else if ((system == "thetvdb.com") && (m_tvGrabberPath.endsWith(QString("/ttvdb4.py"))))
                         {
                             // text is series/<inetref>
                             QString inetrefRaw(xml.readElementText(QXmlStreamReader::SkipChildElements));
                             if (inetrefRaw.startsWith(QString("series/")))
                             {
-                                QString inetref(QString ("ttvdb.py_") + inetrefRaw.section('/',1,1).trimmed());
+                                QString inetref(QString ("ttvdb4.py_") + inetrefRaw.section('/',1,1).trimmed());
                                 pginfo->m_inetref = inetref;
                                 // ProgInfo does not have a collectionref, so we don't set any
                             }

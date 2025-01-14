@@ -4,7 +4,6 @@
 MythRender::MythRender(RenderType type)
   : ReferenceCounter(QString("MythRender:%1").arg(type)),
     m_type(type),
-    m_size(QSize()),
     m_errored(false)
 {
 }
@@ -16,5 +15,5 @@ bool MythRender::IsShared() const
 
 QStringList MythRender::GetDescription()
 {
-    return QStringList();
+    return {};
 }

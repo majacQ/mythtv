@@ -1,10 +1,8 @@
-// ANSI C headers
-#include <cmath>
-#include <cerrno>
-#include <thread> // for sleep_for
-
 // C++ headers
 #include <algorithm>
+#include <cerrno>
+#include <cmath>
+#include <thread> // for sleep_for
 
 // Qt headers
 #include <QCoreApplication>
@@ -12,22 +10,22 @@
 #include <QFileInfo>
 
 // MythTV headers
-#include "compat.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythmiscutil.h"
-#include "mythcommflagplayer.h"
-#include "programinfo.h"
-#include "channelutil.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/mythcommflagplayer.h"
 
 // Commercial Flagging headers
-#include "CommDetector2.h"
-#include "CannyEdgeDetector.h"
-#include "FrameAnalyzer.h"
-#include "PGMConverter.h"
-#include "BorderDetector.h"
-#include "HistogramAnalyzer.h"
 #include "BlankFrameDetector.h"
+#include "BorderDetector.h"
+#include "CannyEdgeDetector.h"
+#include "CommDetector2.h"
+#include "FrameAnalyzer.h"
+#include "HistogramAnalyzer.h"
+#include "PGMConverter.h"
 #include "SceneChangeDetector.h"
 #include "TemplateFinder.h"
 #include "TemplateMatcher.h"
@@ -252,23 +250,20 @@ QString frameToTimestamp(long long frameno, float fps)
 {
     auto ms = millisecondsFromFloat(frameno / fps * 1000);
     auto secs = std::chrono::ceil<std::chrono::seconds>(ms);
-    return MythFormatTime(secs, "hh:mm:ss");
+    return MythDate::formatTime(secs, "HH:mm:ss");
 }
 
 QString frameToTimestampms(long long frameno, float fps)
 {
     auto ms = millisecondsFromFloat(frameno / fps * 1000);
-    QString timestr = MythFormatTime(ms, "mm:ss.zzz");
-    timestr.chop(1); // Chop 1 to return hundredths
+    QString timestr = MythDate::formatTime(ms, "mm:ss.zz");
     return timestr;
 }
 
 QString strftimeval(std::chrono::microseconds usecs)
 {
     auto msecs = duration_cast<std::chrono::milliseconds>(usecs);
-    return QString("%1.%2")
-        .arg(duration_cast<std::chrono::seconds>(usecs).count())
-        .arg((msecs % 1s).count(), 3, 10, QChar(QChar('0')));
+    return MythDate::formatTime(msecs, "s.zzz");
 }
 
 };  /* namespace */
@@ -379,7 +374,7 @@ void CommDetector2::reportState(int elapsedms, long long frameno,
 
     /* Assume that 0-th pass is negligible in terms of computational cost. */
     int percentage = (passno == 0 || npasses == 1 || nframes == 0) ? 0 :
-        (passno - 1) * 100 / (npasses - 1) +
+        ((passno - 1) * 100 / (npasses - 1)) +
         std::min((long long)100, (frameno * 100 / nframes) / (npasses - 1));
 
     if (m_showProgress)
@@ -608,7 +603,7 @@ bool CommDetector2::go(void)
             {
                 waitForBuffer(start, minlag,
                         m_recstartts.secsTo(MythDate::current()) -
-                        totalFlagTime.elapsed() / 1000, m_player->GetFrameRate(),
+                        (totalFlagTime.elapsed() / 1000), m_player->GetFrameRate(),
                         m_fullSpeed);
             }
 

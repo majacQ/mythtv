@@ -8,15 +8,14 @@
 #include <QString>
 #include <QMutex>
 #include <QMap>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 
-#include "mythdate.h"
+#include "libmythbase/mythdate.h"
+
 #include "DeviceReadBuffer.h"
-#include "mpegstreamdata.h"
-#include "streamhandler.h"
 #include "dtvconfparserhelpers.h"
+#include "mpeg/mpegstreamdata.h"
+#include "recorders/streamhandler.h"
 
 class HDHRStreamHandler;
 class DTVSignalMonitor;
@@ -31,7 +30,7 @@ struct hdhomerun_device_t { int dummy; };
 struct hdhomerun_device_selector_t { int dummy; };
 #endif
 
-enum HDHRTuneMode {
+enum HDHRTuneMode : std::uint8_t {
     hdhrTuneModeNone = 0,
     hdhrTuneModeFrequency,
     hdhrTuneModeFrequencyPid,
@@ -74,12 +73,8 @@ class HDHRStreamHandler : public StreamHandler
 
     bool Connect(void);
 
-    QString TunerGet(const QString &name,
-                     bool report_error_return = true,
-                     bool print_error = true) const;
-    QString TunerSet(const QString &name, const QString &value,
-                     bool report_error_return = true,
-                     bool print_error = true);
+    QString TunerGet(const QString &name);
+    QString TunerSet(const QString &name, const QString &value);
 
     bool Open(void);
     void Close(void);
@@ -96,11 +91,7 @@ class HDHRStreamHandler : public StreamHandler
     HDHRTuneMode                 m_tuneMode         {hdhrTuneModeNone}; // debug self check
     int                          m_majorId;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex               m_hdhrLock         {QMutex::Recursive};
-#else
     mutable QRecursiveMutex      m_hdhrLock;
-#endif
 
     // for implementing Get & Return
     static QMutex                            s_handlersLock;

@@ -9,15 +9,14 @@
 #include <QString>
 #include <QMutex>
 #include <QRect>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 #include <QCoreApplication>
 
 // MythTV
-#include "io/mythopticalbuffer.h"
-#include "mythdate.h"
-#include "referencecounter.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/referencecounter.h"
+#include "libmythtv/io/mythopticalbuffer.h"
+
 #include "mythdvdcontext.h"
 #include "mythdvdinfo.h"
 
@@ -26,7 +25,7 @@ extern "C" {
 #include "libavcodec/avcodec.h"
 }
 
-#define DVD_MENU_MAX 7
+static constexpr int32_t DVD_MENU_MAX { 7 };
 
 class MythDVDPlayer;
 
@@ -93,7 +92,7 @@ class MTV_PUBLIC MythDVDBuffer : public MythOpticalBuffer
     int       GetAudioTrackNum     (uint StreamId);
     int       GetAudioTrackType    (uint Index);
     bool      GetDVDStateSnapshot  (QString& State);
-    bool      RestoreDVDStateSnapshot(QString& State);
+    bool      RestoreDVDStateSnapshot(const QString& State);
     double    GetFrameRate         (void);
     bool      StartOfTitle         (void) const;
     bool      EndOfTitle           (void) const;
@@ -199,11 +198,7 @@ class MTV_PUBLIC MythDVDBuffer : public MythOpticalBuffer
     QMap<int, QList<std::chrono::seconds> > m_chapterMap;
     MythDVDPlayer  *m_parent                { nullptr };
     float           m_forcedAspect          { -1.0F   };
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex          m_contextLock           { QMutex::Recursive };
-#else
     QRecursiveMutex m_contextLock;
-#endif
     MythDVDContext *m_context               { nullptr };
     dvdnav_status_t m_dvdStat               { DVDNAV_STATUS_OK };
     int32_t         m_dvdEvent              { 0       };

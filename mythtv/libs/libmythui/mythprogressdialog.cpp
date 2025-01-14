@@ -3,13 +3,13 @@
 #include "mythprogressdialog.h"
 
 // libmythbase headers
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 // libmythui headers
 #include "mythuitext.h"
 #include "mythuiprogressbar.h"
 
-QEvent::Type ProgressUpdateEvent::kEventType =
+const QEvent::Type ProgressUpdateEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 // Force this class to have a vtable so that dynamic_cast works.
@@ -75,7 +75,7 @@ bool MythUIBusyDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -83,7 +83,9 @@ bool MythUIBusyDialog::keyPressEvent(QKeyEvent *event)
             // eat the escape keypress
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -149,7 +151,7 @@ bool MythUIProgressDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE")
@@ -157,7 +159,9 @@ bool MythUIProgressDialog::keyPressEvent(QKeyEvent *event)
             // eat the escape keypress
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))

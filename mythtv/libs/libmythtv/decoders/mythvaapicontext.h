@@ -2,7 +2,7 @@
 #define MYTHVAAPICONTEXT_H
 
 // MythTV
-#include "decoders/mythcodeccontext.h"
+#include "libmythtv/decoders/mythcodeccontext.h"
 
 // VAAPI
 #include "va/va.h"
@@ -34,7 +34,7 @@ class MTV_PUBLIC MythVAAPIContext : public MythCodecContext
     bool   DecoderWillResetOnFlush       () override;
     bool   DecoderWillResetOnAspect      () override;
 
-    static MythCodecID GetSupportedCodec (AVCodecContext** Context, AVCodec** Codec,
+    static MythCodecID GetSupportedCodec (AVCodecContext** Context, const AVCodec** Codec,
                                           const QString&   Decoder, uint StreamType);
     static enum AVPixelFormat GetFormat  (AVCodecContext* Context, const AVPixelFormat* PixFmt);
     static enum AVPixelFormat GetFormat2 (AVCodecContext* Context, const AVPixelFormat* PixFmt);
@@ -51,7 +51,7 @@ class MTV_PUBLIC MythVAAPIContext : public MythCodecContext
 
     MythDeintType    m_deinterlacer      { DEINT_NONE };
     bool             m_deinterlacer2x    { false      };
-    int              m_lastInterlaced    { 0 };
+    bool             m_lastInterlaced    { false };
     bool             m_lastTopFieldFirst { false };
     AVFilterContext* m_filterSink        { nullptr };
     AVFilterContext* m_filterSource      { nullptr };

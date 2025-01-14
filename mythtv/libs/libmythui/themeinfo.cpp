@@ -9,8 +9,8 @@
 #include <QDomElement>
 
 // MythTV headers
-#include "mythlogging.h"
-#include "mythdownloadmanager.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
 
 #define LOC      QString("ThemeInfo: ")
 
@@ -247,6 +247,15 @@ bool ThemeInfo::parseThemeInfo()
 bool ThemeInfo::IsWide() const
 {
     return m_aspect == "16:9" || m_aspect == "16:10";
+}
+
+QString ThemeInfo::GetDirectoryName() const
+{
+#ifdef Q_OS_ANDROID
+    return m_theme.fileName().remove("assets:/");
+#else
+    return m_theme.fileName();
+#endif
 }
 
 void ThemeInfo::ToMap(InfoMap &infoMap) const

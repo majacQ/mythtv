@@ -21,15 +21,17 @@
  */
 
 // MythTV headers
-#include "streamlisteners.h"
-#include "scanstreamdata.h"
-#include "premieretables.h"
-#include "mythlogging.h"
-#include "atsctables.h"
-#include "sctetables.h"
-#include "io/mythmediabuffer.h"
-#include "dvbtables.h"
-#include "exitcodes.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythtv/io/mythmediabuffer.h"
+#include "libmythtv/mpeg/atsctables.h"
+#include "libmythtv/mpeg/dvbtables.h"
+#include "libmythtv/mpeg/premieretables.h"
+#include "libmythtv/mpeg/scanstreamdata.h"
+#include "libmythtv/mpeg/sctetables.h"
+#include "libmythtv/mpeg/streamlisteners.h"
+#include "libmythtv/bytereader.h"
+
 
 // Application local headers
 #include "mpegutils.h"
@@ -45,7 +47,7 @@ static QHash<uint,bool> extract_pids(const QString &pidsStr, bool required)
     else
     {
         QStringList pidsList = pidsStr.split(",");
-        for (const QString &pidStr : qAsConst(pidsList))
+        for (const QString &pidStr : std::as_const(pidsList))
         {
             bool ok = false;
             uint tmp = pidStr.toUInt(&ok, 0);
@@ -304,7 +306,7 @@ class PTSListener :
     {
         int64_t pts = -1LL;
         uint32_t pts_count = 0;
-        for (uint stream : qAsConst(m_ptsStreams))
+        for (uint stream : std::as_const(m_ptsStreams))
         {
             if(m_ptsCount[stream] > pts_count){
                 pts = m_ptsFirst[stream];
@@ -317,7 +319,7 @@ class PTSListener :
     {
         int64_t pts = -1LL;
         uint32_t pts_count = 0;
-        for (uint stream : qAsConst(m_ptsStreams))
+        for (uint stream : std::as_const(m_ptsStreams))
         {
             if(m_ptsCount[stream] > pts_count){
                 pts = m_ptsLast[stream];
@@ -359,9 +361,9 @@ bool PTSListener::ProcessTSPacket(const TSPacket &tspacket)
 
     while (bufptr < bufend)
     {
-        bufptr = avpriv_find_start_code(bufptr, bufend, &m_startCode);
+        bufptr = ByteReader::find_start_code_truncated(bufptr, bufend, &m_startCode);
         int bytes_left = bufend - bufptr;
-        if ((m_startCode & 0xffffff00) == 0x00000100)
+        if (ByteReader::start_code_is_valid(m_startCode))
         {
             // At this point we have seen the start code 0 0 1
             // the next byte will be the PES packet stream id.

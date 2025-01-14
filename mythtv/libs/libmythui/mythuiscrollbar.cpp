@@ -3,13 +3,14 @@
 
 // C++
 #include <cmath>
+#include <algorithm>
 
 // QT
 #include <QCoreApplication>
 #include <QDomDocument>
 
 // myth
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 void MythUIScrollBar::Reset()
 {
@@ -35,9 +36,13 @@ bool MythUIScrollBar::ParseElement(
             m_layout = LayoutHorizontal;
     }
     else if (element.tagName() == "hidedelay")
+    {
         m_hideDelay = std::chrono::milliseconds(getFirstText(element).toInt());
+    }
     else
+    {
         return MythUIType::ParseElement(filename, element, showWarnings);
+    }
 
     return true;
 }
@@ -59,8 +64,7 @@ void MythUIScrollBar::SetMaximum(int value)
     if (value - 1 == m_maximum)
         return;
 
-    if (value < 1)
-        value = 1;
+    value = std::max(value, 1);
 
     m_maximum = value - 1;
     CalculatePosition();
@@ -71,11 +75,7 @@ void MythUIScrollBar::SetSliderPosition(int value)
     if (value == m_sliderPosition)
         return;
 
-    if (value < 0)
-        value = 0;
-
-    if (value > m_maximum)
-        value = m_maximum;
+    value = std::clamp(value, 0, m_maximum);
 
     m_sliderPosition = value;
     CalculatePosition();
@@ -108,14 +108,14 @@ void MythUIScrollBar::CalculatePosition(void)
 
     if (m_layout == LayoutHorizontal)
     {
-        int width = qMax((int)lroundf(fillArea.width() * relativeSize),
+        int width = std::max((int)lroundf(fillArea.width() * relativeSize),
                          m_sliderArea.width());
         newSliderArea.setWidth(width);
         endPos.setX(lroundf((fillArea.width() - width) * percentage));
     }
     else
     {
-        int height = qMax((int)lroundf(fillArea.height() * relativeSize),
+        int height = std::max((int)lroundf(fillArea.height() * relativeSize),
                           m_sliderArea.height());
         newSliderArea.setHeight(height);
         endPos.setY(lroundf((fillArea.height() - height) * percentage));

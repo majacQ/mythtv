@@ -23,7 +23,6 @@ HEADERS += httprequest.h upnp.h ssdp.h taskqueue.h upnpsubscription.h
 HEADERS += upnpdevice.h upnptasknotify.h upnptasksearch.h upnputil.h
 HEADERS += httpserver.h upnpcds.h upnpcdsobjects.h bufferedsocketdevice.h upnpmsrr.h
 HEADERS += eventing.h upnpcmgr.h upnptaskevent.h upnptaskcache.h ssdpcache.h
-HEADERS += configuration.h
 HEADERS += soapclient.h mythxmlclient.h mmembuf.h upnpexp.h
 HEADERS += upnpserviceimpl.h
 HEADERS += servicehost.h wsdl.h htmlserver.h xsd.h
@@ -46,7 +45,7 @@ SOURCES += httprequest.cpp upnp.cpp ssdp.cpp taskqueue.cpp upnputil.cpp
 SOURCES += upnpdevice.cpp upnptasknotify.cpp upnptasksearch.cpp
 SOURCES += httpserver.cpp upnpcds.cpp upnpcdsobjects.cpp bufferedsocketdevice.cpp
 SOURCES += eventing.cpp upnpcmgr.cpp upnpmsrr.cpp upnptaskevent.cpp ssdpcache.cpp
-SOURCES += configuration.cpp soapclient.cpp mythxmlclient.cpp mmembuf.cpp
+SOURCES += soapclient.cpp mythxmlclient.cpp mmembuf.cpp
 SOURCES += upnpserviceimpl.cpp
 SOURCES += htmlserver.cpp
 SOURCES += servicehost.cpp wsdl.cpp upnpsubscription.cpp xsd.cpp
@@ -60,15 +59,13 @@ SOURCES += serializers/xmlplistSerializer.cpp
 
 SOURCES += websocket_extensions/*.cpp
 
-contains(QT_MAJOR_VERSION, 5) {
+using_qtscript: {
     HEADERS += serverSideScripting.h
     SOURCES += serverSideScripting.cpp
 }
 
-INCLUDEPATH += ../libmythbase ../libmythservicecontracts ..
-INCLUDEPATH += ./serializers
+INCLUDEPATH += ..
 
-DEPENDPATH  += ../libmythbase ..
 LIBS      += -L../libmythbase -lmythbase-$$LIBVERSION
 LIBS      += -L../libmythservicecontracts -lmythservicecontracts-$$LIBVERSION
 
@@ -82,13 +79,13 @@ mingw | win32-msvc* {
 win32-msvc*:LIBS += -lzlib
 
 
-inc.path = $${PREFIX}/include/mythtv/upnp/
+inc.path = $${PREFIX}/include/mythtv/libmythupnp/
 
 inc.files  = httprequest.h upnp.h ssdp.h taskqueue.h bufferedsocketdevice.h
 inc.files += upnpdevice.h upnptasknotify.h upnptasksearch.h upnputil.h
 inc.files += httpserver.h httpstatus.h upnpcds.h upnpcdsobjects.h
 inc.files += eventing.h upnpcmgr.h upnptaskevent.h upnptaskcache.h ssdpcache.h
-inc.files += upnpimpl.h configuration.h
+inc.files += upnpimpl.h
 inc.files += soapclient.h mythxmlclient.h mmembuf.h upnpsubscription.h
 inc.files += servicehost.h wsdl.h htmlserver.h serverSideScripting.h
 inc.files += xsd.h upnphelpers.h
@@ -96,10 +93,11 @@ inc.files += xsd.h upnphelpers.h
 # inc.files += services/rtti.h
 # inc.files += serviceHosts/rttiServiceHost.h
 
-inc.files += serializers/serializer.h     serializers/xmlSerializer.h 
-inc.files += serializers/jsonSerializer.h serializers/soapSerializer.h
+inc2.path = $${PREFIX}/include/mythtv/libmythupnp/serializers
+inc2.files += serializers/serializer.h     serializers/xmlSerializer.h
+inc2.files += serializers/jsonSerializer.h serializers/soapSerializer.h
 
-INSTALLS += inc
+INSTALLS += inc inc2
 
 macx {
 
@@ -107,7 +105,8 @@ macx {
 }
 
 QT += network xml sql
-contains(QT_MAJOR_VERSION, 5): QT += script
+
+using_qtscript: QT += script
 
 mingw | win32-msvc* {
 

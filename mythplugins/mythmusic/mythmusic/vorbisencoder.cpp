@@ -11,14 +11,14 @@
 #include <QString>
 
 // MythTV
-#include <mythcontext.h>
-#include <compat.h> // For random() on MINGW32
-#include <musicmetadata.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythrandom.h>
+#include <libmythmetadata/metaiooggvorbis.h>
+#include <libmythmetadata/musicmetadata.h>
 
 // MythMusic
 #include "encoder.h"
 #include "vorbisencoder.h"
-#include "metaiooggvorbis.h"
 
 
 static int write_page(ogg_page *page, FILE *fp)
@@ -59,7 +59,7 @@ VorbisEncoder::VorbisEncoder(const QString &outfile, int qualitylevel,
     vorbis_analysis_init(&m_vd, &m_vi);
     vorbis_block_init(&m_vd, &m_vb);
 
-    ogg_stream_init(&m_os, random());
+    ogg_stream_init(&m_os, MythRandom());
 
     ogg_packet header_main;
     ogg_packet header_comments;
@@ -114,10 +114,10 @@ int VorbisEncoder::addSamples(int16_t * bytes, unsigned int length)
 
     for (long i = 0; i < realsamples; i++)
     {
-        buffer[0][i] = ((chars[i * 4 + 1] << 8) |
+        buffer[0][i] = ((chars[(i * 4) + 1] << 8) |
                         (chars[i * 4] & 0xff)) / 32768.0F;
-        buffer[1][i] = ((chars[i * 4 + 3] << 8) |
-                        (chars[i * 4 + 2] & 0xff)) / 32768.0F;
+        buffer[1][i] = ((chars[(i * 4) + 3] << 8) |
+                        (chars[(i * 4) + 2] & 0xff)) / 32768.0F;
     }
 
     vorbis_analysis_wrote(&m_vd, realsamples);

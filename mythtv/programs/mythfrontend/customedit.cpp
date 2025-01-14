@@ -1,28 +1,21 @@
-
-#include "customedit.h"
-
-// QT
+// Qt
 #include <QSqlError>
 
-// libmythbase
-#include "mythdb.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/mythuitextedit.h"
 
-// libmyth
-#include "mythcorecontext.h"
-
-// libmythui
-#include "mythuibuttonlist.h"
-#include "mythuitextedit.h"
-#include "mythuibutton.h"
-#include "mythdialogbox.h"
-#include "mythuitext.h"
-
-// libmythtv
-#include "recordingrule.h"
-
-// mythfrontend
-#include "scheduleeditor.h"
+// MythFrontend
+#include "customedit.h"
 #include "proglist.h"
+#include "scheduleeditor.h"
+
 
 CustomEdit::CustomEdit(MythScreenStack *parent, ProgramInfo *pginfo)
               : MythScreenType(parent, "CustomEdit")
@@ -145,7 +138,9 @@ void CustomEdit::loadData(void)
         }
     }
     else
+    {
         MythDB::DBError("Get power search rules query", result);
+    }
 
     loadClauses();
 
@@ -203,19 +198,11 @@ QString CustomEdit::evaluate(QString clause)
             repl = m_pginfo->GetScheduledEndTime().toString("hh:mm");
         } else if (mid.compare("STARTSEC") == 0) {
             QDateTime date = m_pginfo->GetScheduledStartTime();
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QDateTime midnight = QDateTime(date.date());
-#else
             QDateTime midnight = date.date().startOfDay();
-#endif
             repl = QString("%1").arg(midnight.secsTo(date));
         } else if (mid.compare("ENDSEC") == 0) {
             QDateTime date = m_pginfo->GetScheduledEndTime();
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QDateTime midnight = QDateTime(date.date());
-#else
             QDateTime midnight = date.date().startOfDay();
-#endif
             repl = QString("%1").arg(midnight.secsTo(date));
         }
         // unknown tags are simply removed
@@ -633,7 +620,8 @@ void CustomEdit::clauseClicked(MythUIButtonListItem *item)
     QString clause;
     QString desc = m_descriptionEdit->GetText();
 
-    if (desc.contains(QRegularExpression("\\S")))
+    static const QRegularExpression kNonWhitespaceRE { "\\S" };
+    if (desc.contains(kNonWhitespaceRE))
         clause = "AND ";
     clause += (m_evaluate) ? evaluate(rule.description) : rule.description;
 
@@ -659,7 +647,9 @@ void CustomEdit::testClicked(void)
         mainStack->AddScreen(pl);
     }
     else
+    {
         delete pl;
+    }
 }
 
 /**
@@ -708,7 +698,9 @@ void CustomEdit::recordClicked(void)
         connect(schededit, &ScheduleEditor::ruleSaved, this, &CustomEdit::scheduleCreated);
     }
     else
+    {
         delete schededit;
+    }
 }
 
 void CustomEdit::scheduleCreated(int ruleID)
@@ -770,7 +762,9 @@ void CustomEdit::storeClicked(void)
         mainStack->AddScreen(storediag);
     }
     else
+    {
         delete storediag;
+    }
 }
 
 
@@ -793,8 +787,8 @@ bool CustomEdit::checkSyntax(void)
     else
     {
         MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare(QString("SELECT NULL FROM (program,channel) "
-                              "%1 WHERE\n%2").arg(from, desc));
+        query.prepare(QString("SELECT NULL FROM (program, channel, oldrecorded AS oldrecstatus) "
+                              "%1 WHERE %2 LIMIT 5").arg(from, desc));
 
         if (query.exec())
         {
@@ -935,7 +929,7 @@ bool CustomEdit::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "DELETE")
@@ -951,8 +945,11 @@ bool CustomEdit::keyPressEvent(QKeyEvent *event)
             m_evaluate = !m_evaluate;
             MythUIButtonListItem* item = m_clauseList->GetItemCurrent();
             clauseChanged(item);
-        } else
+        }
+        else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))

@@ -1,0 +1,23 @@
+.channelBox {
+    border-radius: 10px;
+    background: var(--surface-200);
+    height: 120px;
+}
+
+.channelIcon {
+    height: 57px;
+    max-width: 86px;
+    margin-top: 10px;
+    margin-bottom: 3px;
+    overflow: hidden;
+    float: right;
+}
+
+.channelText {
+    clear: both;
+    font-weight: bold;
+    text-align: -webkit-center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0px 3px; /* Vertical Horizontal */
+}

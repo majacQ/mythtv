@@ -1,31 +1,31 @@
 // qt
-#include <QString>
 #include <QFileInfo>
+#include <QString>
 #include <QtAlgorithms>
 
-// myth
-#include <mythdb.h>
-#include <mythcontext.h>
-#include <mythdirs.h>
-#include <mythsystemlegacy.h>
-#include <mythprogressdialog.h>
-#include <rssparse.h>
-#include <netutils.h>
-#include <mythrssmanager.h>
-#include <netgrabbermanager.h>
-#include <mythcoreutil.h>
-#include <metadata/videoutils.h>
-#include <mythuiimage.h>
-#include <mythuitext.h>
-#include <mythscreenstack.h>
-#include <mythmainwindow.h>
-#include <mythsorthelper.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythcoreutil.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythsorthelper.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/netgrabbermanager.h>
+#include <libmythbase/netutils.h>
+#include <libmythbase/rssmanager.h>
+#include <libmythbase/rssparse.h>
+#include <libmythmetadata/videoutils.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythscreenstack.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // mythnetvision
-#include "treeeditor.h"
+#include "netcommon.h"
 #include "nettree.h"
 #include "rsseditor.h"
-#include "netcommon.h"
+#include "treeeditor.h"
 
 class GrabberScript;
 
@@ -178,7 +178,7 @@ void NetTree::LoadData(void)
         using MGTreeChildList = QList<MythGenericTree *>;
         MGTreeChildList *lchildren = m_currentNode->getAllChildren();
 
-        for (auto * child : qAsConst(*lchildren))
+        for (auto * child : std::as_const(*lchildren))
         {
             if (child != nullptr)
             {
@@ -367,7 +367,7 @@ bool NetTree::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -384,7 +384,9 @@ bool NetTree::keyPressEvent(QKeyEvent *event)
                 handled = false;
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -514,7 +516,9 @@ void NetTree::SwitchView()
         deleteLater();
     }
     else
+    {
         delete nettree;
+    }
 }
 
 void NetTree::FillTree()
@@ -531,7 +535,7 @@ void NetTree::FillTree()
         rssGeneric->SetData(QString("%1/mythnetvision/icons/rss.png")
                             .arg(GetShareDir()));
 
-        for (const auto & feed : qAsConst(m_rssList))
+        for (const auto & feed : std::as_const(m_rssList))
         {
             ResultItem::resultList items = getRSSArticles(feed->GetTitle(),
                                                           VIDEO_PODCAST);
@@ -544,7 +548,7 @@ void NetTree::FillTree()
             if (m_type != DLG_TREE)
                 ret->addNode(tr("Back"), kUpFolder, true, false);
 
-            for (const auto & item : qAsConst(items))
+            for (const auto & item : std::as_const(items))
                 AddFileNode(ret, item);
             SetSubfolderData(ret);
         }
@@ -554,7 +558,7 @@ void NetTree::FillTree()
     }
 
     // Now let's add all the grabber trees
-    for (const auto & g : qAsConst(m_grabberList))
+    for (const auto & g : std::as_const(m_grabberList))
     {
 
         QMultiMap<QPair<QString,QString>, ResultItem*> treePathsNodes =
@@ -571,7 +575,7 @@ void NetTree::FillTree()
         if (m_type != DLG_TREE)
             ret->addNode(tr("Back"), kUpFolder, true, false);
 
-        for (const auto & path : qAsConst(paths))
+        for (const auto & path : std::as_const(paths))
         {
             QStringList curPaths = path.first.split("/");
             QString dirthumb = path.second;
@@ -618,7 +622,7 @@ void NetTree::BuildGenericTree(MythGenericTree *dst, QStringList paths,
     else
     {
         // File Handling
-        for (const auto & video : qAsConst(videos))
+        for (const auto & video : std::as_const(videos))
             AddFileNode(folder, video);
     }
     SetSubfolderData(folder);
@@ -691,7 +695,9 @@ void NetTree::UpdateResultItem(ResultItem *item)
         }
     }
     else if (m_thumbImage)
+    {
         m_thumbImage->Reset();
+    }
 
     if (m_downloadable)
     {
@@ -723,7 +729,9 @@ void NetTree::UpdateSiteItem(RSSSite *site)
         m_thumbImage->Load();
     }
     else if (m_thumbImage)
+    {
         m_thumbImage->Reset();
+    }
 
     if (m_downloadable)
         m_downloadable->Reset();
@@ -779,7 +787,9 @@ void NetTree::UpdateCurrentItem(void)
                 m_thumbImage->Load();
             }
             else
+            {
                 m_thumbImage->Reset();
+            }
         }
         else
         {
@@ -799,7 +809,9 @@ void NetTree::UpdateCurrentItem(void)
                 m_thumbImage->Load();
             }
             else
+            {
                 m_thumbImage->Reset();
+            }
         }
     }
 
@@ -850,7 +862,9 @@ void NetTree::RunTreeEditor() const
         mainStack->AddScreen(treeedit);
     }
     else
+    {
         delete treeedit;
+    }
 }
 
 void NetTree::RunRSSEditor() const
@@ -866,7 +880,9 @@ void NetTree::RunRSSEditor() const
         mainStack->AddScreen(rssedit);
     }
     else
+    {
         delete rssedit;
+    }
 }
 
 void NetTree::DoTreeRefresh()
@@ -969,7 +985,9 @@ void NetTree::customEvent(QEvent *event)
         }
     }
     else
+    {
         NetBase::customEvent(event);
+    }
 }
 
 void NetTree::SetSubfolderData(MythGenericTree *folder)

@@ -1,9 +1,12 @@
+#include <algorithm>
+
 // MythTV
+#include "libmyth/audio/audiooutput.h"
+
+#include "DVD/mythdvdbuffer.h"
+#include "DVD/mythdvddecoder.h"
+#include "DVD/mythdvdplayer.h"
 #include "tv_play.h"
-#include "mythdvdbuffer.h"
-#include "audiooutput.h"
-#include "mythdvddecoder.h"
-#include "mythdvdplayer.h"
 
 #define LOC      QString("DVDPlayer: ")
 
@@ -96,23 +99,15 @@ bool MythDVDPlayer::PrebufferEnoughFrames(int /*MinBuffers*/)
     return MythPlayerUI::PrebufferEnoughFrames(1);
 }
 
-bool MythDVDPlayer::DecoderGetFrameFFREW(void)
+void MythDVDPlayer::DoFFRewSkip(void)
 {
-    bool res = MythPlayerUI::DecoderGetFrameFFREW();
+    MythPlayerUI::DoFFRewSkip();
     if (m_decoderChangeLock.tryLock(1))
     {
         if (m_decoder)
             m_decoder->UpdateFramesPlayed();
         m_decoderChangeLock.unlock();
     }
-    return res;
-}
-
-bool MythDVDPlayer::DecoderGetFrameREW(void)
-{
-    MythPlayerUI::DecoderGetFrameREW();
-    return (m_playerCtx->m_buffer->IsDVD() &&
-            (m_playerCtx->m_buffer->DVD()->GetCurrentTime() < 2s));
 }
 
 void MythDVDPlayer::PreProcessNormalFrame(void)
@@ -367,7 +362,9 @@ void MythDVDPlayer::SetBookmark(bool Clear)
                 fields += dvdstate;
             }
             else
+            {
                 LOG(VB_PLAYBACK, LOG_INFO, LOC + "Clear bookmark");
+            }
 
             ProgramInfo::SaveDVDBookmark(fields);
 
@@ -496,7 +493,7 @@ void MythDVDPlayer::SetTrack(uint Type, uint TrackNo)
 {
     if (kTrackTypeAudio == Type)
     {
-        StreamInfo stream = m_decoder->GetTrackInfo(Type, static_cast<uint>(TrackNo));
+        StreamInfo stream = m_decoder->GetTrackInfo(Type, TrackNo);
         m_playerCtx->m_buffer->DVD()->SetTrack(Type, stream.m_stream_id);
     }
 
@@ -537,12 +534,12 @@ bool MythDVDPlayer::DoJumpChapter(int Chapter)
         if (Chapter < 0)
         {
             Chapter = current -1;
-            if (Chapter < 0) Chapter = 0;
+            Chapter = std::max(Chapter, 0);
         }
         else if (Chapter > total)
         {
             Chapter = current + 1;
-            if (Chapter > total) Chapter = total;
+            Chapter = std::min(Chapter, total);
         }
     }
 
@@ -675,7 +672,7 @@ QString MythDVDPlayer::GetAngleName(int Angle) const
         QString name = tr("Angle %1").arg(Angle);
         return name;
     }
-    return QString();
+    return {};
 }
 
 bool MythDVDPlayer::SwitchAngle(int Angle)

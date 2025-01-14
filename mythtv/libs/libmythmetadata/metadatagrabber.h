@@ -7,17 +7,17 @@
 #include <QStringList>
 #include <QDomDocument>
 
-#include "mythtypes.h"
-#include "mythmetaexp.h"
-//#include "metadatacommon.h"
-#include "referencecounterlist.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythbase/referencecounterlist.h"
+#include "libmythmetadata/mythmetaexp.h"
+
 class MetadataLookup;
 using MetadataLookupList = RefCountedList<MetadataLookup>;
 
 class MetaGrabberScript;
 using GrabberList = QList<MetaGrabberScript>;
 
-enum GrabberType {
+enum GrabberType : std::uint8_t {
     kGrabberAll,
     kGrabberMovie,
     kGrabberTelevision,

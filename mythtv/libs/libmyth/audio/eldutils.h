@@ -16,8 +16,8 @@
  *  more details.
  *
  *  You should have received a copy of the GNU General Public License along with
- *  this program; if not, write to the Free Software Foundation, Inc., 59
- *  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ *  this program; if not, write to the Free Software Foundation, Inc., 51
+ *  Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef ELDUTILS_H
@@ -25,20 +25,20 @@
 
 #include <cstdint>
 #include <QString>
-#include "mythexp.h"
+#include "libmyth/mythexp.h"
 
-#define ELD_FIXED_BYTES    20
-#define ELD_MAX_SAD        16
+static constexpr uint8_t ELD_FIXED_BYTES    { 20 };
+static constexpr size_t  ELD_MAX_SAD        { 16 };
 
-#define PRINT_RATES_ADVISED_BUFSIZE              80
-#define PRINT_BITS_ADVISED_BUFSIZE               16
-#define PRINT_CHANNEL_ALLOCATION_ADVISED_BUFSIZE 80
+static constexpr uint8_t PRINT_RATES_ADVISED_BUFSIZE              { 80 };
+static constexpr uint8_t PRINT_BITS_ADVISED_BUFSIZE               { 16 };
+static constexpr uint8_t PRINT_CHANNEL_ALLOCATION_ADVISED_BUFSIZE { 80 };
 
 class MPUBLIC eld
 {
   public:
     eld(const char *buf, int size);
-    eld(const eld& /*rhs*/);
+    eld(const eld& rhs) = default;
     eld();
     ~eld()= default;
     eld& operator=(const eld& /*rhs*/);
@@ -54,7 +54,7 @@ class MPUBLIC eld
     int maxChannels();
     QString codecs_desc() const;
     
-    enum cea_audio_coding_types {
+    enum cea_audio_coding_types : std::uint8_t {
         TYPE_REF_STREAM_HEADER =  0,
         TYPE_LPCM              =  1,
         TYPE_AC3               =  2,
@@ -107,7 +107,7 @@ class MPUBLIC eld
         int      baseline_len    { 0 };
         int      eld_ver         { 0 };
         int      cea_edid_ver    { 0 };
-        QString  monitor_name    {};
+        QString  monitor_name;
         int      manufacture_id  { 0 };
         int      product_id      { 0 };
         uint64_t port_id         { 0 };

@@ -12,12 +12,12 @@
 #include <QMutex>
 #include <QPixmap>
 
-#include "referencecounter.h"
-#include "mythpainter.h"
+#include "libmythbase/referencecounter.h"
+#include "libmythui/mythpainter.h"
 
-enum class ReflectAxis {Horizontal, Vertical};
-enum class FillDirection {LeftToRight, TopToBottom};
-enum class BoundaryWanted {No, Yes};
+enum class ReflectAxis : std::uint8_t {Horizontal, Vertical};
+enum class FillDirection : std::uint8_t {LeftToRight, TopToBottom};
+enum class BoundaryWanted : std::uint8_t {No, Yes};
 
 class QNetworkReply;
 class MythUIHelper;
@@ -66,6 +66,9 @@ class MUI_PUBLIC MythImage : public QImage, public ReferenceCounter
                  int spacing = 0);
     void ToGreyscale();
 
+    int64_t GetSize(void)
+    { return static_cast<int64_t>(bytesPerLine()) * height(); }
+
     /**
      * @brief Create a gradient image.
      * @param painter The painter on which the gradient should be draw.
@@ -94,11 +97,7 @@ class MUI_PUBLIC MythImage : public QImage, public ReferenceCounter
 
     uint GetCacheSize(void) const
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        return (m_cached) ? byteCount() : 0;
-#else
         return (m_cached) ? sizeInBytes() : 0;
-#endif
     }
 
   protected:

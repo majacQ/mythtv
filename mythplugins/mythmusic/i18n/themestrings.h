@@ -16,6 +16,8 @@ void strings_null() {
     ThemeUI::tr("%CHANNEL% (%STATION%)");
     ThemeUI::tr("%COUNTRY%/%LANGUAGE%");
     ThemeUI::tr("%DATE%, %TIME%");
+    ThemeUI::tr("%DISCNUM%.%TRACKNUM%");
+    ThemeUI::tr("%DISCNUM%/%DISCCOUNT%");
     ThemeUI::tr("%GENRE%");
     ThemeUI::tr("%NEXTTITLE% by %NEXTARTIST%");
     ThemeUI::tr("%PLAYCOUNT%x ~ %LASTPLAYED%");
@@ -27,11 +29,13 @@ void strings_null() {
     ThemeUI::tr("%TITLE%");
     ThemeUI::tr("%TITLE%  by  %ARTIST%");
     ThemeUI::tr("%TITLE% - %ARTIST% - %ALBUM%");
+    ThemeUI::tr("%TITLE% \ %ARTIST% \ %ALBUM% \ %TRACKNUM%");
     ThemeUI::tr("%TITLE% by %ARTIST% on %ALBUM%");
     ThemeUI::tr("%TITLE% by %ARTIST% on %ALBUM% (%length%)");
     ThemeUI::tr("%TITLE% ~ %ARTIST%");
     ThemeUI::tr("%TRACKNUM% - %TITLE% %(|LENGTH|)%");
     ThemeUI::tr("%TRACKNUM% - %TITLE% - %ARTIST% %(|LENGTH|)%");
+    ThemeUI::tr("%TRACKNUM%/%TRACKCOUNT%");
     ThemeUI::tr("%TRACKNUM| %%TITLE% by %ARTIST% of %ALBUM%");
     ThemeUI::tr("%VOLUMEPERCENT%");
     ThemeUI::tr("%VOLUMEPERCENT% %|(MUTE|)%");
@@ -104,6 +108,7 @@ void strings_null() {
     ThemeUI::tr("Burn Settings");
     ThemeUI::tr("Burning Settings");
     ThemeUI::tr("By %ARTIST%");
+    ThemeUI::tr("By the artist “%ARTIST%” from the album “%ALBUM%”");
     ThemeUI::tr("CD");
     ThemeUI::tr("CD Blanking Type:");
     ThemeUI::tr("CD Ripper");
@@ -161,6 +166,7 @@ void strings_null() {
     ThemeUI::tr("Description:");
     ThemeUI::tr("Destination:");
     ThemeUI::tr("Directory to hold music:");
+    ThemeUI::tr("Disc:");
     ThemeUI::tr("Disk Size:");
     ThemeUI::tr("Done");
     ThemeUI::tr("Duration");
@@ -207,7 +213,6 @@ void strings_null() {
     ThemeUI::tr("Fixed Date");
     ThemeUI::tr("Fixed Date:");
     ThemeUI::tr("Found:");
-    ThemeUI::tr("From the album %ALBUM% by the artist %ARTIST%");
     ThemeUI::tr("General");
     ThemeUI::tr("General Settings");
     ThemeUI::tr("General music");
@@ -219,6 +224,7 @@ void strings_null() {
     ThemeUI::tr("Genres:");
     ThemeUI::tr("Grabber:");
     ThemeUI::tr("Height for Visual Scaling:");
+    ThemeUI::tr("Hit M (Menu) to add and play tracks");
     ThemeUI::tr("Ignore ID3 Tags");
     ThemeUI::tr("Ignore ID3 Tags:");
     ThemeUI::tr("Image Type:");
@@ -264,6 +270,7 @@ void strings_null() {
     ThemeUI::tr("Logo URL:");
     ThemeUI::tr("Look Up");
     ThemeUI::tr("Look for new music files");
+    ThemeUI::tr("Lyrics View");
     ThemeUI::tr("Lyrics:");
     ThemeUI::tr("MUSIC PLAYER");
     ThemeUI::tr("MUSIC Playlist Editor");
@@ -302,6 +309,7 @@ void strings_null() {
     ThemeUI::tr("Next Playing");
     ThemeUI::tr("Next new file");
     ThemeUI::tr("Next song:");
+    ThemeUI::tr("Next: %NEXTTITLE% \ %NEXTARTIST% \ %NEXTALBUM% \ %NEXTTRACKNUM%");
     ThemeUI::tr("Next: %NEXTTITLE% by %NEXTARTIST%");
     ThemeUI::tr("No Album Art Found");
     ThemeUI::tr("No Album Art Found!");
@@ -310,6 +318,7 @@ void strings_null() {
     ThemeUI::tr("Not muted");
     ThemeUI::tr("Now Playing");
     ThemeUI::tr("Now Playing:");
+    ThemeUI::tr("Now Playing: %TITLE% \ %ARTIST% \ %ALBUM% \ %TRACKNUM%");
     ThemeUI::tr("Now Playing: %TITLE% by %ARTIST% on %ALBUM%");
     ThemeUI::tr("Now playing");
     ThemeUI::tr("Number of songs found: %n", 0, 1);
@@ -373,6 +382,7 @@ void strings_null() {
     ThemeUI::tr("Position:");
     ThemeUI::tr("Position: %position%");
     ThemeUI::tr("Post processing scripts:");
+    ThemeUI::tr("Press M (Menu) to add and play tracks");
     ThemeUI::tr("Press MENU to add some radio streams to play.");
     ThemeUI::tr("Previous");
     ThemeUI::tr("Quality   :");
@@ -491,7 +501,6 @@ void strings_null() {
     ThemeUI::tr("Title");
     ThemeUI::tr("Title:");
     ThemeUI::tr("Track");
-    ThemeUI::tr("Track Count:");
     ThemeUI::tr("Track Details");
     ThemeUI::tr("Track Info");
     ThemeUI::tr("Track Information");

@@ -19,12 +19,12 @@ extern "C" {
 #include <QVector>
 
 // MythTV headers
-#include "mythscreentype.h"
-#include "subtitlereader.h"
-#include "mythplayer.h"
-#include "mythuishape.h"
-#include "mythuisimpletext.h"
-#include "mythuiimage.h"
+#include "libmythtv/captions/subtitlereader.h"
+#include "libmythtv/mythplayer.h"
+#include "libmythui/mythscreentype.h"
+#include "libmythui/mythuiimage.h"
+#include "libmythui/mythuishape.h"
+#include "libmythui/mythuisimpletext.h"
 
 class SubtitleScreen;
 class TestSubtitleScreen;
@@ -131,7 +131,7 @@ private:
 class MTV_PUBLIC FormattedTextSubtitle608 : public FormattedTextSubtitle
 {
 public:
-    explicit FormattedTextSubtitle608(const vector<CC608Text*> &buffers,
+    explicit FormattedTextSubtitle608(const std::vector<CC608Text*> &buffers,
                              const QString &base = "",
                              QRect safearea = QRect(),
                              SubtitleScreen *p = nullptr) :
@@ -141,7 +141,7 @@ public:
     }
     void Layout(void) override; // FormattedTextSubtitle
 private:
-    void Init(const vector<CC608Text*> &buffers);
+    void Init(const std::vector<CC608Text*> &buffers);
 };
 
 class MTV_PUBLIC FormattedTextSubtitle708 : public FormattedTextSubtitle
@@ -149,7 +149,7 @@ class MTV_PUBLIC FormattedTextSubtitle708 : public FormattedTextSubtitle
 public:
     FormattedTextSubtitle708(const CC708Window &win,
                              int num,
-                             const vector<CC708String*> &list,
+                             const std::vector<CC708String*> &list,
                              const QString &base = "",
                              QRect safearea = QRect(),
                              SubtitleScreen *p = nullptr,
@@ -166,7 +166,7 @@ public:
         { return m_num; }
 private:
     void Init(const CC708Window &win,
-              const vector<CC708String*> &list,
+              const std::vector<CC708String*> &list,
               float aspect);
     int m_num;
     uint m_bgFillAlpha;
@@ -253,6 +253,7 @@ private:
     std::chrono::milliseconds m_textFontDurationExtensionMsPrev {0ms};
     bool            m_refreshModified     {false};
     bool            m_refreshDeleted      {false};
+    bool            m_atEnd               {false};
     int             m_fontStretch;
     QString         m_family; // 608, 708, text, teletext
     // Subtitles initialized but still to be processed and drawn
@@ -265,9 +266,9 @@ private:
     void CleanupAssLibrary(void);
     void InitialiseAssTrack(int tracknum);
     void CleanupAssTrack(void);
-    void AddAssEvent(char *event);
+    void AddAssEvent(char *event, uint32_t starttime, uint32_t endtime);
     void ResizeAssRenderer(void);
-    void RenderAssTrack(std::chrono::milliseconds timecode);
+    void RenderAssTrack(std::chrono::milliseconds timecode, bool force);
 
     ASS_Library    *m_assLibrary          {nullptr};
     ASS_Renderer   *m_assRenderer         {nullptr};

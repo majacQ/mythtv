@@ -3,17 +3,13 @@
 
 // Qt
 #include <QMap>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 
 // MythTV
-#include "mythchrono.h"
-#include "mythimage.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythui/mythimage.h"
 
-enum ImageCacheMode
+enum ImageCacheMode : std::uint8_t
 {
     kCacheNormal          = 0x0,
     kCacheIgnoreDisk      = 0x1,
@@ -52,18 +48,9 @@ class MUI_PUBLIC MythUIThemeCache
 
     QMap<QString, MythImage *> m_imageCache;
     QMap<QString, SystemTime> m_cacheTrack;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex m_cacheLock                    { QMutex::Recursive };
-#else
     QRecursiveMutex m_cacheLock;
-#endif
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-    QAtomicInt m_cacheSize                { 0 };
-    QAtomicInt m_maxCacheSize             { 30 * 1024 * 1024 };
-#else
     QAtomicInteger<qint64> m_cacheSize    { 0 };
-    QAtomicInteger<qint64> m_maxCacheSize { 30 * 1024 * 1024 };
-#endif
+    QAtomicInteger<qint64> m_maxCacheSize { 30LL * 1024 * 1024 };
     QString m_themecachedir;
     QSize   m_cacheScreenSize;
     MThreadPool* m_imageThreadPool        { nullptr };

@@ -5,8 +5,8 @@
 #include <QMutex>
 
 // MythTV
-#include "mythexp.h"
-#include "visual.h"
+#include "libmyth/mythexp.h"
+#include "libmyth/visual.h"
 
 class MythImage;
 class MythPainter;
@@ -28,7 +28,7 @@ class MPUBLIC AudioOutputGraph : public MythTV::Visual
     void Reset();
 
   public:
-    void add(const void * _Buffer, unsigned long Length, std::chrono::milliseconds Timecode,
+    void add(const void * Buffer, unsigned long Length, std::chrono::milliseconds Timecode,
              int Channnels, int Bits) override;
     void prepare() override;
 
@@ -38,8 +38,8 @@ class MPUBLIC AudioOutputGraph : public MythTV::Visual
     int          m_dBquiet   { -60 };
     int          m_dBLoud    { -12 };
     int          m_dbMax     { -6  };
-    class Buffer;
-    Buffer* const m_buffer   { nullptr };
+    class AOBuffer;
+    AOBuffer* const m_buffer { nullptr };
     QMutex mutable m_mutex;
 };
 

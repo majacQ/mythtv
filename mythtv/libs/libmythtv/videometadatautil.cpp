@@ -2,9 +2,10 @@
 #include <QHash>
 #include <QUrl>
 
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
 #include "videometadatautil.h"
-#include "mythlogging.h"
-#include "mythdb.h"
 
 #define LOC      QString("VideoMetaDataUtil: ")
 
@@ -23,13 +24,14 @@ QString VideoMetaDataUtil::GetArtPath(const QString &pathname,
         LOG(VB_GENERAL, LOG_WARNING, LOC +
                 "Programmer Error: Cannot determine art path\n\t\t\t"
                 "until the ProgramInfo pathname has been fully resolved.");
-        return QString();
+        return {};
     }
 
     art_path_map_lock.lockForRead();
     ArtList ret(art_path_map.values(basename));
     art_path_map_lock.unlock();
-    for (const auto & [arttype, artpath] : qAsConst(ret))
+    // cppcheck-suppress unassignedVariable
+    for (const auto & [arttype, artpath] : std::as_const(ret))
     {
         if (arttype == type)
             return artpath;

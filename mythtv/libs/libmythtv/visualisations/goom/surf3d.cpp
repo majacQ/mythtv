@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,8 +19,8 @@ grid3d *grid3d_new (int sizex, int defx, int sizez, int defz, v3d center) {
 	auto *g = (grid3d*)malloc (sizeof(grid3d));
 	surf3d *s = &(g->surf);
 	s->nbvertex = x*y;
-	s->vertex = (v3d*)malloc (x*y*sizeof(v3d));
-	s->svertex = (v3d*)malloc(x*y*sizeof(v3d));
+	s->vertex = (v3d*)malloc (sizeof(v3d)*x*y);
+	s->svertex = (v3d*)malloc(sizeof(v3d)*x*y);
 	s->center = center;
 	
 	g->defx=defx;
@@ -33,9 +34,9 @@ grid3d *grid3d_new (int sizex, int defx, int sizez, int defz, v3d center) {
 		x = defx;
 		while (x) {
 			--x;
-			s->vertex[x+defx*y].x = (x-defx/2.0F)*sizex/defx;
-			s->vertex[x+defx*y].y = 0;
-			s->vertex[x+defx*y].z = (y-defz/2.0F)*sizez/defz;
+			s->vertex[x+(defx*y)].x = (x-defx/2.0F)*sizex/defx;
+			s->vertex[x+(defx*y)].y = 0;
+			s->vertex[x+(defx*y)].z = (y-defz/2.0F)*sizez/defz;
 		}
 	}
 	return g;
@@ -49,14 +50,11 @@ void surf3d_draw (surf3d *s, int color, int dist, int *buf, int *back, int W,int
 	
 	for (int i=0;i<s->nbvertex;i++) {
 		V3D_TO_V2D(s->svertex[i],v2,W,H,dist);
-		int *p1 = buf + v2.x + (v2.y*W);
-		int *p2 = back + v2.x + (v2.y*W);
+		int *p1 = buf + v2.x + (v2.y*static_cast<ptrdiff_t>(W));
+		[[maybe_unused]] int *p2 = back + v2.x + (v2.y*static_cast<ptrdiff_t>(W));
 		if ((v2.x>=0) && (v2.y>=0) && (v2.x<W) && (v2.y<H)) {
 			*p1 = color;
 		}
-
-                /* Squelch a gcc warning */
-                (void)p2;
 	}
 }
 
@@ -69,7 +67,7 @@ void grid3d_draw (grid3d *g, int color, int colorlow,
 		V3D_TO_V2D(g->surf.svertex[x],v2x,W,H,dist);
 
 		for (int z=1;z<g->defz;z++) {
-			V3D_TO_V2D(g->surf.svertex[z*g->defx + x],v2,W,H,dist);
+			V3D_TO_V2D(g->surf.svertex[(z*g->defx) + x],v2,W,H,dist);
 			if (((v2.x != -666) || (v2.y!=-666))
 					&& ((v2x.x != -666) || (v2x.y!=-666))) {
 				draw_line(buf,v2x.x,v2x.y,v2.x,v2.y, colorlow, W, H);

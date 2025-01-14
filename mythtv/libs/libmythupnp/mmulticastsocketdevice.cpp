@@ -6,12 +6,12 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #include <cerrno>
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
 
 #ifdef _WIN32
 # include <winsock2.h>
@@ -31,9 +31,10 @@
 #include <QStringList>
 
 // MythTV headers
-#include "mythmiscutil.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+
 #include "mmulticastsocketdevice.h"
-#include "mythlogging.h"
 
 #define LOC      QString("MMulticastSocketDevice(%1:%2): ") \
                      .arg(m_address.toString()).arg(socket())
@@ -44,7 +45,7 @@ MMulticastSocketDevice::MMulticastSocketDevice(
     m_address(sAddress), m_port(nPort)
 {
 #if 0
-    ttl = UPnp::GetConfiguration()->GetValue( "UPnP/TTL", 4 );
+    ttl = XmlConfiguration().GetValue( "UPnP/TTL", 4 );
 #endif
 
     if (ttl == 0)
@@ -95,7 +96,7 @@ qint64 MMulticastSocketDevice::writeBlock(
     if (host.toString() == "239.255.255.250")
     {
         int retx = 0;
-        for (const auto & address : qAsConst(m_localAddresses))
+        for (const auto & address : std::as_const(m_localAddresses))
         {
             if (address.protocol() != QAbstractSocket::IPv4Protocol)
                 continue; // skip IPv6 addresses
@@ -117,7 +118,7 @@ qint64 MMulticastSocketDevice::writeBlock(
             LOG(VB_GENERAL, LOG_DEBUG, LOC + QString("writeBlock on %1 %2")
                     .arg((*it).toString()).arg((retx==(int)len)?"ok":"err"));
 #endif
-            std::this_thread::sleep_for(std::chrono::milliseconds(5 + (MythRandom() % 5)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom(5, 9)));
         }
         return retx;
     }

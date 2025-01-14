@@ -2,10 +2,6 @@ include ( ../../mythconfig.mak )
 include ( ../../settings.pro )
 include ( ../../programs-libs.pro )
 
-INCLUDEPATH += $${SYSROOT}$${PREFIX}/include/mythtv/libavformat
-INCLUDEPATH += $${SYSROOT}$${PREFIX}/include/mythtv/libswscale
-DEPENDPATH *= $${INCLUDEPATH}
-
 LIBS += -lmythswscale
 LIBS += -lmythavformat
 LIBS += -lmythavcodec
@@ -13,7 +9,6 @@ LIBS += -lmythavutil
 LIBS += -lmythmetadata-$$LIBVERSION
 LIBS += -lmythtv-$$LIBVERSION
 # libmythtv dependencies
-using_live: LIBS += -lmythlivemedia-$$LIBVERSION
 using_mheg: LIBS += -lmythfreemheg-$$LIBVERSION
 using_hdhomerun: LIBS += -lhdhomerun
 
@@ -29,7 +24,7 @@ HEADERS += archiveutil.h selectdestination.h
 HEADERS += mythburn.h themeselector.h editmetadata.h thumbfinder.h
 HEADERS += exportnative.h importnative.h
 
-SOURCES += main.cpp archivesettings.cpp logviewer.cpp
+SOURCES += mytharchive.cpp archivesettings.cpp logviewer.cpp
 SOURCES += fileselector.cpp recordingselector.cpp videoselector.cpp
 SOURCES += archivedbcheck.cpp archiveutil.cpp selectdestination.cpp
 SOURCES += mythburn.cpp themeselector.cpp editmetadata.cpp thumbfinder.cpp

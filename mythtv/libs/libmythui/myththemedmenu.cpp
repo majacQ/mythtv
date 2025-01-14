@@ -10,6 +10,18 @@
 #include <QFileInfo>
 #include <QTextStream>
 
+// libmythbase headers
+#include "libmythbase/lcddevice.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmedia.h"
+#include "libmythbase/mythplugin.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/mythversion.h"
+
 // libmythui headers
 #include "mythmainwindow.h"
 #include "mythdialogbox.h"
@@ -17,21 +29,7 @@
 #include "mythuitext.h"
 #include "mythuistatetype.h"
 #include "xmlparsebase.h"
-#include "mythsystemlegacy.h"
 #include "mythuihelper.h"
-#include "lcddevice.h"
-#include "mythcorecontext.h"
-
-// libmythbase headers
-#include "mythlogging.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythmedia.h"
-#include "mythversion.h"
-#include "mythdate.h"
-
-// libmythbase headers
-#include "mythplugin.h"
 
 bool MythThemedMenuState::Create(void)
 {
@@ -117,7 +115,9 @@ void MythThemedMenu::SetMenuTheme(const QString &menufile)
             m_foundtheme = true;
     }
     else
+    {
         m_foundtheme = true;
+    }
 
     if (!m_foundtheme)
         return;
@@ -212,7 +212,7 @@ bool MythThemedMenu::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "ESCAPE" ||
@@ -273,7 +273,9 @@ bool MythThemedMenu::keyPressEvent(QKeyEvent *event)
             handleAction(action);
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -593,6 +595,7 @@ bool MythThemedMenu::parseMenu(const QString &menuname)
         return false;
     }
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
@@ -609,6 +612,22 @@ bool MythThemedMenu::parseMenu(const QString &menuname)
                         .arg(menuname));
         return false;
     }
+#else
+    auto parseResult = doc.setContent(&f);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+            QString("Error parsing: %1\nat line: %2  column: %3 msg: %4")
+            .arg(filename).arg(parseResult.errorLine)
+            .arg(parseResult.errorColumn).arg(parseResult.errorMessage));
+        f.close();
+
+        if (menuname != "mainmenu.xml")
+            ShowOkPopup(tr("The menu file %1 is incomplete.")
+                        .arg(menuname));
+        return false;
+    }
+#endif
 
     f.close();
 
@@ -706,7 +725,7 @@ void MythThemedMenu::buttonAction(MythUIButtonListItem *item, bool skipPass)
     if (!skipPass)
         password = button.password;
 
-    for (const auto & act : qAsConst(button.action))
+    for (const auto & act : std::as_const(button.action))
     {
         if (handleAction(act, password))
             break;
@@ -761,7 +780,7 @@ QString MythThemedMenu::findMenuFile(const QString &menuname)
         return testdir;
     LOG(VB_FILE, LOG_DEBUG, "No menu file " + testdir);
 
-    return QString();
+    return {};
 }
 
 /** \brief Handle a MythTV action for the Menus.
@@ -861,7 +880,7 @@ bool MythThemedMenu::findDepends(const QString &fileList)
     QStringList files = fileList.split(" ");
     MythPluginManager *pluginManager = gCoreContext->GetPluginManager();
 
-    for (const auto & file : qAsConst(files))
+    for (const auto & file : std::as_const(files))
     {
         QString filename = findMenuFile(file);
         if (!filename.isEmpty() && filename.endsWith(".xml"))
@@ -931,7 +950,9 @@ bool MythThemedMenu::checkPinCode(const QString &password_setting)
         popupStack->AddScreen(dialog);
     }
     else
+    {
         delete dialog;
+    }
 
     return false;
 }

@@ -1,6 +1,8 @@
+// C++
 #include <unistd.h>
 
 // QT headers
+#include <QApplication>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
@@ -9,15 +11,14 @@
 #else
 #include <QStringConverter>
 #endif
-#include <QApplication>
 
 // MythTV headers
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <compat.h>
-#include <mythdirs.h>
-#include <mythsystemlegacy.h>
-#include <exitcodes.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/compat.h>
+#include <libmythbase/exitcodes.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythsystemlegacy.h>
 
 // MythWeather headers
 #include "weatherScreen.h"
@@ -115,7 +116,7 @@ bool WeatherSource::ProbeTimeouts(const QString&  workingDirectory,
     }
 
     std::array<bool,2> isOK {};
-    uint ut = temp[0].toUInt(&isOK[0]);
+    uint ut = temp[0].toUInt(isOK.data());
     uint st = temp[1].toUInt(&isOK[1]);
     if (!isOK[0] || !isOK[1])
     {
@@ -392,7 +393,7 @@ QStringList WeatherSource::getLocationList(const QString &str)
     if (ms.Wait() != GENERIC_EXIT_OK)
     {
         LOG(VB_GENERAL, LOG_ERR, loc + "Cannot run script");
-        return QStringList();
+        return {};
     }
 
     QStringList locs;
@@ -567,21 +568,13 @@ void WeatherSource::processExit(void)
 void WeatherSource::processData()
 {
     QString unicode_buffer = QString::fromUtf8(m_buffer);
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList data = unicode_buffer.split('\n', QString::SkipEmptyParts);
-#else
     QStringList data = unicode_buffer.split('\n', Qt::SkipEmptyParts);
-#endif
 
     m_data.clear();
 
     for (int i = 0; i < data.size(); ++i)
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList temp = data[i].split("::", QString::SkipEmptyParts);
-#else
         QStringList temp = data[i].split("::", Qt::SkipEmptyParts);
-#endif
         if (temp.size() > 2)
             LOG(VB_GENERAL, LOG_ERR, "Error parsing script file, ignoring");
         if (temp.size() < 2)
@@ -601,7 +594,9 @@ void WeatherSource::processData()
                 m_data[temp[0]].append("\n" + temp[1]);
             }
             else
+            {
                 m_data[temp[0]] = temp[1];
+            }
         }
     }
 }

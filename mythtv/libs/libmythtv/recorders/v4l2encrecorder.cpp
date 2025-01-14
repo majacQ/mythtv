@@ -18,19 +18,19 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <sys/ioctl.h>
 #include <chrono> // for milliseconds
+#include <sys/ioctl.h>
 #include <thread> // for sleep_for
 
 // Qt includes
 #include <QString>
 
 // MythTV includes
-#include "recordingprofile.h"
-#include "v4l2encstreamhandler.h"
-#include "v4l2encrecorder.h"
-#include "v4lchannel.h"
 #include "io/mythmediabuffer.h"
+#include "recorders/v4l2encrecorder.h"
+#include "recorders/v4l2encstreamhandler.h"
+#include "recorders/v4lchannel.h"
+#include "recordingprofile.h"
 #include "tv_rec.h"
 
 #define LOC QString("V4L2Rec[%1](%2): ") \
@@ -71,13 +71,10 @@ void V4L2encRecorder::SetStrOption(RecordingProfile *profile, const QString &nam
 
 void V4L2encRecorder::SetOptionsFromProfile(RecordingProfile *profile,
                                          const QString &videodev,
-                                         const QString &audiodev,
-                                         const QString &vbidev)
+                                         [[maybe_unused]] const QString &audiodev,
+                                         [[maybe_unused]] const QString &vbidev)
 {
     LOG(VB_GENERAL, LOG_INFO, LOC + "SetOptionsFromProfile() -- begin");  //debugging
-
-    (void)audiodev;
-    (void)vbidev;
 
     SetOption("videodevice", videodev);
     SetOption("vbidevice", vbidev);
@@ -220,7 +217,9 @@ void V4L2encRecorder::run(void)
         m_streamData->RemoveAVListener(this);
     }
     else
+    {
         m_streamData->RemovePSStreamListener(this);
+    }
 
     Close();
 

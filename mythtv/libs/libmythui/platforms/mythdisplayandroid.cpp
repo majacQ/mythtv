@@ -1,8 +1,17 @@
 // Qt
+#include <QtGlobal>
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtAndroidExtras>
+#else
+#include <QCoreApplication>
+#include <QJniEnvironment>
+#include <QJniObject>
+#define QAndroidJniEnvironment QJniEnvironment
+#define QAndroidJniObject QJniObject
+#endif
 
 // MythTV
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "mythdisplayandroid.h"
 
 #define LOC QString("Display: ")
@@ -20,7 +29,11 @@ MythDisplayAndroid::~MythDisplayAndroid()
 void MythDisplayAndroid::UpdateCurrentMode(void)
 {
     QAndroidJniEnvironment env;
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     QAndroidJniObject activity = QtAndroid::androidActivity();
+#else
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+#endif
     QAndroidJniObject windowManager =  activity.callObjectMethod("getWindowManager", "()Landroid/view/WindowManager;");
     QAndroidJniObject display =  windowManager.callObjectMethod("getDefaultDisplay", "()Landroid/view/Display;");
     QAndroidJniObject displayMetrics("android/util/DisplayMetrics");

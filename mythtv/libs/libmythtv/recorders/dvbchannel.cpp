@@ -34,6 +34,7 @@
 // POSIX headers
 #include <fcntl.h>
 #include <unistd.h>
+#include <algorithm>
 #include <utility>
 #include <sys/poll.h>
 #include <sys/select.h>
@@ -45,8 +46,8 @@
 #include <thread>
 
 // MythTV headers
-#include "mythconfig.h"
-#include "mythdb.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdb.h"
 #include "cardutil.h"
 #include "channelutil.h"
 #include "dvbtypes.h"
@@ -69,7 +70,8 @@ std::chrono::milliseconds DVBChannel::s_lastTuning = MythDate::currentMSecsSince
 
 #define LOC QString("DVBChan[%1](%2): ").arg(m_inputId).arg(DVBChannel::GetDevice())
 
-#define DTV_STAT_FULL_DEBUG 0       // All DTV_STAT_xxx values
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define DTV_STAT_FULL_DEBUG 0 // All DTV_STAT_xxx values
 
 /** \class DVBChannel
  *  \brief Provides interface to the tuning hardware when using DVB drivers
@@ -1125,7 +1127,7 @@ int DVBChannel::GetChanID() const
 
     if (idlist.isEmpty())
     {
-        LOG(VB_GENERAL, LOG_INFO, LOC +
+        LOG(VB_GENERAL, LOG_WARNING, LOC +
             QString("No visible channel ID for %1")
             .arg(m_curChannelName));
     }
@@ -1139,13 +1141,13 @@ int DVBChannel::GetChanID() const
             {
                 sl.append(QString::number(chanid));
             }
-            LOG(VB_CHANNEL, LOG_INFO, LOC +
+            LOG(VB_CHANNEL, LOG_DEBUG, LOC +
                 QString("Found for '%1' multiple visible channel IDs: %2")
                 .arg(m_curChannelName, sl.join(" ")));
         }
         else
         {
-            LOG(VB_CHANNEL, LOG_INFO, LOC +
+            LOG(VB_CHANNEL, LOG_DEBUG, LOC +
                 QString("Found visible channel ID %1 for '%2'")
                 .arg(id).arg(m_curChannelName));
         }
@@ -1240,8 +1242,7 @@ double DVBChannel::GetSignalStrengthDVBv5(bool *ok) const
                 // convert value from -100dBm to 0dBm to a 0-1 range
                 value = svalue + 100000;
                 value = value / 100000.0;
-                if (value > 1.0)
-                    value = 1.0;
+                value = std::min(value, 1.0);
             }
         }
         else if (cmd.props->u.st.stat[0].scale == FE_SCALE_RELATIVE)
@@ -1588,7 +1589,9 @@ bool DVBChannel::WaitForBackend(std::chrono::milliseconds timeout_ms)
     const int fd  = m_fdFrontend;
     auto seconds = duration_cast<std::chrono::seconds>(timeout_ms);
     auto usecs = duration_cast<std::chrono::microseconds>(timeout_ms) - seconds;
-    struct timeval select_timeout = { seconds.count(), usecs.count()};
+    struct timeval select_timeout = {
+         static_cast<typeof(select_timeout.tv_sec)>(seconds.count()),
+         static_cast<typeof(select_timeout.tv_usec)>(usecs.count())};
     fd_set fd_select_set;
     FD_ZERO(    &fd_select_set); // NOLINT(readability-isolate-declaration)
     FD_SET (fd, &fd_select_set);

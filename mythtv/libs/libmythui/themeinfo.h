@@ -6,12 +6,11 @@
 #include <QMetaType>
 #include <QFileInfo>
 
-#include "mythuiexp.h"
-#include "mythtypes.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythui/mythuiexp.h"
+#include "libmythui/xmlparsebase.h" // for VERBOSE_XML && Xml Parsing helpers
 
-#include "xmlparsebase.h" // for VERBOSE_XML && Xml Parsing helpers
-
-enum ThemeType {
+enum ThemeType : std::uint8_t {
     THEME_UNKN  = 0x00,
     THEME_UI    = 0x01,
     THEME_OSD   = 0x02,
@@ -40,7 +39,7 @@ class MUI_PUBLIC ThemeInfo : public XMLParseBase
     QString GetThemeWebSite() const { return m_themesite; }
 
     QString GetLocalURL() const { return m_themeurl; }
-    QString GetDirectoryName() const { return m_theme.fileName(); }
+    QString GetDirectoryName() const;
 
     void ToMap(InfoMap &infoMap) const;
 

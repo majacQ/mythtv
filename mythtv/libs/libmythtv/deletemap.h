@@ -5,10 +5,11 @@
 
 // Qt headers
 #include <QCoreApplication>
+#include <QVector>
 
 // MythTV headers
-#include "mythtvexp.h"
-#include "programtypes.h"               // for frm_dir_map_t, MarkTypes
+#include "libmythbase/programtypes.h"   // for frm_dir_map_t, MarkTypes
+#include "libmythtv/mythtvexp.h"
 
 class OSD;
 class PlayerContext;

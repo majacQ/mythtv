@@ -5,23 +5,16 @@
 #include <QTimer>
 
 // MythTV
-#include "mythchrono.h"
-#include "mythscreenstack.h"
-#include "mythnotificationcenter.h"
-#include "mythuiactions.h"
-#include "mythrect.h"
-#include "mythuiscreenbounds.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythui/mythnotificationcenter.h"
+#include "libmythui/mythrect.h"
+#include "libmythui/mythscreenstack.h"
+#include "libmythui/mythuiactions.h"
+#include "libmythui/mythuiscreenbounds.h"
 
 class QEvent;
 class MythThemeBase;
 class MythMediaDevice;
-
-#define REG_KEY(a, b, c, d) GetMythMainWindow()->RegisterKey(a, b, c, d)
-#define GET_KEY(a, b) GetMythMainWindow()->GetKey(a, b)
-#define REG_JUMP(a, b, c, d) GetMythMainWindow()->RegisterJump(a, b, c, d)
-#define REG_JUMPLOC(a, b, c, d, e) GetMythMainWindow()->RegisterJump(a, b, c, d, true, e)
-#define REG_JUMPEX(a, b, c, d, e) GetMythMainWindow()->RegisterJump(a, b, c, d, e)
-#define REG_MEDIAPLAYER(a,b,c) GetMythMainWindow()->RegisterMediaPlugin(a, b, c)
 
 using MediaPlayCallback = int (*)(const QString& , const QString& , const QString& , const QString& , const QString& , int, int, const QString& , std::chrono::minutes, const QString& , const QString& , bool);
 
@@ -42,7 +35,6 @@ class MUI_PUBLIC MythMainWindow : public MythUIScreenBounds
 
   public:
     void Init(bool MayReInit = true);
-    void ReinitDone();
     void Show();
     void MoveResize(QRect& Geometry);
 
@@ -166,9 +158,7 @@ class MUI_PUBLIC MythMainWindow : public MythUIScreenBounds
     QTimer             m_refreshTimer;
     MythThemeBase*     m_themeBase     { nullptr };
     MythPainter*       m_painter       { nullptr };
-    MythPainter*       m_oldPainter    { nullptr };
     MythPainterWindow* m_painterWin    { nullptr };
-    MythPainterWindow* m_oldPainterWin { nullptr };
     MythInputDeviceHandler* m_deviceHandler { nullptr };
     MythScreenSaverControl* m_screensaver   { nullptr };
     QTimer             m_idleTimer;
@@ -180,5 +170,45 @@ MUI_PUBLIC bool HasMythMainWindow();
 MUI_PUBLIC void DestroyMythMainWindow();
 MUI_PUBLIC MythPainter* GetMythPainter();
 MUI_PUBLIC MythNotificationCenter* GetNotificationCenter();
+
+static inline void
+REG_KEY(const QString& Context, const QString& Action,
+        const QString& Description, const QString& Key)
+{
+    GetMythMainWindow()->RegisterKey(Context, Action, Description, Key);
+}
+
+static inline QString
+GET_KEY(const QString& Context, const QString& Action)
+{
+    return MythMainWindow::GetKey(Context, Action);
+}
+
+static inline void
+REG_JUMP(const QString& Destination, const QString& Description,
+         const QString& Key, void (*Callback)(void))
+{
+    GetMythMainWindow()->RegisterJump(Destination, Description, Key, Callback);
+}
+
+static inline void
+REG_JUMPLOC(const QString& Destination, const QString& Description,
+            const QString& Key, void (*Callback)(void), const QString& LocalAction)
+{
+    GetMythMainWindow()->RegisterJump(Destination, Description, Key, Callback, true, LocalAction);
+}
+
+static inline void
+REG_JUMPEX(const QString& Destination, const QString& Description,
+            const QString& Key, void (*Callback)(void), bool ExitToMain)
+{
+    GetMythMainWindow()->RegisterJump(Destination, Description, Key, Callback, ExitToMain);
+}
+
+static inline void
+REG_MEDIAPLAYER(const QString& Name, const QString& Desc, MediaPlayCallback Func)
+{
+    GetMythMainWindow()->RegisterMediaPlugin(Name, Desc, Func);
+}
 
 #endif

@@ -16,15 +16,16 @@
 #include <QHostInfo>
 
 // MythTV headers
-#include "iptvstreamhandler.h"
-#include "rtppacketbuffer.h"
-#include "udppacketbuffer.h"
-#include "rtptsdatapacket.h"
-#include "rtpdatapacket.h"
-#include "rtpfecpacket.h"
-#include "rtcpdatapacket.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
+
 #include "cetonrtsp.h"
+#include "iptvstreamhandler.h"
+#include "rtp/rtcpdatapacket.h"
+#include "rtp/rtpdatapacket.h"
+#include "rtp/rtpfecpacket.h"
+#include "rtp/rtppacketbuffer.h"
+#include "rtp/rtptsdatapacket.h"
+#include "rtp/udppacketbuffer.h"
 
 #define LOC QString("IPTVSH[%1](%2): ").arg(m_inputId).arg(m_device)
 
@@ -108,8 +109,8 @@ void IPTVStreamHandler::Return(IPTVStreamHandler * & ref, int inputid)
 IPTVStreamHandler::IPTVStreamHandler(const IPTVTuningData &tuning, int inputid)
     : StreamHandler(tuning.GetDeviceKey(), inputid)
     , m_tuning(tuning)
+    , m_useRtpStreaming(m_tuning.IsRTP())
 {
-    m_useRtpStreaming = m_tuning.IsRTP();
 }
 
 void IPTVStreamHandler::run(void)
@@ -165,7 +166,7 @@ void IPTVStreamHandler::run(void)
     bool error = false;
 
     int start_port = 0;
-    for (uint i = 0; i < IPTV_SOCKET_COUNT; i++)
+    for (size_t i = 0; i < IPTV_SOCKET_COUNT; i++)
     {
         QUrl url = tuning.GetURL(i);
         if (url.port() < 0)
@@ -192,7 +193,7 @@ void IPTVStreamHandler::run(void)
             }
             else
             {
-                for (const auto & addr : qAsConst(list))
+                for (const auto & addr : std::as_const(list))
                 {
                     dest_addr = addr;
                     if (addr.protocol() == QAbstractSocket::IPv6Protocol)
@@ -245,10 +246,12 @@ void IPTVStreamHandler::run(void)
 
         // we bind to destination address if it's a multicast address, or
         // the local ones otherwise
-        if (!m_sockets[i]->bind(is_multicast ?
-                                dest_addr :
-                                (ipv6 ? QHostAddress::AnyIPv6 : QHostAddress::Any),
-                                port))
+        QHostAddress a {QHostAddress::Any};
+        if (is_multicast)
+            a = dest_addr;
+        else if (ipv6)
+            a = QHostAddress::AnyIPv6;
+        if (!m_sockets[i]->bind(a, port))
         {
             LOG(VB_GENERAL, LOG_ERR, LOC + "Binding to port failed.");
             error = true;
@@ -306,7 +309,7 @@ void IPTVStreamHandler::run(void)
     }
 
     // Clean up
-    for (uint i = 0; i < IPTV_SOCKET_COUNT; i++)
+    for (size_t i = 0; i < IPTV_SOCKET_COUNT; i++)
     {
         if (m_sockets[i])
         {

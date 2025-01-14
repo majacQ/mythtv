@@ -3,16 +3,16 @@
 #ifndef DECODER_H_
 #define DECODER_H_
 
-#include <QWaitCondition>
-#include <QStringList>
+// Qt
+#include <QCoreApplication>
 #include <QEvent>
 #include <QMutex>
-#include <QCoreApplication>
+#include <QStringList>
+#include <QWaitCondition>
 
-#include "config.h"
-
-#include <mythobservable.h>
-#include <mthread.h>
+// MythTV
+#include <libmythbase/mthread.h>
+#include <libmythbase/mythobservable.h>
 
 class MusicMetadata;
 class MetaIO;
@@ -30,7 +30,7 @@ class DecoderEvent : public MythEvent
 {
   public:
     explicit DecoderEvent(Type type) : MythEvent(type) { ; }
-    explicit DecoderEvent(QString *e) : MythEvent(Error), m_errorMsg(e) { ; }
+    explicit DecoderEvent(QString *e) : MythEvent(kError), m_errorMsg(e) { ; }
 
     ~DecoderEvent() override
     {
@@ -42,10 +42,10 @@ class DecoderEvent : public MythEvent
     MythEvent *clone(void) const override // MythEvent
         { return new DecoderEvent(*this); }
 
-    static Type Decoding;
-    static Type Stopped;
-    static Type Finished;
-    static Type Error;
+    static const Type kDecoding;
+    static const Type kStopped;
+    static const Type kFinished;
+    static const Type kError;
 
   private:
     DecoderEvent(const DecoderEvent &o) : MythEvent(o)

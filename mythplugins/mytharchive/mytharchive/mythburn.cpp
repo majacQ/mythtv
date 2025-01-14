@@ -1,45 +1,43 @@
-#include <unistd.h>
-
+// C++
 #include <cstdlib>
-#include <unistd.h>
 #include <iostream>
-#include <cstdlib>
-#include <sys/wait.h>  // for WIFEXITED and WEXITSTATUS
+#include <unistd.h>
 
 // qt
+#include <QApplication>
 #include <QDir>
 #include <QDomDocument>
-#include <QApplication>
 #include <QKeyEvent>
 #include <QTextStream>
 
 // myth
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <mythdirs.h>
-#include <mythprogressdialog.h>
-#include <mythuihelper.h>
-#include <mythdialogbox.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuicheckbox.h>
-#include <mythuibuttonlist.h>
-#include <mythuiprogressbar.h>
-#include <mythdate.h>
-#include <mythsystemlegacy.h>
-#include <mythmiscutil.h>
-#include <exitcodes.h>
 #include <mythconfig.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/exitcodes.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythmiscutil.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/stringutil.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
 #include "archiveutil.h"
-#include "mythburn.h"
 #include "editmetadata.h"
 #include "fileselector.h"
-#include "thumbfinder.h"
-#include "recordingselector.h"
-#include "videoselector.h"
 #include "logviewer.h"
+#include "mythburn.h"
+#include "recordingselector.h"
+#include "thumbfinder.h"
+#include "videoselector.h"
 
 MythBurn::MythBurn(MythScreenStack   *parent,
                    MythScreenType    *destinationScreen,
@@ -133,7 +131,7 @@ bool MythBurn::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         // if we are currently moving an item,
@@ -178,7 +176,9 @@ bool MythBurn::keyPressEvent(QKeyEvent *event)
             toggleUseCutlist();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -190,7 +190,7 @@ bool MythBurn::keyPressEvent(QKeyEvent *event)
 void MythBurn::updateSizeBar(void)
 {
     int64_t size = 0;
-    for (const auto *a : qAsConst(m_archiveList))
+    for (const auto *a : std::as_const(m_archiveList))
         size += a->newsize;
 
     uint usedSpace = size / 1024 / 1024;
@@ -377,7 +377,9 @@ QString MythBurn::loadFile(const QString &filename)
         file.close();
     }
     else
+    {
         return "";
+    }
 
     return res;
 }
@@ -409,7 +411,7 @@ void MythBurn::updateArchiveList(void)
     }
     else
     {
-        for (auto *a : qAsConst(m_archiveList))
+        for (auto *a : std::as_const(m_archiveList))
         {
             QCoreApplication::processEvents();
             // get duration of this file
@@ -431,7 +433,7 @@ void MythBurn::updateArchiveList(void)
             item->SetData(QVariant::fromValue(a));
             item->SetText(a->subtitle, "subtitle");
             item->SetText(a->startDate + " " + a->startTime, "date");
-            item->SetText(formatSize(a->newsize / 1024, 2), "size");
+            item->SetText(StringUtil::formatKBytes(a->newsize / 1024, 2), "size");
             if (a->hasCutlist)
             {
                 if (a->useCutlist)
@@ -546,7 +548,7 @@ EncoderProfile *MythBurn::getDefaultProfile(ArchiveItem *item)
         QString defaultProfile =
                 gCoreContext->GetSetting("MythArchiveDefaultEncProfile", "SP");
 
-        for (auto *x : qAsConst(m_profileList))
+        for (auto *x : std::as_const(m_profileList))
             if (x->name == defaultProfile)
                 profile = x;
     }
@@ -601,7 +603,7 @@ void MythBurn::createConfigFile(const QString &filename)
             QDomElement thumbs = doc.createElement("thumbimages");
             file.appendChild(thumbs);
 
-            for (auto *thumbImage : qAsConst(a->thumbList))
+            for (auto *thumbImage : std::as_const(a->thumbList))
             {
                 QDomElement thumb = doc.createElement("thumb");
                 thumbs.appendChild(thumb);
@@ -692,7 +694,7 @@ void MythBurn::loadConfiguration(void)
 
 EncoderProfile *MythBurn::getProfileFromName(const QString &profileName)
 {
-    for (auto *x : qAsConst(m_profileList))
+    for (auto *x : std::as_const(m_profileList))
         if (x->name == profileName)
             return x;
 
@@ -888,7 +890,7 @@ void MythBurn::profileChanged(int profileNo)
     archiveItem->encoderProfile = profile;
 
     item->SetText(profile->name, "profile");
-    item->SetText(formatSize(archiveItem->newsize / 1024, 2), "size");
+    item->SetText(StringUtil::formatKBytes(archiveItem->newsize / 1024, 2), "size");
 
     updateSizeBar();
 }
@@ -1026,7 +1028,7 @@ bool ProfileDialog::Create()
         return false;
     }
 
-    for (auto *x : qAsConst(m_profileList))
+    for (auto *x : std::as_const(m_profileList))
     {
         auto *item = new
                 MythUIButtonListItem(m_profileBtnList, x->name);
@@ -1040,7 +1042,7 @@ bool ProfileDialog::Create()
     m_profileBtnList->MoveToNamedPosition(m_archiveItem->encoderProfile->name);
 
     m_captionText->SetText(m_archiveItem->title);
-    m_oldSizeText->SetText(formatSize(m_archiveItem->size / 1024, 2));
+    m_oldSizeText->SetText(StringUtil::formatKBytes(m_archiveItem->size / 1024, 2));
 
     connect(m_okButton, &MythUIButton::Clicked, this, &ProfileDialog::save);
 
@@ -1067,7 +1069,7 @@ void ProfileDialog::profileChanged(MythUIButtonListItem *item)
     // calc new size
     recalcItemSize(m_archiveItem);
 
-    m_newSizeText->SetText(formatSize(m_archiveItem->newsize / 1024, 2));
+    m_newSizeText->SetText(StringUtil::formatKBytes(m_archiveItem->newsize / 1024, 2));
 }
 
 

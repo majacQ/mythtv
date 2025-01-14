@@ -1,35 +1,34 @@
-
-#include "statusbox.h"
-
+// Qt
 #include <QHostAddress>
 #include <QNetworkInterface>
 
-#include "mythcorecontext.h"
-#include "filesysteminfo.h"
-#include "mythmiscutil.h"
-#include "mythdb.h"
-#include "mythlogging.h"
-#include "mythversion.h"
-#include "mythdate.h"
+// MythTV
+#include "libmythbase/filesysteminfo.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythversion.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/stringutil.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/decoders/mythcodeccontext.h"
+#include "libmythtv/jobqueue.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/tv.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythdisplay.h"
+#include "libmythui/mythrender_base.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuihelper.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
+#include "libmythui/opengl/mythrenderopengl.h"
 
-#include "config.h"
-#include "remoteutil.h"
-#include "tv.h"
-#include "jobqueue.h"
-#include "cardutil.h"
-#include "recordinginfo.h"
-
-#include "mythmiscutil.h"
-#include "mythuihelper.h"
-#include "mythuibuttonlist.h"
-#include "mythuitext.h"
-#include "mythuistatetype.h"
-#include "mythdialogbox.h"
-#include "mythrender_base.h"
-#include "opengl/mythrenderopengl.h"
-#include "mythdisplay.h"
-#include "decoders/mythcodeccontext.h"
-#include "mythchrono.h"
+// MythFrontend
+#include "statusbox.h"
 
 struct LogLine {
     QString m_line;
@@ -42,7 +41,7 @@ struct LogLine {
 
 void StatusBoxItem::Start(std::chrono::seconds Interval)
 {
-    connect(this, &QTimer::timeout, [=]() { emit UpdateRequired(this); });
+    connect(this, &QTimer::timeout, [this]() { emit UpdateRequired(this); });
     start(Interval);
 }
 
@@ -340,10 +339,14 @@ void StatusBox::clicked(MythUIButtonListItem *item)
                                                        QVariant::fromValue(rec));
             }
             else if ((rec)->GetRecordingGroup() == "Deleted")
+            {
                 menuPopup->AddButtonV(tr("Undelete"), QVariant::fromValue(rec));
+            }
             else
+            {
                 menuPopup->AddButtonV(tr("Disable AutoExpire"),
                                                         QVariant::fromValue(rec));
+            }
             menuPopup->AddButtonV(tr("No Change"), QVariant::fromValue(rec));
 
         }
@@ -487,6 +490,7 @@ void StatusBox::doListingsStatus()
     AddLogLine(tr("Mythfrontend version: %1 (%2)")
                .arg(GetMythSourcePath(), GetMythSourceVersion()),
                helpmsg);
+    AddLogLine(tr("Database schema version: %1").arg(gCoreContext->GetSetting("DBSchemaVer")));
     AddLogLine(tr("Last mythfilldatabase guide update:"), helpmsg);
     tmp = tr("Started:   %1").arg(
         MythDate::toString(
@@ -688,6 +692,7 @@ void StatusBox::doScheduleStatus()
         }
     }
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ADD_STATUS_LOG_LINE(rtype, fstate)                      \
     do {                                                        \
         if (statusMatch[rtype] > 0)                             \
@@ -827,11 +832,17 @@ void StatusBox::doTunerStatus()
         }
         else if (state == kState_RecordingOnly ||
                  state == kState_WatchingRecording)
+        {
             info[infoid].m_recording += 1;
+        }
         else if (state == kState_WatchingLiveTV)
+        {
             info[infoid].m_livetv += 1;
+        }
         else
+        {
             info[infoid].m_available += 1;
+        }
 
         if (state == kState_RecordingOnly ||
             state == kState_WatchingRecording ||
@@ -851,7 +862,7 @@ void StatusBox::doTunerStatus()
         }
     }
 
-    for (int inputid : qAsConst(inputids))
+    for (int inputid : std::as_const(inputids))
     {
         QStringList statuslist;
         if (info[inputid].m_errored)
@@ -1015,39 +1026,13 @@ void StatusBox::doJobQueueStatus()
         }
     }
     else
+    {
         AddLogLine(tr("Job Queue is currently empty."), helpmsg);
+    }
 
 }
 
 // Some helper routines for doMachineStatus() that format the output strings
-
-/** \fn sm_str(long long, int)
- *  \brief Returns a short string describing an amount of space, choosing
- *         one of a number of useful units, "TB", "GB", "MB", or "KB".
- *  \param sizeKB Number of kilobytes.
- *  \param prec   Precision to use if we have less than ten of whatever
- *                unit is chosen.
- */
-static QString sm_str(long long sizeKB, int prec=1)
-{
-    if (sizeKB>1024*1024*1024) // Terabytes
-    {
-        double sizeGB = sizeKB/(1024*1024*1024.0);
-        return QObject::tr("%1 TB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024*1024) // Gigabytes
-    {
-        double sizeGB = sizeKB/(1024*1024.0);
-        return QObject::tr("%1 GB").arg(sizeGB, 0, 'f', (sizeGB>10)?0:prec);
-    }
-    if (sizeKB>1024) // Megabytes
-    {
-        double sizeMB = sizeKB/1024.0;
-        return QObject::tr("%1 MB").arg(sizeMB, 0, 'f', (sizeMB>10)?0:prec);
-    }
-    // Kilobytes
-    return QObject::tr("%1 KB").arg(sizeKB);
-}
 
 static QString usage_str_kb(long long total,
                                   long long used,
@@ -1058,8 +1043,10 @@ static QString usage_str_kb(long long total,
     {
         double percent = (100.0*free)/total;
         ret = StatusBox::tr("%1 total, %2 used, %3 (or %4%) free.")
-            .arg(sm_str(total), sm_str(used),
-                 sm_str(free)).arg(percent, 0, 'f', (percent >= 10.0) ? 0 : 2);
+            .arg(StringUtil::formatKBytes(total),
+                 StringUtil::formatKBytes(used),
+                 StringUtil::formatKBytes(free))
+            .arg(percent, 0, 'f', (percent >= 10.0) ? 0 : 2);
     }
     return ret;
 }
@@ -1086,7 +1073,7 @@ static void disk_usage_with_rec_time_kb(QStringList& out, long long total,
         const QString pro =
                 tail.arg(it.key()).arg((int)((float)(*it) / 1024.0F));
 
-        long long bytesPerMin = ((*it) >> 1) * 15;
+        long long bytesPerMin = ((*it) >> 1) * 15LL;
         uint minLeft = ((free<<5)/bytesPerMin)<<5;
         minLeft = (minLeft/15)*15;
         uint hoursLeft = minLeft/60;
@@ -1122,9 +1109,9 @@ static QString uptimeStr(std::chrono::seconds uptime)
     {
         astext = QString("%1, %2")
             .arg(StatusBox::tr("%n day(s)", "", days.count()),
-                 MythFormatTime(secs, "H:mm"));
+                 MythDate::formatTime(secs, "H:mm"));
     } else {
-        astext = MythFormatTime(secs, "H:mm:ss");
+        astext = MythDate::formatTime(secs, "H:mm:ss");
     }
     return str + astext;
 }
@@ -1226,7 +1213,7 @@ void StatusBox::doMachineStatus()
     AddLogLine("   " + tr("Qt version") + QString(": %1").arg(qVersion()));
 
     QList allInterfaces = QNetworkInterface::allInterfaces();
-    for (const QNetworkInterface & iface : qAsConst(allInterfaces))
+    for (const QNetworkInterface & iface : std::as_const(allInterfaces))
     {
         QNetworkInterface::InterfaceFlags f = iface.flags();
         if (!(f & QNetworkInterface::IsUp))
@@ -1236,16 +1223,12 @@ void StatusBox::doMachineStatus()
         if ((f & QNetworkInterface::IsLoopBack) != 0U)
             continue;
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
         QNetworkInterface::InterfaceType type = iface.type();
         QString name = type == QNetworkInterface::Wifi ? tr("WiFi") : tr("Ethernet");
-#else
-        QString name = tr("Network");
-#endif
         AddLogLine("   " + name + QString(" (%1): ").arg(iface.humanReadableName()));
         AddLogLine("        " + tr("MAC Address") + ": " + iface.hardwareAddress());
         QList addresses = iface.addressEntries();
-        for (const QNetworkAddressEntry & addr : qAsConst(addresses))
+        for (const QNetworkAddressEntry & addr : std::as_const(addresses))
         {
             if (addr.ip().protocol() == QAbstractSocket::IPv4Protocol ||
                 addr.ip().protocol() == QAbstractSocket::IPv6Protocol)
@@ -1474,7 +1457,7 @@ void StatusBox::doDecoderStatus()
     }
     else
     {
-        for (const QString & decoder : qAsConst(decoders))
+        for (const QString & decoder : std::as_const(decoders))
             AddLogLine(decoder);
     }
 }
@@ -1491,7 +1474,7 @@ void StatusBox::doDisplayStatus()
         m_justHelpText->SetText(displayhelp);
 
     auto desc = GetMythMainWindow()->GetDisplay()->GetDescription();
-    for (const auto & line : qAsConst(desc))
+    for (const auto & line : std::as_const(desc))
         AddLogLine(line);
 }
 
@@ -1519,7 +1502,7 @@ void StatusBox::doRenderStatus()
                 auto * rend = GetMythMainWindow()->GetRenderDevice();
                 if (auto * gl = dynamic_cast<MythRenderOpenGL*>(rend); gl != nullptr)
                     swapcount = gl->GetSwapCount();
-                Item->SetText(tr("Current fps: %1").arg(swapcount));
+                Item->SetText(tr("Current fps\t: %1").arg(swapcount));
             };
 
             auto * fps = AddLogLine("");
@@ -1577,7 +1560,7 @@ void StatusBox::doRenderStatus()
         }
 
         auto desc = render->GetDescription();
-        for (const auto & line : qAsConst(desc))
+        for (const auto & line : std::as_const(desc))
             AddLogLine(line);
     }
 }
@@ -1609,7 +1592,7 @@ void StatusBox::doAutoExpireList(bool updateExpList)
     long long             deletedGroupSize(0);
     int                   deletedGroupCount(0);
 
-    vector<ProgramInfo *>::iterator it;
+    std::vector<ProgramInfo *>::iterator it;
 
     if (updateExpList)
     {
@@ -1638,17 +1621,17 @@ void StatusBox::doAutoExpireList(bool updateExpList)
     }
 
     staticInfo = tr("%n recording(s) consuming %1 (is) allowed to expire\n", "",
-                     m_expList.size()).arg(sm_str(totalSize / 1024));
+                     m_expList.size()).arg(StringUtil::formatKBytes(totalSize / 1024));
 
     if (liveTVCount)
         staticInfo += tr("%n (is) LiveTV and consume(s) %1\n", "", liveTVCount)
-                            .arg(sm_str(liveTVSize / 1024));
+                            .arg(StringUtil::formatKBytes(liveTVSize / 1024));
 
     if (deletedGroupCount)
     {
         staticInfo += tr("%n (is) Deleted and consume(s) %1\n", "",
                         deletedGroupCount)
-                        .arg(sm_str(deletedGroupSize / 1024));
+                        .arg(StringUtil::formatKBytes(deletedGroupSize / 1024));
     }
 
     for (it = m_expList.begin(); it != m_expList.end(); ++it)
@@ -1664,7 +1647,7 @@ void StatusBox::doAutoExpireList(bool updateExpList)
             "(" + ProgramInfo::i18n(pginfo->GetRecordingGroup()) + ") ";
 
         contentLine += pginfo->GetTitle() +
-            " (" + sm_str(pginfo->GetFilesize() / 1024) + ")";
+            " (" + StringUtil::formatKBytes(pginfo->GetFilesize() / 1024) + ")";
 
         detailInfo =
             MythDate::toString(
@@ -1673,7 +1656,7 @@ void StatusBox::doAutoExpireList(bool updateExpList)
             MythDate::toString(
                 endtime, MythDate::kDateTimeFull | MythDate::kSimplify);
 
-        detailInfo += " (" + sm_str(pginfo->GetFilesize() / 1024) + ")";
+        detailInfo += " (" + StringUtil::formatKBytes(pginfo->GetFilesize() / 1024) + ")";
 
         detailInfo += " (" + ProgramInfo::i18n(pginfo->GetRecordingGroup()) + ")";
 

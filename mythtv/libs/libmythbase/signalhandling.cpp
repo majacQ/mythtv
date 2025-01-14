@@ -1,3 +1,4 @@
+#include <QtGlobal>
 #include <QObject>
 #include <QSocketNotifier>
 #include <QCoreApplication>
@@ -16,6 +17,7 @@
 
 #include "compat.h"
 #include "mythlogging.h"
+#include "loggingserver.h"
 #include "exitcodes.h"
 #include "signalhandling.h"
 
@@ -24,9 +26,27 @@ volatile bool SignalHandler::s_exit_program = false;
 QMutex SignalHandler::s_singletonLock;
 SignalHandler *SignalHandler::s_singleton;
 
+static const std::array<const int, 6
+#ifndef _WIN32
+    + 1
+#ifndef Q_OS_DARWIN
+    + 1
+#endif // Q_OS_DARWIN
+#endif // _WIN32
+    > kDefaultSignalList
+{
+    SIGINT, SIGTERM, SIGSEGV, SIGABRT, SIGFPE, SIGILL,
+#ifndef _WIN32
+    SIGBUS,
+#ifndef Q_OS_DARWIN
+    SIGRTMIN, // not necessarily constexpr
+#endif // Q_OS_DARWIN
+#endif // _WIN32
+};
+
 // We may need to write out signal info using just the write() function
 // so we create an array of C strings + measure their lengths.
-#define SIG_STR_COUNT 256
+static constexpr size_t SIG_STR_COUNT { 256 };
 std::array<std::string,SIG_STR_COUNT> sig_str;
 
 static void sig_str_init(size_t sig, const char *name)
@@ -43,15 +63,14 @@ static void sig_str_init(void)
         sig_str_init(i, qPrintable(QString("Signal %1").arg(i)));
 }
 
-QList<int> SignalHandler::s_defaultHandlerList;
-
-SignalHandler::SignalHandler(QList<int> &signallist, QObject *parent) :
+SignalHandler::SignalHandler(QObject *parent) :
     QObject(parent)
 {
     s_exit_program = false; // set here due to "C++ static initializer madness"
     sig_str_init();
 
 #ifndef _WIN32
+    //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     m_sigStack = new char[SIGSTKSZ];
     stack_t stack;
     stack.ss_sp = m_sigStack;
@@ -65,16 +84,6 @@ SignalHandler::SignalHandler(QList<int> &signallist, QObject *parent) :
         delete [] m_sigStack;
         m_sigStack = nullptr;
     }
-#endif
-
-    if (s_defaultHandlerList.isEmpty())
-        s_defaultHandlerList << SIGINT << SIGTERM << SIGSEGV << SIGABRT
-                             << SIGFPE << SIGILL;
-#ifndef _WIN32
-    s_defaultHandlerList << SIGBUS;
-#if ! CONFIG_DARWIN
-    s_defaultHandlerList << SIGRTMIN;
-#endif
 
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, s_sigFd.data()))
     {
@@ -84,17 +93,12 @@ SignalHandler::SignalHandler(QList<int> &signallist, QObject *parent) :
     m_notifier = new QSocketNotifier(s_sigFd[1], QSocketNotifier::Read, this);
     connect(m_notifier, &QSocketNotifier::activated, this, &SignalHandler::handleSignal);
 
-    for (int signum : qAsConst(signallist))
+    for (const int signum : kDefaultSignalList)
     {
-        if (!s_defaultHandlerList.contains(signum))
-        {
-            std::cerr << "No default handler for signal " << signum << std::endl;
-            continue;
-        }
-
         SetHandlerPrivate(signum, nullptr);
     }
-#endif
+    SetHandlerPrivate(SIGHUP, logSigHup);
+#endif // _WIN32
 }
 
 SignalHandler::~SignalHandler()
@@ -121,11 +125,11 @@ SignalHandler::~SignalHandler()
 #endif
 }
 
-void SignalHandler::Init(QList<int> &signallist, QObject *parent)
+void SignalHandler::Init(QObject *parent)
 {
     QMutexLocker locker(&s_singletonLock);
     if (!s_singleton)
-        s_singleton = new SignalHandler(signallist, parent);
+        s_singleton = new SignalHandler(parent);
 }
 
 void SignalHandler::Done(void)
@@ -142,7 +146,8 @@ void SignalHandler::SetHandler(int signum, SigHandlerFunc handler)
         s_singleton->SetHandlerPrivate(signum, handler);
 }
 
-void SignalHandler::SetHandlerPrivate(int signum, SigHandlerFunc handler)
+void SignalHandler::SetHandlerPrivate([[maybe_unused]] int signum,
+                                      [[maybe_unused]] SigHandlerFunc handler)
 {
 #ifndef _WIN32
     const char *signame = strsignal(signum);
@@ -188,14 +193,14 @@ struct SignalInfo {
     uint64_t m_value;
 };
 
-void SignalHandler::signalHandler(int signum, siginfo_t *info, void *context)
+void SignalHandler::signalHandler(int signum,
+                                  [[maybe_unused]] siginfo_t *info,
+                                  [[maybe_unused]] void *context)
 {
     SignalInfo signalInfo {};
 
-    (void)context;
     signalInfo.m_signum = signum;
 #ifdef _WIN32
-    (void)info;
     signalInfo.m_code   = 0;
     signalInfo.m_pid    = 0;
     signalInfo.m_uid    = 0;
@@ -294,7 +299,7 @@ void SignalHandler::handleSignal(void)
     SigHandlerFunc handler = nullptr;
     bool allowNullHandler = false;
 
-#if ! CONFIG_DARWIN
+#ifndef Q_OS_DARWIN
     if (signum == SIGRTMIN)
     {
         // glibc idiots seem to have made SIGRTMIN a macro that expands to a
@@ -302,7 +307,7 @@ void SignalHandler::handleSignal(void)
         // This uses the default handler to just get us here and to ignore it.
         allowNullHandler = true;
     }
-#endif
+#endif // Q_OS_DARWIN
 
     switch (signum)
     {
@@ -343,7 +348,7 @@ void SignalHandler::handleSignal(void)
     }
 
     m_notifier->setEnabled(true);
-#endif
+#endif // _WIN32
 }
 
 /*

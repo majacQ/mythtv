@@ -1,36 +1,52 @@
-
-#include "proglist.h"
-
 // C/C++
 #include <algorithm>
-#include <functional>
 #include <deque>                        // for _Deque_iterator, operator-, etc
+#include <functional>
 #include <iterator>                     // for reverse_iterator
+#include <utility>
 
 // Qt
 #include <QCoreApplication>
 #include <QLocale>
-#include <utility>
 
 // MythTV
-#include "mythmiscutil.h"
-#include "scheduledrecording.h"
-#include "mythuibuttonlist.h"
-#include "mythuistatetype.h"
-#include "mythcorecontext.h"
-#include "mythdialogbox.h"
-#include "recordinginfo.h"
-#include "recordingrule.h"
-#include "channelinfo.h"
-#include "channelutil.h"
-#include "mythuitext.h"
-#include "tv_actions.h"                 // for ACTION_CHANNELSEARCH
-#include "mythdb.h"
-#include "mythdate.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/stringutil.h"
+#include "libmythtv/channelinfo.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythtv/scheduledrecording.h"
+#include "libmythtv/tv_actions.h"       // for ACTION_CHANNELSEARCH
+#include "libmythtv/tv_play.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuistatetype.h"
+#include "libmythui/mythuitext.h"
+
+// MythFrontend
+#include "proglist.h"
 
 #define LOC      QString("ProgLister: ")
 #define LOC_WARN QString("ProgLister, Warning: ")
 #define LOC_ERR  QString("ProgLister, Error: ")
+
+void *ProgLister::RunProgramList(void *player, ProgListType pltype,
+                                 const QString & extraArg)
+{
+    MythScreenStack *mainStack = GetMythMainWindow()->GetMainStack();
+    auto *vsb = new ProgLister(mainStack, static_cast<TV*>(player),
+                               pltype, extraArg);
+
+    if (vsb->Create())
+        mainStack->AddScreen(vsb, (player == nullptr));
+    else
+        delete vsb;
+
+    return nullptr;
+}
 
 ProgLister::ProgLister(MythScreenStack *parent, ProgListType pltype,
                        QString view, QString extraArg,
@@ -71,6 +87,37 @@ ProgLister::ProgLister(MythScreenStack *parent, ProgListType pltype,
     }
 }
 
+// From tv_play
+ProgLister::ProgLister(MythScreenStack *parent, TV* player,
+                       ProgListType pltype, const QString & extraArg) :
+    ScheduleCommon(parent, "ProgLister"),
+    m_type(pltype),
+    m_extraArg(extraArg),
+    m_startTime(MythDate::current()),
+    m_searchTime(m_startTime),
+    m_channelOrdering(gCoreContext->GetSetting("ChannelOrdering", "channum")),
+    m_player(player)
+{
+    if (m_player)
+        m_player->IncrRef();
+
+    switch (pltype)
+    {
+        case plTitleSearch:   m_searchType = kTitleSearch;   break;
+        case plKeywordSearch: m_searchType = kKeywordSearch; break;
+        case plPeopleSearch:  m_searchType = kPeopleSearch;  break;
+        case plPowerSearch:
+        case plSQLSearch:
+        case plStoredSearch:  m_searchType = kPowerSearch;   break;
+        default:              m_searchType = kNoSearch;      break;
+    }
+
+    m_view = extraArg;
+    m_viewList.push_back(extraArg);
+    m_viewTextList.push_back(extraArg);
+    m_curView = m_viewList.size() - 1;
+}
+
 // previously recorded ctor
 ProgLister::ProgLister(
     MythScreenStack *parent, uint recid, QString title) :
@@ -86,14 +133,30 @@ ProgLister::ProgLister(
 {
 }
 
-ProgLister::~ProgLister()
+ProgLister::~ProgLister(void)
 {
     m_itemList.clear();
     m_itemListSave.clear();
     gCoreContext->removeListener(this);
+
+    // if we have a player, we need to tell we are done
+    if (m_player)
+    {
+        emit m_player->RequestEmbedding(false);
+        m_player->DecrRef();
+    }
 }
 
-bool ProgLister::Create()
+void ProgLister::Close(void)
+{
+    // don't fade the screen if we are returning to the player
+    if (m_player)
+        GetScreenStack()->PopScreen(this, false);
+    else
+        GetScreenStack()->PopScreen(this, true);
+}
+
+bool ProgLister::Create(void)
 {
     if (!LoadWindowFromXML("schedule-ui.xml", "programlist", this))
         return false;
@@ -163,6 +226,9 @@ bool ProgLister::Create()
 
     LoadInBackground();
 
+    if (m_player)
+        emit m_player->RequestEmbedding(true);
+
     return true;
 }
 
@@ -197,7 +263,7 @@ bool ProgLister::keyPressEvent(QKeyEvent *e)
     bool needUpdate = false;
     for (uint i = 0; i < uint(actions.size()) && !handled; ++i)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "PREVVIEW")
@@ -876,6 +942,7 @@ void ProgLister::FillViewList(const QString &view)
         }
         else
         {
+            LOG(VB_GENERAL, LOG_WARNING, LOC + QString("Failed to load viewList"));
             m_curView = -1;
         }
     }
@@ -918,11 +985,11 @@ void ProgLister::FillViewList(const QString &view)
         m_viewTextList.push_back(tr("All"));
         m_viewList.push_back("= 0.0");
         m_viewTextList.push_back(tr("Unrated"));
-        m_viewList.push_back(QString(">= %1").arg((10 - 0.5) / 10.0 - 0.001));
+        m_viewList.push_back(QString(">= %1").arg(((10 - 0.5) / 10.0) - 0.001));
         m_viewTextList.push_back(tr("%n star(s)", "", 10));
         for (int i = 9; i > 0; i--)
         {
-            float stars = (i - 0.5 ) / 10.0 - 0.001;
+            float stars = ((i - 0.5 ) / 10.0) - 0.001;
             m_viewList.push_back(QString(">= %1").arg(stars));
             m_viewTextList.push_back(tr("%n star(s) and above", "", i));
         }
@@ -1002,77 +1069,54 @@ void ProgLister::FillViewList(const QString &view)
         m_curView = m_viewList.size() - 1;
 }
 
-class plCompare : std::binary_function<const ProgramInfo*, const ProgramInfo*, bool>
+static bool plTitleSort(const ProgramInfo *a, const ProgramInfo *b)
 {
-  public:
-    virtual bool operator()(const ProgramInfo*, const ProgramInfo*) = 0;
-    virtual ~plCompare() = default;
-};
+    if (a->GetSortTitle() != b->GetSortTitle())
+        return StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
+    if (a->GetSortSubtitle() != b->GetSortSubtitle())
+        return StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
 
-class plTitleSort : public plCompare
-{
-  public:
-    bool operator()(const ProgramInfo *a, const ProgramInfo *b) override // plCompare
-    {
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        if (a->GetSortSubtitle() != b->GetSortSubtitle())
-            return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
-
-        if (a->GetRecordingStatus() == b->GetRecordingStatus())
-            return a->GetScheduledStartTime() < b->GetScheduledStartTime();
-
-        if (a->GetRecordingStatus() == RecStatus::Recording ||
-            a->GetRecordingStatus() == RecStatus::Tuning ||
-            a->GetRecordingStatus() == RecStatus::Failing)
-            return true;
-        if (b->GetRecordingStatus() == RecStatus::Recording ||
-            b->GetRecordingStatus() == RecStatus::Tuning ||
-            b->GetRecordingStatus() == RecStatus::Failing)
-            return false;
-
-        if (a->GetRecordingStatus() == RecStatus::WillRecord ||
-            a->GetRecordingStatus() == RecStatus::Pending)
-            return true;
-        if (b->GetRecordingStatus() == RecStatus::WillRecord ||
-            b->GetRecordingStatus() == RecStatus::Pending)
-            return false;
-
+    if (a->GetRecordingStatus() == b->GetRecordingStatus())
         return a->GetScheduledStartTime() < b->GetScheduledStartTime();
-    }
+
+    if (a->GetRecordingStatus() == RecStatus::Recording ||
+        a->GetRecordingStatus() == RecStatus::Tuning ||
+        a->GetRecordingStatus() == RecStatus::Failing)
+        return true;
+    if (b->GetRecordingStatus() == RecStatus::Recording ||
+        b->GetRecordingStatus() == RecStatus::Tuning ||
+        b->GetRecordingStatus() == RecStatus::Failing)
+        return false;
+
+    if (a->GetRecordingStatus() == RecStatus::WillRecord ||
+        a->GetRecordingStatus() == RecStatus::Pending)
+        return true;
+    if (b->GetRecordingStatus() == RecStatus::WillRecord ||
+        b->GetRecordingStatus() == RecStatus::Pending)
+        return false;
+
+    return a->GetScheduledStartTime() < b->GetScheduledStartTime();
 };
 
-class plPrevTitleSort : public plCompare
+static bool plPrevTitleSort(const ProgramInfo *a, const ProgramInfo *b)
 {
-  public:
-    plPrevTitleSort(void) {;}
+    if (a->GetSortTitle() != b->GetSortTitle())
+        return StringUtil::naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
+    if (a->GetSortSubtitle() != b->GetSortSubtitle())
+        return StringUtil::naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
 
-    bool operator()(const ProgramInfo *a, const ProgramInfo *b) override // plCompare
-    {
-        if (a->GetSortTitle() != b->GetSortTitle())
-            return naturalCompare(a->GetSortTitle(), b->GetSortTitle()) < 0;
-        if (a->GetSortSubtitle() != b->GetSortSubtitle())
-            return naturalCompare(a->GetSortSubtitle(), b->GetSortSubtitle()) < 0;
+    if (a->GetProgramID() != b->GetProgramID())
+        return a->GetProgramID() < b->GetProgramID();
 
-        if (a->GetProgramID() != b->GetProgramID())
-            return a->GetProgramID() < b->GetProgramID();
-
-        return a->GetScheduledStartTime() < b->GetScheduledStartTime();
-    }
+    return a->GetScheduledStartTime() < b->GetScheduledStartTime();
 };
 
-class plTimeSort : public plCompare
+static bool plTimeSort(const ProgramInfo *a, const ProgramInfo *b)
 {
-  public:
-    plTimeSort(void) {;}
+    if (a->GetScheduledStartTime() == b->GetScheduledStartTime())
+        return (a->GetChanID() < b->GetChanID());
 
-    bool operator()(const ProgramInfo *a, const ProgramInfo *b) override // plCompare
-    {
-        if (a->GetScheduledStartTime() == b->GetScheduledStartTime())
-            return (a->GetChanID() < b->GetChanID());
-
-        return (a->GetScheduledStartTime() < b->GetScheduledStartTime());
-    }
+    return (a->GetScheduledStartTime() < b->GetScheduledStartTime());
 };
 
 void ProgLister::FillItemList(bool restorePosition, bool updateDisp)
@@ -1414,31 +1458,31 @@ void ProgLister::SortList(SortBy sortby, bool reverseSort)
     {
         if (kTimeSort == sortby)
         {
-            stable_sort(m_itemList.rbegin(), m_itemList.rend(), plTimeSort());
+            std::stable_sort(m_itemList.rbegin(), m_itemList.rend(), plTimeSort);
         }
         else if (kPrevTitleSort == sortby)
         {
-            stable_sort(m_itemList.rbegin(), m_itemList.rend(),
-                        plPrevTitleSort());
+            std::stable_sort(m_itemList.rbegin(), m_itemList.rend(),
+                        plPrevTitleSort);
         }
         else
         {
-            stable_sort(m_itemList.rbegin(), m_itemList.rend(), plTitleSort());
+            std::stable_sort(m_itemList.rbegin(), m_itemList.rend(), plTitleSort);
         }
     }
     else
     {
         if (kTimeSort == sortby)
         {
-            stable_sort(m_itemList.begin(), m_itemList.end(), plTimeSort());
+            std::stable_sort(m_itemList.begin(), m_itemList.end(), plTimeSort);
         }
         else if (kPrevTitleSort == sortby)
         {
-            stable_sort(m_itemList.begin(), m_itemList.end(),plPrevTitleSort());
+            std::stable_sort(m_itemList.begin(), m_itemList.end(),plPrevTitleSort);
         }
         else
         {
-            stable_sort(m_itemList.begin(), m_itemList.end(), plTitleSort());
+            std::stable_sort(m_itemList.begin(), m_itemList.end(), plTitleSort);
         }
     }
 }
@@ -1491,27 +1535,26 @@ void ProgLister::UpdateDisplay(const ProgramInfo *selected)
 void ProgLister::RestoreSelection(const ProgramInfo *selected,
                                   int selectedOffset)
 {
-    plCompare *comp = nullptr;
+    using ProgramInfoSortFn = bool (*)(const ProgramInfo *a, const ProgramInfo *b);
+    ProgramInfoSortFn comp { nullptr };
     if (!m_titleSort)
-        comp = new plTimeSort();
+        comp = plTimeSort;
     else if (m_type == plPreviouslyRecorded)
-        comp = new plPrevTitleSort();
+        comp = plPrevTitleSort;
     else
-        comp = new plTitleSort();
+        comp = plTitleSort;
 
     int i = 0;
     for (i = m_itemList.size() - 2; i >= 0; i--)
     {
         bool dobreak = false;
         if (m_reverseSort)
-            dobreak = comp->operator()(selected, m_itemList[i]);
+            dobreak = comp(selected, m_itemList[i]);
         else
-            dobreak = comp->operator()(m_itemList[i], selected);
+            dobreak = comp(m_itemList[i], selected);
         if (dobreak)
             break;
     }
-
-    delete comp;
 
     m_progList->SetItemCurrent(i + 1, i + 1 - selectedOffset);
 }
@@ -1690,7 +1733,7 @@ void ProgLister::customEvent(QEvent *event)
                 ShowChooseViewMenu();
         }
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)

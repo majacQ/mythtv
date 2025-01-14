@@ -6,21 +6,22 @@
 //                                                                            
 // Copyright (c) 2011 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
-
-#include "mythlogging.h"
-#include "htmlserver.h"
-#include "storagegroup.h"
-#include "httprequest.h"
-
-#include "serviceHosts/rttiServiceHost.h"
 
 #include <QFileInfo>
 #include <QDir>
 #include <QTextStream>
 #include <QUuid>
+
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/storagegroup.h"
+
+#include "htmlserver.h"
+#include "httprequest.h"
+
+#include "serviceHosts/rttiServiceHost.h"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -31,6 +32,7 @@ HtmlServerExtension::HtmlServerExtension( const QString &sSharePath,
   : HttpServerExtension( "Html" , sSharePath),
     m_indexFilename(sApplicationPrefix + "index")
 {
+#if CONFIG_QTSCRIPT
     LOG(VB_HTTP, LOG_INFO, QString("HtmlServerExtension() - SharePath = %1")
             .arg(m_sSharePath));
     m_scripting.SetResourceRootPath( m_sSharePath );
@@ -43,6 +45,7 @@ HtmlServerExtension::HtmlServerExtension( const QString &sSharePath,
     QScriptEngine *pEngine = ScriptEngine();
     pEngine->globalObject().setProperty("Rtti",
          pEngine->scriptValueFromQMetaObject< ScriptableRtti >() );
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -203,7 +206,9 @@ bool HtmlServerExtension::ProcessRequest( HTTPRequest *pRequest )
                     {
                         QTextStream stream( &pRequest->m_response );
                         
+#if CONFIG_QTSCRIPT
                         m_scripting.EvaluatePage( &stream, sResName, pRequest, cspNonce);
+#endif
 
                         return true;
                     }

@@ -1,19 +1,20 @@
-// ANSI C headers
+// C++ headers
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <utility>
 
 // MythTV headers
-#include "mythcorecontext.h"    /* gContext */
-#include "mythplayer.h"
+#include "libmythbase/mythcorecontext.h"    /* gContext */
+#include "libmythtv/mythplayer.h"
 
 // Commercial Flagging headers
+#include "BlankFrameDetector.h"
 #include "CommDetector2.h"
 #include "FrameAnalyzer.h"
-#include "quickselect.h"
 #include "HistogramAnalyzer.h"
-#include "BlankFrameDetector.h"
 #include "TemplateMatcher.h"
+#include "quickselect.h"
 
 using namespace commDetector2;
 using namespace frameAnalyzer;
@@ -39,7 +40,11 @@ sort_ascending_float(const void *aa, const void *bb)
 {
     float faa = *(float*)aa;
     float fbb = *(float*)bb;
-    return faa < fbb ? -1 : faa == fbb ? 0 : 1;
+    if (faa < fbb)
+        return -1;
+    if (faa == fbb)
+        return 0;
+    return 1;
 }
 
 bool
@@ -237,9 +242,9 @@ computeBreakMap(FrameAnalyzer::FrameMap *breakMap,
     {
         long long brkb = iiblank.key();
         long long iilen = *iiblank;
-        long long start = brkb + iilen / 2;
+        long long start = brkb + (iilen / 2);
 
-        for (auto type : kBreakType)
+        for (const auto& type : kBreakType)
         {
             /* Look for next blank frame that is an acceptable distance away. */
             FrameAnalyzer::FrameMap::const_iterator jjblank = iiblank;
@@ -247,7 +252,7 @@ computeBreakMap(FrameAnalyzer::FrameMap *breakMap,
             {
                 long long brke = jjblank.key();
                 long long jjlen = *jjblank;
-                long long end = brke + jjlen / 2;
+                long long end = brke + (jjlen / 2);
 
                 auto testlen = std::chrono::seconds(lroundf((end - start) / fps));
                 if (testlen > type.m_len + type.m_delta)
@@ -349,17 +354,21 @@ computeBreakMap(FrameAnalyzer::FrameMap *breakMap,
         iibreak = breakMap->erase(iibreak);
 
         /* Trim leading blanks from commercial break. */
-        long long addb = *blankMap->find(iib);
+        auto iter = blankMap->find(iib);
+        if (iter == blankMap->end())
+            break;
+        long long addb = *iter;
         addb = addb / 2;
-        if (addb > MAX_BLANK_FRAMES)
-            addb = MAX_BLANK_FRAMES;
+        addb = std::min<long long>(addb, MAX_BLANK_FRAMES);
         iib += addb;
         /* Add trailing blanks to commercial break. */
-        long long adde = *blankMap->find(iie);
+        iter = blankMap->find(iib);
+        if (iter == blankMap->end())
+            break;
+        long long adde = *iter;
         iie += adde;
         long long sube = adde / 2;
-        if (sube > MAX_BLANK_FRAMES)
-            sube = MAX_BLANK_FRAMES;
+        sube = std::min<long long>(sube, MAX_BLANK_FRAMES);
         iie -= sube;
         breakMap->insert(iib, iie - iib);
     }
@@ -615,10 +624,8 @@ BlankFrameDetector::computeForLogoSurplus(
 
 int
 BlankFrameDetector::computeForLogoDeficit(
-        const TemplateMatcher *templateMatcher)
+        [[maybe_unused]] const TemplateMatcher *templateMatcher)
 {
-    (void)templateMatcher;  /* gcc */
-
     LOG(VB_COMMFLAG, LOG_INFO, "BlankFrameDetector adjusting for "
                                "too little logo coverage (unimplemented)");
     return 0;

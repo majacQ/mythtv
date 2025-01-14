@@ -1,12 +1,16 @@
-#include <QNetworkInterface>
+// Qt
 #include <QDomDocument>
 #include <QFile>
+#include <QNetworkInterface>
 
-#include "channelsettings.h" // for ChannelTVFormat::GetFormats()
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythtv/channelsettings.h" // for ChannelTVFormat::GetFormats()
+#include "libmythtv/frequencies.h"
+
+// MythBackend
 #include "mythsettings.h"
-#include "frequencies.h"
-#include "mythcontext.h"
-#include "mythdb.h"
 
 MythSetting::SettingType parse_setting_type(const QString &str);
 MythSetting::DataType parse_data_type(const QString &str);
@@ -27,7 +31,7 @@ static QString extract_query_list(
 {
     QString list;
 
-    for (const auto *val : qAsConst(settings))
+    for (const auto *val : std::as_const(settings))
     {
         const auto *group = dynamic_cast<const MythSettingGroup*>(val);
         if (group)
@@ -52,7 +56,7 @@ static void fill_setting(
     const auto *group = dynamic_cast<const MythSettingGroup*>(sb);
     if (group)
     {
-        for (auto *setting : qAsConst(group->m_settings))
+        for (auto *setting : std::as_const(group->m_settings))
             fill_setting(setting, map, stype);
         return;
     }
@@ -128,7 +132,7 @@ static void fill_settings(
     while (query.next())
         map[query.value(0).toString()] = query.value(1).toString();
 
-    for (auto *setting : qAsConst(settings))
+    for (auto *setting : std::as_const(settings))
         fill_setting(setting, map, stype);
 }
 
@@ -144,7 +148,7 @@ QString MythSettingGroup::ToHTML(uint depth) const
             .arg(depth+1).arg(m_human_label).arg(depth+1);
     }
 
-    for (const auto *setting : qAsConst(m_settings))
+    for (const auto *setting : std::as_const(m_settings))
         ret += setting->ToHTML(depth+1);
 
     ret += indent(depth) +"</div>";
@@ -404,7 +408,7 @@ QStringList GetSettingValueList(const QString &type)
     if (type == "LocalIPAddress")
     {
         QList<QHostAddress> list = QNetworkInterface::allAddresses();
-        for (const auto & addr : qAsConst(list))
+        for (const auto & addr : std::as_const(list))
         {
             if (addr.toString().contains(":"))
                 continue; // ignore IP6 addresses for now
@@ -447,7 +451,7 @@ QString StringListToJSON(const QString &key,
 {
     QString result;
 
-    for (const auto & item : qAsConst(sList))
+    for (const auto & item : std::as_const(sList))
     {
         if (result.isEmpty())
             result += QString("{ \"%1\" : [ ").arg(key);
@@ -516,7 +520,9 @@ bool parse_dom(MythSettingList &settings, const QDomElement &element,
                 mFoundGroup = true;
             }
             else
+            {
                 delete g;
+            }
 
         }
         else if (e.tagName() == "setting" && includeAllChildren)
@@ -650,6 +656,7 @@ bool parse_settings(MythSettingList &settings, const QString &filename,
         return false;
     }
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
@@ -663,6 +670,19 @@ bool parse_settings(MythSettingList &settings, const QString &filename,
         f.close();
         return false;
     }
+#else
+    auto parseResult = doc.setContent(&f);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR, QString("parse_settings: ") +
+            QString("Parsing: %1 at line: %2 column: %3")
+                .arg(filename).arg(parseResult.errorLine)
+                .arg(parseResult.errorColumn) +
+            QString("\n\t\t\t%1").arg(parseResult.errorMessage));
+        f.close();
+        return false;
+    }
+#endif
     f.close();
 
     settings.clear();

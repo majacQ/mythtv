@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -17,8 +17,7 @@
 #include <QObject>
 
 // MythTV
-#include "configuration.h"
-#include "mythpower.h"
+#include "libmythbase/mythpower.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -33,7 +32,7 @@
 //
 //////////////////////////////////////////////////////////////////////////////
 
-enum UPnPResultCode
+enum UPnPResultCode : std::uint16_t
 {
     UPnPResult_Success                       =   0,
 
@@ -102,8 +101,6 @@ class UPNP_PUBLIC UPnp : public QObject
 
     protected:
 
-        static Configuration   *g_pConfig;
-
         HttpServer             *m_pHttpServer  {nullptr};
         int                     m_nServicePort {0};
 
@@ -115,9 +112,6 @@ class UPNP_PUBLIC UPnp : public QObject
     public:
         UPnp();
        ~UPnp() override;
-
-        static void           SetConfiguration( Configuration *pConfig );
-        static Configuration* GetConfiguration();
 
         bool Initialize( int nServicePort, HttpServer *pHttpServer );
         bool Initialize( QList<QHostAddress> &sIPAddrList, int nServicePort,

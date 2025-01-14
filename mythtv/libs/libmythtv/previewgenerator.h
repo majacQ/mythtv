@@ -10,10 +10,11 @@
 #include <QMap>
 #include <QSet>
 
-#include "programinfo.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/programinfo.h"
+
 #include "mythtvexp.h"
-#include "mthread.h"
-#include "mythdate.h"
 
 class PreviewGenerator;
 class QByteArray;
@@ -36,7 +37,7 @@ class MTV_PUBLIC PreviewGenerator : public QObject, public MThread
     Q_OBJECT
 
   public:
-    enum Mode
+    enum Mode : std::uint8_t
     {
         kNone           = 0x0,
         kLocal          = 0x1,

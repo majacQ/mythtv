@@ -6,15 +6,15 @@
 //                                                                            
 // Copyright (c) 2006 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef UPNPTASKEVENT_H
 #define UPNPTASKEVENT_H
 
-#include "upnp.h"
-#include "bufferedsocketdevice.h"
+#include "libmythupnp/upnp.h"
+#include "libmythupnp/bufferedsocketdevice.h"
 
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
@@ -40,9 +40,14 @@ class UPnpEventTask : public Task
 
     public:
 
-        UPnpEventTask( QHostAddress peerAddress,
+        UPnpEventTask( const QHostAddress& peerAddress,
                        int          nPeerPort,  
-                       QByteArray  *m_pPayload );
+                       QByteArray  *pPayload ) :
+            Task("UPnpEventTask"),
+            m_peerAddress(peerAddress),
+            m_nPeerPort(nPeerPort),
+            m_pPayload(pPayload)  // We take ownership of this pointer.
+        {}
 
         QString Name() override { return( "Event" ); } // Task
         void Execute( TaskQueue *pQueue ) override; // Task

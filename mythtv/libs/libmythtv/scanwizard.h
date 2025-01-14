@@ -33,11 +33,11 @@
 #define SCANWIZARD_H
 
 // MythTV headers
-#include "mythtvexp.h"
-#include "mythdbcon.h"
-#include "cardutil.h"
-#include "standardsettings.h"
-#include "scanwizardconfig.h"
+#include "libmythui/standardsettings.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythtv/cardutil.h"
+#include "libmythtv/channelscan/scanwizardconfig.h"
+#include "libmythtv/mythtvexp.h"
 
 class ChannelScannerGUI;
 
@@ -59,7 +59,7 @@ class MTV_PUBLIC ScanWizard : public GroupSetting
 
   protected:
     uint               m_lastHWCardID   {0};
-    uint               m_lastHWCardType {CardUtil::ERROR_PROBE};
+    CardUtil::INPUT_TYPES m_lastHWCardType {CardUtil::INPUT_TYPES::ERROR_PROBE};
     ChannelScannerGUI *m_scannerPane    {nullptr};
 
   // The following are moved from deleted class ScanWizardConfig

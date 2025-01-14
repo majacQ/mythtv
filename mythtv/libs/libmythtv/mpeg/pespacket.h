@@ -12,8 +12,9 @@
 
 using AspectArray = std::array<float,16>;
 
+#include "libmythbase/mythlogging.h"
+
 #include "tspacket.h"
-#include "mythlogging.h"
 
 MTV_PUBLIC unsigned char *pes_alloc(uint size);
 MTV_PUBLIC void pes_free(unsigned char *ptr);
@@ -33,16 +34,16 @@ class MTV_PUBLIC PESPacket
     // does not create it's own data
     explicit PESPacket(const unsigned char *pesdata)
         : m_pesData(const_cast<unsigned char*>(pesdata)),
-          m_fullBuffer(const_cast<unsigned char*>(pesdata))
+          m_fullBuffer(const_cast<unsigned char*>(pesdata)),
+          m_badPacket(!VerifyCRC())
     {
-        m_badPacket = !VerifyCRC();
         m_pesDataSize = std::max(((int)Length())-1 + (PESPacket::HasCRC() ? 4 : 0), 0);
     }
     explicit PESPacket(const std::vector<uint8_t> &pesdata)
       : m_pesData(const_cast<unsigned char*>(pesdata.data())),
-        m_fullBuffer(const_cast<unsigned char*>(pesdata.data()))
+        m_fullBuffer(const_cast<unsigned char*>(pesdata.data())),
+        m_badPacket(!VerifyCRC())
     {
-        m_badPacket = !VerifyCRC();
         m_pesDataSize = std::max(((int)Length())-1 + (PESPacket::HasCRC() ? 4 : 0), 0);
     }
 
@@ -229,6 +230,9 @@ class MTV_PUBLIC PESPacket
     // FIXME re-read the specs and follow all negations to find out the
     // initial value of the CRC function when its being returned
     static const uint kTheMagicNoCRCCRC = 0xFFFFFFFF;
+
+  public:
+    static constexpr uint kMpegCRCSize { 4 };
 };
 
 class SequenceHeader

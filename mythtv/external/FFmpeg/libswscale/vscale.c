@@ -17,6 +17,7 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
+#include "libavutil/mem.h"
 #include "swscale_internal.h"
 
 typedef struct VScalerContext
@@ -92,7 +93,7 @@ static int chr_planar_vscale(SwsContext *c, SwsFilterDescriptor *desc, int slice
         uint16_t *filter = inst->filter[0] + (inst->isMMX ? 0 : chrSliceY * inst->filter_size);
 
         if (c->yuv2nv12cX) {
-            inst->pfn.yuv2interleavedX(c, filter, inst->filter_size, (const int16_t**)src1, (const int16_t**)src2, dst1[0], dstW);
+            inst->pfn.yuv2interleavedX(c->dstFormat, c->chrDither8, filter, inst->filter_size, (const int16_t**)src1, (const int16_t**)src2, dst1[0], dstW);
         } else if (inst->filter_size == 1) {
             inst->pfn.yuv2planar1((const int16_t*)src1[0], dst1[0], dstW, c->chrDither8, 0);
             inst->pfn.yuv2planar1((const int16_t*)src2[0], dst2[0], dstW, c->chrDither8, 3);
@@ -237,7 +238,7 @@ int ff_init_vscale(SwsContext *c, SwsFilterDescriptor *desc, SwsSlice *src, SwsS
             desc[1].dst = dst;
         }
     } else {
-        lumCtx = av_mallocz_array(sizeof(VScalerContext), 2);
+        lumCtx = av_calloc(2, sizeof(*lumCtx));
         if (!lumCtx)
             return AVERROR(ENOMEM);
         chrCtx = &lumCtx[1];

@@ -22,6 +22,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "pcm.h"
 
@@ -80,7 +81,8 @@ static int nist_read_header(AVFormatContext *s)
 
             avpriv_set_pts_info(st, 64, 1, st->codecpar->sample_rate);
 
-            st->codecpar->block_align = st->codecpar->bits_per_coded_sample * st->codecpar->channels / 8;
+            st->codecpar->block_align = st->codecpar->bits_per_coded_sample *
+                                        st->codecpar->ch_layout.nb_channels / 8;
 
             if (avio_tell(s->pb) > header_size)
                 return AVERROR_INVALIDDATA;
@@ -89,8 +91,8 @@ static int nist_read_header(AVFormatContext *s)
 
             return 0;
         } else if (!memcmp(buffer, "channel_count", 13)) {
-            sscanf(buffer, "%*s %*s %u", &st->codecpar->channels);
-            if (st->codecpar->channels <= 0 || st->codecpar->channels > INT16_MAX)
+            sscanf(buffer, "%*s %*s %u", &st->codecpar->ch_layout.nb_channels);
+            if (st->codecpar->ch_layout.nb_channels <= 0 || st->codecpar->ch_layout.nb_channels > INT16_MAX)
                 return AVERROR_INVALIDDATA;
         } else if (!memcmp(buffer, "sample_byte_format", 18)) {
             sscanf(buffer, "%*s %*s %31s", format);
@@ -132,13 +134,13 @@ static int nist_read_header(AVFormatContext *s)
     return AVERROR_EOF;
 }
 
-AVInputFormat ff_nistsphere_demuxer = {
-    .name           = "nistsphere",
-    .long_name      = NULL_IF_CONFIG_SMALL("NIST SPeech HEader REsources"),
+const FFInputFormat ff_nistsphere_demuxer = {
+    .p.name         = "nistsphere",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("NIST SPeech HEader REsources"),
+    .p.extensions   = "nist,sph",
+    .p.flags        = AVFMT_GENERIC_INDEX,
     .read_probe     = nist_probe,
     .read_header    = nist_read_header,
     .read_packet    = ff_pcm_read_packet,
     .read_seek      = ff_pcm_read_seek,
-    .extensions     = "nist,sph",
-    .flags          = AVFMT_GENERIC_INDEX,
 };

@@ -1,9 +1,8 @@
 #ifndef CHANNELRECPRIORITY_H_
 #define CHANNELRECPRIORITY_H_
 
-#include "mythscreentype.h"
-
-#include "programinfo.h"
+#include "libmythbase/programinfo.h"
+#include "libmythui/mythscreentype.h"
 
 class ChannelInfo;
 
@@ -30,7 +29,7 @@ class ChannelRecPriority : public MythScreenType
     bool keyPressEvent(QKeyEvent *event) override; // MythScreenType
     void customEvent(QEvent *event) override; // MythUIType
 
-    enum SortType
+    enum SortType : std::uint8_t
     {
         byChannel,
         byRecPriority,

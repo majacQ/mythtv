@@ -1,10 +1,13 @@
+// C++
 #include <chrono>
 
-#include "galleryinfo.h"
+// MythTV
+#include "libmythbase/mythcoreutil.h"
+#include "libmythbase/mythdate.h"
+#include "libmythmetadata/imagemetadata.h"
 
-#include "imagemetadata.h"
-#include "mythcoreutil.h"
-#include "mythdate.h"
+// MythFrontend
+#include "galleryinfo.h"
 
 
 //! The exif/video tags comprising the Basic file info
@@ -100,7 +103,9 @@ void InfoList::Toggle(const ImagePtrK& im)
         return;
     }
     else
+    {
         m_infoVisible = kBasicInfo;
+    }
 
     Clear();
     Update(im);
@@ -268,7 +273,7 @@ void InfoList::Display(ImageItemK &im, const QStringList &tagStrings)
         // Create buttons for exif/video tags
         // Multimap iterates each key latest->earliest so we must do it the long way
         QList groups = tags.uniqueKeys();
-        for (const QString & group : qAsConst(groups))
+        for (const QString & group : std::as_const(groups))
         {
             // Iterate earliest->latest to preserve tag order
             using TagList = QList<QStringList>;

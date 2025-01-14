@@ -2,12 +2,11 @@
 #define BACKENDSELECT_H
 
 #include <QMutex>
+#include <QString>
 
-// libmythui
-#include "mythscreentype.h"
-
-#include "configuration.h"
-#include "upnpdevice.h"
+// MythTV
+#include "libmythui/mythscreentype.h"
+#include "libmythupnp/upnpdevice.h"
 
 class QEventLoop;
 class MythUIButtonList;
@@ -39,17 +38,16 @@ class BackendSelection : public MythScreenType
     Q_OBJECT
 
   public:
-    enum Decision
+    enum Decision : std::int8_t
     {
         kManualConfigure = -1,
         kCancelConfigure = 0,
         kAcceptConfigure = +1,
     };
-    static Decision Prompt(
-        DatabaseParams *dbParams, Configuration *pConfig);
+    static Decision Prompt(DatabaseParams *dbParams, const QString& config_filename);
 
     BackendSelection(MythScreenStack *parent, DatabaseParams *params,
-                     Configuration *pConfig, bool exitOnFinish = false);
+                     QString config_filename, bool exitOnFinish = false);
     ~BackendSelection() override;
 
     bool Create(void) override; // MythScreenType
@@ -73,7 +71,7 @@ class BackendSelection : public MythScreenType
     void CloseWithDecision(Decision d);
 
     DatabaseParams   *m_dbParams        {nullptr};
-    Configuration    *m_pConfig         {nullptr};
+    QString           m_configFilename;
     bool              m_exitOnFinish;
     ItemMap           m_devices;
 

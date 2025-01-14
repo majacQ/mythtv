@@ -1,33 +1,33 @@
 
 #include "mythuisimpletext.h"
 
+#include <utility>
+
 #include <QCoreApplication>
-#include <QtGlobal>
 #include <QDomDocument>
 #include <QFontMetrics>
-#include <QString>
 #include <QHash>
+#include <QString>
+#include <QtGlobal>
 
-#include "mythlogging.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 
 #include "mythuihelper.h"
 #include "mythpainter.h"
 #include "mythmainwindow.h"
-#include "mythcorecontext.h"
-
-#include "compat.h"
 
 MythUISimpleText::MythUISimpleText(const QString &text,
-                                   const MythFontProperties &font,
+                                   MythFontProperties font,
                                    const QRect rect, Qt::Alignment align,
                                    MythUIType *parent, const QString &name)
     : MythUIType(parent, name),
       m_justification(align),
-      m_font(font),
+      m_font(std::move(font)),
       m_message(text.trimmed())
 {
     SetArea(MythRect(rect));
-    m_font = font;
 }
 
 void MythUISimpleText::DrawSelf(MythPainter *p, int xoffset, int yoffset,

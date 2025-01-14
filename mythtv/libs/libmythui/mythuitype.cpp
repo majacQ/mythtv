@@ -2,19 +2,26 @@
 // Own header
 #include "mythuitype.h"
 
+// C++ headers
+#include <algorithm>
+#include <utility>
+
 // QT headers
 #include <QDomDocument>
 #include <QEvent>
 #include <QKeyEvent>
-#include <utility>
+#include <QInputMethodEvent>
 
 // XML headers
 #include "xmlparsebase.h"
 
 // Mythbase headers
-#include "mythlogging.h"
-#include "mythmiscutil.h"
-#include "mythmedia.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmedia.h"
+#include "libmythbase/mythrandom.h"
+#ifdef _MSC_VER
+#  include "libmythbase/compat.h"   // random
+#endif
 
 // MythUI headers
 #include "mythgesture.h"
@@ -31,11 +38,6 @@
 #include "mythuiprogressbar.h"
 #include "mythuispinbox.h"
 #include "mythuigroup.h"
-#include "mythgesture.h"
-
-#ifdef _MSC_VER
-#  include "compat.h"   // random
-#endif
 
 #define LOC      QString("MythUIType: ")
 
@@ -54,7 +56,8 @@ MythUIType::MythUIType(QObject *parent, const QString &name)
 
     m_fonts = new FontMap();
 
-    m_borderColor = QColor(MythRandom() % 255, MythRandom()  % 255, MythRandom()  % 255);
+    // for debugging/theming
+    m_borderColor = QColor(MythRandom(0, 255), MythRandom(0, 255), MythRandom(0, 255));
 }
 
 MythUIType::~MythUIType()
@@ -101,7 +104,7 @@ static QObject *qChildHelper(const char *objName, const char *inheritsClass,
                         && qstrcmp(inheritsClass, "QWidget") == 0);
     const QLatin1String oName(objName);
 
-    for (auto *obj : qAsConst(children))
+    for (auto *obj : std::as_const(children))
     {
         if (onlyWidgets)
         {
@@ -110,13 +113,17 @@ static QObject *qChildHelper(const char *objName, const char *inheritsClass,
         }
         else if ((!inheritsClass || obj->inherits(inheritsClass))
                  && (!objName || obj->objectName() == oName))
+        {
             return obj;
+        }
 
-        if (recursiveSearch && (qobject_cast<MythUIGroup *>(obj) != nullptr)
-            && (obj = qChildHelper(objName, inheritsClass,
-                                   recursiveSearch,
-                                   obj->children())))
-            return obj;
+        if (recursiveSearch && (qobject_cast<MythUIGroup *>(obj) != nullptr))
+        {
+            obj = qChildHelper(objName, inheritsClass, recursiveSearch,
+                               obj->children());
+            if (obj != nullptr)
+                return obj;
+        }
     }
 
     return nullptr;
@@ -197,6 +204,18 @@ QList<MythUIType *> *MythUIType::GetAllChildren(void)
     return &m_childrenList;
 }
 
+QList<MythUIType *> MythUIType::GetAllDescendants(void)
+{
+    QList<MythUIType *> descendants {};
+
+    for (const auto & item :std::as_const(m_childrenList))
+    {
+        descendants += item;
+        descendants += item->GetAllDescendants();
+    }
+    return descendants;
+}
+
 /**
  *  \brief Delete all child widgets
  */
@@ -231,9 +250,9 @@ MythUIType *MythUIType::GetChildAt(const QPoint p, bool recursive,
             return nullptr;
 
         /* check all children */
-        QList<MythUIType *>::const_iterator it;
+        QList<MythUIType *>::const_reverse_iterator it;
 
-        for (it = m_childrenList.end() - 1; it != m_childrenList.begin() - 1; --it)
+        for (it = m_childrenList.rbegin(); it != m_childrenList.rend(); it++)
         {
             if (!(*it))
                 continue;
@@ -268,11 +287,11 @@ MythUIType *MythUIType::GetChildAt(const QPoint p, bool recursive,
 
 void MythUIType::ActivateAnimations(MythUIAnimation::Trigger trigger)
 {
-    for (MythUIAnimation* animation : qAsConst(m_animations))
+    for (MythUIAnimation* animation : std::as_const(m_animations))
         if (animation->GetTrigger() == trigger)
             animation->Activate();
 
-    for (MythUIType* uiType : qAsConst(m_childrenList))
+    for (MythUIType* uiType : std::as_const(m_childrenList))
         uiType->ActivateAnimations(trigger);
 }
 
@@ -408,11 +427,7 @@ void MythUIType::HandleAlphaPulse(void)
 
     m_effects.m_alpha += m_alphaChange;
 
-    if (m_effects.m_alpha > m_alphaMax)
-        m_effects.m_alpha = m_alphaMax;
-
-    if (m_effects.m_alpha < m_alphaMin)
-        m_effects.m_alpha = m_alphaMin;
+    m_effects.m_alpha = std::clamp(m_effects.m_alpha, m_alphaMin, m_alphaMax);
 
     // Reached limits so change direction
     if (m_effects.m_alpha == m_alphaMax || m_effects.m_alpha == m_alphaMin)
@@ -921,11 +936,7 @@ void MythUIType::AdjustAlpha(int mode, int alphachange, int minalpha,
     m_alphaMin = minalpha;
     m_alphaMax = maxalpha;
 
-    if (m_effects.m_alpha > m_alphaMax)
-        m_effects.m_alpha = m_alphaMax;
-
-    if (m_effects.m_alpha < m_alphaMin)
-        m_effects.m_alpha = m_alphaMin;
+    m_effects.m_alpha = std::clamp(m_effects.m_alpha, m_alphaMin, m_alphaMax);
 }
 
 void MythUIType::SetAlpha(int newalpha)
@@ -980,6 +991,14 @@ bool MythUIType::keyPressEvent(QKeyEvent * /*event*/)
     return false;
 }
 
+/** \brief Input Method event handler
+ *
+ *  \param event Input Method event
+ */
+bool MythUIType::inputMethodEvent(QInputMethodEvent * /*event*/)
+{
+    return false;
+}
 
 void MythUIType::customEvent(QEvent *event)
 {
@@ -1251,8 +1270,7 @@ bool MythUIType::ParseElement(
         if (m_alphaMax > 255)
             m_effects.m_alpha = m_alphaMax = 255;
 
-        if (m_alphaMin < 0)
-            m_alphaMin = 0;
+        m_alphaMin = std::max(m_alphaMin, 0);
 
         m_alphaChange = element.attribute("change", "5").toInt();
     }
@@ -1431,7 +1449,7 @@ void MythUIType::ConnectDependants(bool recurse)
         operators.clear();
         QString name = it.value();
         QStringList tmp1 = name.split("&");
-        for (const QString& t1 : qAsConst(tmp1))
+        for (const QString& t1 : std::as_const(tmp1))
         {
             QStringList tmp2 = t1.split("|");
 
@@ -1448,7 +1466,7 @@ void MythUIType::ConnectDependants(bool recurse)
         if (dependant)
         {
             dependant->m_dependOperator = operators;
-            for (QString dependeeName : qAsConst(dependees))
+            for (QString dependeeName : std::as_const(dependees))
             {
                 bool reverse = false;
                 if (dependeeName.startsWith('!'))

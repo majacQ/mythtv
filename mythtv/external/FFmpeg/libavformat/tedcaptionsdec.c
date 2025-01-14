@@ -23,6 +23,7 @@
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "subtitles.h"
 
@@ -244,7 +245,7 @@ static int parse_file(AVIOContext *pb, FFDemuxSubtitlesQueue *subs)
             ret = AVERROR_INVALIDDATA;
             goto fail;
         }
-        pkt = ff_subtitles_queue_insert(subs, content.str, content.len, 0);
+        pkt = ff_subtitles_queue_insert_bprint(subs, &content, 0);
         if (!pkt) {
             ret = AVERROR(ENOMEM);
             goto fail;
@@ -277,32 +278,33 @@ static av_cold int tedcaptions_read_header(AVFormatContext *avf)
 {
     TEDCaptionsDemuxer *tc = avf->priv_data;
     AVStream *st = avformat_new_stream(avf, NULL);
+    FFStream *sti;
     int ret, i;
     AVPacket *last;
 
     if (!st)
         return AVERROR(ENOMEM);
 
+    sti = ffstream(st);
     ret = parse_file(avf->pb, &tc->subs);
     if (ret < 0) {
         if (ret == AVERROR_INVALIDDATA)
             av_log(avf, AV_LOG_ERROR, "Syntax error near offset %"PRId64".\n",
                    avio_tell(avf->pb));
-        ff_subtitles_queue_clean(&tc->subs);
         return ret;
     }
     ff_subtitles_queue_finalize(avf, &tc->subs);
     for (i = 0; i < tc->subs.nb_subs; i++)
-        tc->subs.subs[i].pts += tc->start_time;
+        tc->subs.subs[i]->pts += tc->start_time;
 
-    last = &tc->subs.subs[tc->subs.nb_subs - 1];
+    last = tc->subs.subs[tc->subs.nb_subs - 1];
     st->codecpar->codec_type     = AVMEDIA_TYPE_SUBTITLE;
     st->codecpar->codec_id       = AV_CODEC_ID_TEXT;
     avpriv_set_pts_info(st, 64, 1, 1000);
-    st->probe_packets = 0;
+    sti->probe_packets = 0;
     st->start_time    = 0;
     st->duration      = last->pts + last->duration;
-    st->cur_dts       = 0;
+    sti->cur_dts      = 0;
 
     return 0;
 }
@@ -354,11 +356,12 @@ static int tedcaptions_read_seek(AVFormatContext *avf, int stream_index,
                                    min_ts, ts, max_ts, flags);
 }
 
-AVInputFormat ff_tedcaptions_demuxer = {
-    .name           = "tedcaptions",
-    .long_name      = NULL_IF_CONFIG_SMALL("TED Talks captions"),
+const FFInputFormat ff_tedcaptions_demuxer = {
+    .p.name         = "tedcaptions",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("TED Talks captions"),
+    .p.priv_class   = &tedcaptions_demuxer_class,
     .priv_data_size = sizeof(TEDCaptionsDemuxer),
-    .priv_class     = &tedcaptions_demuxer_class,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_header    = tedcaptions_read_header,
     .read_packet    = tedcaptions_read_packet,
     .read_close     = tedcaptions_read_close,

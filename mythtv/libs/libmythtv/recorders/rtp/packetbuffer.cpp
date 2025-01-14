@@ -4,23 +4,16 @@
  * Distributed as part of MythTV under GPL v2 and later.
  */
 
-// POSIX headers
-#include <cstdlib> // for random
+#include <cstdint>
 
 // MythTV headers
+#include "libmythbase/mythrandom.h"
 #include "packetbuffer.h"
-#include "mythmiscutil.h"
 
 PacketBuffer::PacketBuffer(unsigned int bitrate) :
     m_bitrate(bitrate),
-    m_next_empty_packet_key(0ULL)
+    m_next_empty_packet_key(static_cast<uint64_t>(MythRandom()) << 32)
 {
-    while (!m_next_empty_packet_key)
-    {
-        m_next_empty_packet_key =
-            (MythRandom() << 24) ^ (MythRandom() << 16) ^
-            (MythRandom() << 8) ^ MythRandom();
-    }
 }
 
 bool PacketBuffer::HasAvailablePacket(void) const
@@ -47,6 +40,7 @@ UDPPacket PacketBuffer::GetEmptyPacket(void)
         return UDPPacket(m_next_empty_packet_key++);
     }
 
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     UDPPacket packet(*it);
     m_empty_packets.erase(it);
 
@@ -55,7 +49,8 @@ UDPPacket PacketBuffer::GetEmptyPacket(void)
 
 void PacketBuffer::FreePacket(const UDPPacket &packet)
 {
-    uint64_t top = packet.GetKey() & (0xFFFFFFFFULL<<32);
-    if (top == (m_next_empty_packet_key & (0xFFFFFFFFULL<<32)))
+    static constexpr uint64_t k_mask_upper_32 = ~((UINT64_C(1) << (64 - 32)) - 1);
+    uint64_t top = packet.GetKey() & k_mask_upper_32;
+    if (top == (m_next_empty_packet_key & k_mask_upper_32))
         m_empty_packets[packet.GetKey()] = packet;
 }

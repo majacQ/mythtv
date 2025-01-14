@@ -3,15 +3,16 @@
 #include <QWaitCondition>
 
 // Mythtv
-#include "mythcontext.h"
-#include "mythmainwindow.h"
-#include "mythlogging.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/opengl/mythrenderopengl.h"
+
 #include "decoders/avformatdecoder.h"
-#include "opengl/mythrenderopengl.h"
-#include "videobuffers.h"
-#include "mythvaapiinterop.h"
 #include "mythplayerui.h"
 #include "mythvaapicontext.h"
+#include "opengl/mythvaapiinterop.h"
+#include "videobuffers.h"
 
 extern "C" {
 #include "libavutil/hwcontext_vaapi.h"
@@ -129,7 +130,7 @@ inline AVPixelFormat MythVAAPIContext::FramesFormat(AVPixelFormat Format)
 /*! \brief Confirm whether VAAPI support is available given Decoder and Context
 */
 MythCodecID MythVAAPIContext::GetSupportedCodec(AVCodecContext** Context,
-                                                AVCodec** /*Codec*/,
+                                                const AVCodec** /*Codec*/,
                                                 const QString& Decoder,
                                                 uint StreamType)
 {
@@ -140,7 +141,7 @@ MythCodecID MythVAAPIContext::GetSupportedCodec(AVCodecContext** Context,
     if (!Decoder.startsWith("vaapi") || vendor.isEmpty() || qEnvironmentVariableIsSet("NO_VAAPI"))
         return failure;
 
-    const auto * codec   = ff_codec_id_string((*Context)->codec_id);
+    const auto * codec   = avcodec_get_name((*Context)->codec_id);
     const auto * profile = avcodec_profile_name((*Context)->codec_id, (*Context)->profile);
     const auto * pixfmt  = av_get_pix_fmt_name((*Context)->pix_fmt);
 
@@ -443,7 +444,7 @@ QString MythVAAPIContext::HaveVAAPI(bool ReCheck /*= false*/)
         {
             LOG(VB_GENERAL, LOG_INFO, LOC + "Supported/available VAAPI decoders:");
             const auto & profiles = MythVAAPIContext::GetProfiles();
-            for (const auto & profile : qAsConst(profiles))
+            for (const auto & profile : std::as_const(profiles))
             {
                 if (profile.first != MythCodecContext::MJPEG)
                 {
@@ -464,11 +465,7 @@ QString MythVAAPIContext::HaveVAAPI(bool ReCheck /*= false*/)
 
 const VAAPIProfiles& MythVAAPIContext::GetProfiles()
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    static QMutex lock(QMutex::Recursive);
-#else
     static QRecursiveMutex lock;
-#endif
     static bool s_initialised = false;
     static VAAPIProfiles s_profiles;
 
@@ -561,16 +558,16 @@ const VAAPIProfiles& MythVAAPIContext::GetProfiles()
                                     minsize.setHeight(attrlist[k].value.value.i);
                             }
                         }
-                        av_freep(&attrlist);
+                        av_freep(reinterpret_cast<void*>(&attrlist));
                     }
                     vaDestroyConfig(hwctx->display, config);
                     s_profiles.append(VAAPIProfile(VAToMythProfile(profile), QPair<QSize,QSize>(minsize, maxsize)));
                 }
             }
-            av_freep(&entrylist);
+            av_freep(reinterpret_cast<void*>(&entrylist));
         }
     }
-    av_freep(&profilelist);
+    av_freep(reinterpret_cast<void*>(&profilelist));
     av_buffer_unref(&hwdevicectx);
     return s_profiles;
 }
@@ -581,7 +578,7 @@ void MythVAAPIContext::GetDecoderList(QStringList& Decoders)
     if (profiles.isEmpty())
         return;
     Decoders.append("VAAPI:");
-    for (const auto & profile : qAsConst(profiles))
+    for (const auto & profile : std::as_const(profiles))
         if (profile.first != MythCodecContext::MJPEG)
             Decoders.append(MythCodecContext::GetProfileDescription(profile.first, profile.second.second));
 }
@@ -643,8 +640,6 @@ int MythVAAPIContext::FilteredReceiveFrame(AVCodecContext* Context, AVFrame* Fra
                 if (m_filterPriorPTS[0] && m_filterPTSUsed == m_filterPriorPTS[1])
                 {
                     Frame->pts = m_filterPriorPTS[1] + (m_filterPriorPTS[1] - m_filterPriorPTS[0]) / 2;
-                    Frame->scte_cc_len = 0;
-                    Frame->atsc_cc_len = 0;
                     av_frame_remove_side_data(Frame, AV_FRAME_DATA_A53_CC);
                 }
                 else
@@ -662,8 +657,8 @@ int MythVAAPIContext::FilteredReceiveFrame(AVCodecContext* Context, AVFrame* Fra
         if (ret == 0)
         {
             // preserve interlaced flags
-            m_lastInterlaced = Frame->interlaced_frame;
-            m_lastTopFieldFirst = (Frame->top_field_first != 0);
+            m_lastInterlaced = (Frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
+            m_lastTopFieldFirst = (Frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) != 0;
         }
 
         if (ret < 0)

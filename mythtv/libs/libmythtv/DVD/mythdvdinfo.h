@@ -8,12 +8,12 @@
 #include <QCoreApplication>
 
 // MythTV
-#include "mythtvexp.h"
+#include "libmythtv/mythtvexp.h"
 
 // libdvd
 #include "dvdnav/dvdnav.h"
 
-#define DVD_BLOCK_SIZE 2048LL
+static constexpr size_t DVD_BLOCK_SIZE { 2048 };
 using DvdBuffer = std::array<uint8_t,DVD_BLOCK_SIZE>;
 
 class MTV_PUBLIC MythDVDInfo

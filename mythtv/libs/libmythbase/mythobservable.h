@@ -23,7 +23,7 @@ class MBASE_PUBLIC MythObservable
     bool hasListeners(void) { return !m_listeners.isEmpty(); }
 
   private:
-    Q_DISABLE_COPY(MythObservable)
+    Q_DISABLE_COPY_MOVE(MythObservable)
 
   protected:
     QMutex         *m_lock {nullptr};

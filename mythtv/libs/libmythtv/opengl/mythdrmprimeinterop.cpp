@@ -4,8 +4,8 @@
 #include "mythdrmprimeinterop.h"
 
 #ifdef USING_DRM_VIDEO
-#include "mythmainwindow.h"
-#include "platforms/mythdisplaydrm.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/platforms/mythdisplaydrm.h"
 #endif
 
 // FFmpeg
@@ -39,7 +39,7 @@ void MythDRMPRIMEInterop::DeleteTextures(void)
         int count = 0;
         for (auto it = m_openglTextures.constBegin(); it != m_openglTextures.constEnd(); ++it)
         {
-            vector<MythVideoTextureOpenGL*> textures = it.value();
+            std::vector<MythVideoTextureOpenGL*> textures = it.value();
             for (auto & texture : textures)
             {
                 if (texture->m_data)
@@ -67,9 +67,10 @@ MythDRMPRIMEInterop* MythDRMPRIMEInterop::CreateDRM(MythRenderOpenGL* Context, M
     const auto & types = Player->GetInteropTypes();
     if (const auto & drm = types.find(FMT_DRMPRIME); drm != types.cend())
     {
-        for (auto type : drm->second)
-            if ((type == GL_DRMPRIME) || (type == DRM_DRMPRIME))
-                return new MythDRMPRIMEInterop(Context, Player, type);
+        auto matchType = [](auto type){ return (type == GL_DRMPRIME) || (type == DRM_DRMPRIME); };
+        auto it = std::find_if(drm->second.cbegin(), drm->second.cend(), matchType);
+        if (it != drm->second.cend())
+            return new MythDRMPRIMEInterop(Context, Player, *it);
     }
     return nullptr;
 }
@@ -123,12 +124,13 @@ AVDRMFrameDescriptor* MythDRMPRIMEInterop::VerifyBuffer(MythRenderOpenGL *Contex
     return  reinterpret_cast<AVDRMFrameDescriptor*>(Frame->m_buffer);
 }
 
-vector<MythVideoTextureOpenGL*> MythDRMPRIMEInterop::Acquire(MythRenderOpenGL *Context,
-                                                             MythVideoColourSpace *ColourSpace,
-                                                             MythVideoFrame *Frame,
-                                                             FrameScanType Scan)
+std::vector<MythVideoTextureOpenGL*>
+MythDRMPRIMEInterop::Acquire(MythRenderOpenGL *Context,
+                             MythVideoColourSpace *ColourSpace,
+                             MythVideoFrame *Frame,
+                             FrameScanType Scan)
 {
-    vector<MythVideoTextureOpenGL*> result;
+    std::vector<MythVideoTextureOpenGL*> result;
     if (!Frame)
         return result;
 
@@ -146,9 +148,9 @@ vector<MythVideoTextureOpenGL*> MythDRMPRIMEInterop::Acquire(MythRenderOpenGL *C
     bool composed   = static_cast<uint>(drmdesc->nb_layers) == 1 && m_composable;
     auto id         = reinterpret_cast<unsigned long long>(drmdesc);
 
-    auto Separate = [=]()
+    auto Separate = [this, id, drmdesc, Frame, firstpass, ColourSpace]()
     {
-        vector<MythVideoTextureOpenGL*> textures;
+        std::vector<MythVideoTextureOpenGL*> textures;
         if (!m_openglTextures.contains(id))
         {
             textures = CreateTextures(drmdesc, m_openglContext, Frame, true);
@@ -230,7 +232,12 @@ vector<MythVideoTextureOpenGL*> MythDRMPRIMEInterop::Acquire(MythRenderOpenGL *C
         Frame->m_deinterlaceInuse = DEINT_DRIVER | DEINT_BASIC;
         Frame->m_deinterlaceInuse2x = doublerate;
         bool tff = Frame->m_interlacedReverse ? !Frame->m_topFieldFirst : Frame->m_topFieldFirst;
-        result.emplace_back(m_openglTextures[id].at(Scan == kScan_Interlaced ? (tff ? 1 : 0) : tff ? 0 : 1));
+        int value {0};
+        if (Scan == kScan_Interlaced)
+            value = tff ? 1 : 0;
+        else
+            value = tff ? 0 : 1;
+        result.emplace_back(m_openglTextures[id].at(value));
     }
 
     return result;

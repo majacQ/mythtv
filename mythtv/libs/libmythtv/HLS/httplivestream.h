@@ -3,11 +3,9 @@
 
 #include <QString>
 
-#include "datacontracts/liveStreamInfoList.h"
+#include "libmythtv/mythframe.h"
 
-#include "mythframe.h"
-
-enum HTTPLiveStreamStatus {
+enum HTTPLiveStreamStatus : std::int8_t {
     kHLSStatusUndefined    = -1,
     kHLSStatusQueued       = 0,
     kHLSStatusStarting     = 1,
@@ -71,13 +69,6 @@ class MTV_PUBLIC HTTPLiveStream
     static QString StatusToString(HTTPLiveStreamStatus status);
 
     bool CheckStop(void);
-
-           DTC::LiveStreamInfo     *StartStream(void);
-    static DTC::LiveStreamInfo     *StopStream(int id);
-    static bool                     RemoveStream(int id);
-
-           DTC::LiveStreamInfo     *GetLiveStreamInfo(DTC::LiveStreamInfo *info = nullptr);
-    static DTC::LiveStreamInfoList *GetLiveStreamInfoList( const QString &FileName = "");
 
  protected:
     bool        m_writing          {false};

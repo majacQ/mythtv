@@ -4,22 +4,22 @@
 <context>
     <name>MythControls</name>
     <message>
-        <location filename="../mythnetvision/main.cpp" line="71"/>
+        <location filename="../mythnetvision/mythnetvision.cpp" line="69"/>
         <source>Internet Television Client - Search</source>
         <translation>Internet TV Client - Suchen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/main.cpp" line="73"/>
+        <location filename="../mythnetvision/mythnetvision.cpp" line="71"/>
         <source>Internet Television Client - Site/Tree View</source>
         <translation>Internet TV Client - Seiten/Baum-Ansicht</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/main.cpp" line="76"/>
+        <location filename="../mythnetvision/mythnetvision.cpp" line="74"/>
         <source>Previous Page</source>
         <translation>Vorherige Seite</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/main.cpp" line="78"/>
+        <location filename="../mythnetvision/mythnetvision.cpp" line="76"/>
         <source>Next Page</source>
         <translation>Nächste Seite</translation>
     </message>
@@ -27,29 +27,29 @@
 <context>
     <name>NetBase</name>
     <message>
-        <location filename="../mythnetvision/netbase.cpp" line="55"/>
+        <location filename="../mythnetvision/netbase.cpp" line="54"/>
         <source>Downloading Video...</source>
         <translation>Lade Video herunter...</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netbase.cpp" line="148"/>
+        <location filename="../mythnetvision/netbase.cpp" line="147"/>
         <source>No browser command set! MythNetTree needs MythBrowser installed to display the video.</source>
-        <translation>Kein Browserkommando angegeben! MythNetTree benötigt MythBrowser um das Video darzustellen.</translation>
+        <translation>Kein Browserbefehl angegeben! MythNetTree benötigt MythBrowser um das Video darzustellen.</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netbase.cpp" line="185"/>
+        <location filename="../mythnetvision/netbase.cpp" line="184"/>
         <source>Are you sure you want to delete this file?</source>
-        <translation>Sind Sie sicher, dass Sie die Datei löschen wollen?</translation>
+        <translation>Sind Sie sicher, dass Sie diese Datei löschen wollen?</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netbase.cpp" line="242"/>
+        <location filename="../mythnetvision/netbase.cpp" line="245"/>
         <source>Downloading Video...
 (%1 of %2 MB)</source>
         <translation>Lade Video herunter...
-(%1 of %2 MB)</translation>
+(%1 von %2 MB)</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netbase.cpp" line="272"/>
+        <location filename="../mythnetvision/netbase.cpp" line="275"/>
         <source>Error downloading video to backend.</source>
         <translation>Fehler beim Herunterladen des Videos zum Backend.</translation>
     </message>
@@ -65,75 +65,75 @@
 <context>
     <name>NetSearch</name>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="171"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="169"/>
         <source>Search Options</source>
         <translation>Suchoptionen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="188"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="186"/>
         <source>Stream Video</source>
         <translation>Video streamen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="190"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="188"/>
         <source>Open Web Link</source>
         <translation>Web Link öffnen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="206"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="204"/>
         <source>Play</source>
         <translation>Abspielen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="211"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="209"/>
         <source>Save This Video</source>
         <translation>Dieses Video speichern</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="220"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="218"/>
         <source>Delete</source>
         <translation>Löschen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="226"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="224"/>
         <source>Previous Page</source>
         <translation>Vorherige Seite</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="228"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="226"/>
         <source>Next Page</source>
         <translation>Nächste Seite</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="230"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="228"/>
         <source>Skip 10 Pages Back</source>
         <translation>Springe 10 Seiten zurück</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="234"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="232"/>
         <source>Skip 10 Pages Forward</source>
         <translation>Springe 10 Seiten vor</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="237"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="235"/>
         <source>Manage Search Scripts</source>
         <translation>Suchskripte verwalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="285"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="283"/>
         <source>Searching %1 for &quot;%2&quot;...</source>
         <translation>Suche %1 für &quot;%2&quot;...</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="309"/>
-        <location filename="../mythnetvision/netsearch.cpp" line="328"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="307"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="325"/>
         <source>Changing to page %1 of search &quot;%2&quot;...</source>
         <translation>Wechsle zu Seite %1 der Suche &quot;%2&quot;...</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/netsearch.cpp" line="405"/>
+        <location filename="../mythnetvision/netsearch.cpp" line="401"/>
         <source>Timed out waiting for query to finish.  API might be down.</source>
-        <translation>Zeitüberschreitung beim Warten auf das Ende der Abfrage. API könnte down sein.</translation>
+        <translation>Zeitüberschreitung beim Warten auf das Ende der Abfrage. API könnte unerreichbar sein.</translation>
     </message>
     <message>
         <source>No browser command set! MythNetVision needs MythBrowser installed to display the video.</source>
@@ -182,95 +182,95 @@
         <translation>Heruntergeladene Dateien</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="399"/>
+        <location filename="../mythnetvision/nettree.cpp" line="398"/>
         <source>Playback/Download Options</source>
         <translation>Wiedergabe/Download-Einstellungen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="423"/>
+        <location filename="../mythnetvision/nettree.cpp" line="422"/>
         <source>Stream Video</source>
         <translation>Video streamen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="424"/>
+        <location filename="../mythnetvision/nettree.cpp" line="423"/>
         <source>Open Web Link</source>
         <translation>Web Link öffnen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="427"/>
+        <location filename="../mythnetvision/nettree.cpp" line="426"/>
         <source>Save This Video</source>
         <translation>Dieses Video speichern</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="430"/>
+        <location filename="../mythnetvision/nettree.cpp" line="429"/>
         <source>Scan/Manage Subscriptions</source>
         <translation>Abonnements durchsuchen/verwalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="431"/>
+        <location filename="../mythnetvision/nettree.cpp" line="430"/>
         <source>Change View</source>
         <translation>Ansicht ändern</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="444"/>
+        <location filename="../mythnetvision/nettree.cpp" line="443"/>
         <source>View Options</source>
         <translation>Einstellungen anzeigen</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="449"/>
+        <location filename="../mythnetvision/nettree.cpp" line="448"/>
         <source>Switch to List View</source>
         <translation>Zur Listenansicht wechseln</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="451"/>
+        <location filename="../mythnetvision/nettree.cpp" line="450"/>
         <source>Switch to Gallery View</source>
-        <translation>Zur Gallerieansicht wechseln</translation>
+        <translation>Zur Galerieansicht wechseln</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="453"/>
+        <location filename="../mythnetvision/nettree.cpp" line="452"/>
         <source>Switch to Browse View</source>
-        <translation>Zur Browse-Ansicht wechseln</translation>
+        <translation>Zur Browseransicht wechseln</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="460"/>
+        <location filename="../mythnetvision/nettree.cpp" line="459"/>
         <source>Subscription Management</source>
         <translation>Abonnements verwalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="464"/>
+        <location filename="../mythnetvision/nettree.cpp" line="463"/>
         <source>Update Site Maps</source>
         <translation>Site Maps aktualisieren</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="465"/>
+        <location filename="../mythnetvision/nettree.cpp" line="464"/>
         <source>Update RSS</source>
         <translation>RSS aktualisieren</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="466"/>
+        <location filename="../mythnetvision/nettree.cpp" line="465"/>
         <source>Manage Site Subscriptions</source>
         <translation>Seitenabonnements verwalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="467"/>
+        <location filename="../mythnetvision/nettree.cpp" line="466"/>
         <source>Manage RSS Subscriptions</source>
         <translation>RSS Abonnements verwalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="470"/>
+        <location filename="../mythnetvision/nettree.cpp" line="469"/>
         <source>Enable Automatic Site Updates</source>
         <translation>Automatische Seitenaktualisierungen einschalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="475"/>
+        <location filename="../mythnetvision/nettree.cpp" line="474"/>
         <source>Disable Automatic Site Updates</source>
         <translation>Automatische Seitenaktualisierungen ausschalten</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="530"/>
-        <location filename="../mythnetvision/nettree.cpp" line="546"/>
-        <location filename="../mythnetvision/nettree.cpp" line="573"/>
-        <location filename="../mythnetvision/nettree.cpp" line="615"/>
+        <location filename="../mythnetvision/nettree.cpp" line="529"/>
+        <location filename="../mythnetvision/nettree.cpp" line="545"/>
+        <location filename="../mythnetvision/nettree.cpp" line="572"/>
+        <location filename="../mythnetvision/nettree.cpp" line="614"/>
         <source>Back</source>
         <translation>Zurück</translation>
     </message>
@@ -287,12 +287,12 @@
         <translation type="vanished">Lade Video herunter...</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="899"/>
+        <location filename="../mythnetvision/nettree.cpp" line="898"/>
         <source>Updating RSS.  This could take a while...</source>
         <translation>Aktualisiere RSS. Dies kann einige Zeit dauern...</translation>
     </message>
     <message>
-        <location filename="../mythnetvision/nettree.cpp" line="913"/>
+        <location filename="../mythnetvision/nettree.cpp" line="912"/>
         <source>Updating Site Maps.  This could take a while...</source>
         <translation>Aktualisiere Site Maps. Dies kann einige Zeit dauern...</translation>
     </message>
@@ -337,57 +337,57 @@
     <message>
         <location filename="themestrings.h" line="111"/>
         <source>Season and Episode:</source>
-        <translation type="unfinished"></translation>
+        <translation>Staffel und Folge:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="112"/>
         <source>Select icon image</source>
-        <translation type="unfinished"></translation>
+        <translation>Icon auswählen</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="116"/>
         <source>Size:</source>
-        <translation type="unfinished"></translation>
+        <translation>Größe:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="118"/>
         <source>Stream type:</source>
-        <translation type="unfinished"></translation>
+        <translation>Stream-Typ:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="122"/>
         <source>Unknown</source>
-        <translation type="unfinished"></translation>
+        <translation>Unbekannt</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="125"/>
         <source>VIDEO GALLERY</source>
-        <translation type="unfinished"></translation>
+        <translation>VIDEO GALERIE</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="126"/>
         <source>Video Browser</source>
-        <translation type="unfinished"></translation>
+        <translation>Videobrowser</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="127"/>
         <source>Video Gallery</source>
-        <translation type="unfinished"></translation>
+        <translation>Videogalerie</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="128"/>
         <source>Video List</source>
-        <translation type="unfinished"></translation>
+        <translation>Videoliste</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="129"/>
         <source>Video Search</source>
-        <translation type="unfinished"></translation>
+        <translation>Videosuche</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="130"/>
         <source>Video length:</source>
-        <translation type="unfinished"></translation>
+        <translation>Videolänge:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="131"/>
@@ -408,157 +408,157 @@
         <location filename="themestrings.h" line="5"/>
         <source>%00x00| - %%&quot;|SUBTITLE|&quot;
 %%|RATING| - %%DESCRIPTION%</source>
-        <translation type="unfinished"></translation>
+        <translation>%00x00| - %%&quot;|SUBTITLE|&quot;\n%%|RATING| - %%DESCRIPTION%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="6"/>
         <source>%00x00| - %%&quot;|SUBTITLE|&quot;
 %%|YEARSTARS| - %%DESCRIPTION%</source>
-        <translation type="unfinished"></translation>
+        <translation>%00x00| - %%&quot;|SUBTITLE|&quot;\n%%|YEARSTARS| - %%DESCRIPTION%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="9"/>
         <source>%TITLE%% |SUBTITLE%</source>
-        <translation type="unfinished"></translation>
+        <translation>%TITLE%% |SUBTITLE%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="10"/>
         <source>%TITLE| %%~ |AUTHOR%</source>
-        <translation type="unfinished"></translation>
+        <translation>%TITLE| %%~ |AUTHOR%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="11"/>
         <source>%Userrating: |RATING|
 %%DESCRIPTION%</source>
-        <translation type="unfinished"></translation>
+        <translation>%Bewertung: |RATING|\n%%DESCRIPTION%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="12"/>
         <source>%&quot;|SUBTITLE|&quot;
 %%DESCRIPTION%</source>
-        <translation type="unfinished"></translation>
+        <translation>%&quot;|SUBTITLE|&quot;\n%%DESCRIPTION%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="13"/>
         <source>%&quot;|SUBTITLE|&quot;
 
 %%DESCRIPTION%</source>
-        <translation type="unfinished"></translation>
+        <translation>%&quot;|SUBTITLE|&quot;\n\n%%DESCRIPTION%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="14"/>
         <source>%author%%, |date%</source>
-        <translation type="unfinished"></translation>
+        <translation>%author%%, |date%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="15"/>
         <source>%resolution%%, |filesize_str%% (|length|)%</source>
-        <translation type="unfinished"></translation>
+        <translation>%resolution%%, |filesize_str%% (|length|)%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="16"/>
         <source>%resolution|, %%filesize_str| %</source>
-        <translation type="unfinished"></translation>
+        <translation>%resolution|, %%filesize_str| %</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="17"/>
         <source>%|(RATING)%</source>
-        <translation type="unfinished"></translation>
+        <translation>%|(RATING)%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="23"/>
         <source>Browse Internet video</source>
-        <translation type="unfinished"></translation>
+        <translation>Internet-Video suchen</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="28"/>
         <source>Can&apos;t find any search scripts!  This usually indicates missing search script prerequisities.  Try running a script from the command line.</source>
-        <translation type="unfinished"></translation>
+        <translation>Kann keine Suchskripte finden!  Das deutet auf nicht erfüllte Voraussetzungen für Suchskripte hin.  Versuchen Sie ein Skript von der Kommandozeile zu starten.</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="29"/>
         <source>Can&apos;t find any search scripts! This usually indicates missing search script prerequisites. Try running a script from the command line.</source>
-        <translation type="unfinished"></translation>
+        <translation>Kann keine Suchskripte finden! Das deutet auf nicht erfüllte Voraussetzungen für Suchskripte hin. Versuchen Sie ein Skript von der Kommandozeile zu starten.</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="35"/>
         <source>Created by %author%%, |date%</source>
-        <translation type="unfinished"></translation>
+        <translation>Erstellt von %author%%, |date%</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="36"/>
         <source>Date Posted:</source>
-        <translation type="unfinished"></translation>
+        <translation>Einstelldatum:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="37"/>
         <source>Date:</source>
-        <translation type="unfinished"></translation>
+        <translation>Datum:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="45"/>
         <source>Edit RSS Subscriptions</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Abonnements bearbeiten</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="48"/>
         <source>Episode %1</source>
-        <translation type="unfinished"></translation>
+        <translation>Folge %1</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="49"/>
         <source>Episode:</source>
-        <translation type="unfinished"></translation>
+        <translation>Folge:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="51"/>
         <source>Feed Description:</source>
-        <translation type="unfinished"></translation>
+        <translation>Feed-Beschreibung:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="54"/>
         <source>File Size:</source>
-        <translation type="unfinished"></translation>
+        <translation>Dateigröße:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="55"/>
         <source>INTERNET VIDEO BROWSER</source>
-        <translation type="unfinished"></translation>
+        <translation>INTERNET VIDEOBROWSER</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="56"/>
         <source>INTERNET VIDEOS LIST</source>
-        <translation type="unfinished"></translation>
+        <translation>INTERNET VIDEOLISTE</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="61"/>
         <source>Manage RSS Subscribtions</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Abonnements verwalten</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="68"/>
         <source>Netvision Browse View</source>
-        <translation type="unfinished"></translation>
+        <translation>Netvision Browseransicht</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="69"/>
         <source>Netvision Gallery View</source>
-        <translation type="unfinished"></translation>
+        <translation>Netvision Galerieansicht</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="70"/>
         <source>Netvision List View</source>
-        <translation type="unfinished"></translation>
+        <translation>Netvision Listenansicht</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="71"/>
         <source>Netvision Search</source>
-        <translation type="unfinished"></translation>
+        <translation>Netvision Suche</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="72"/>
         <source>Netvision Site Grabbers</source>
-        <translation type="unfinished"></translation>
+        <translation>Netvision Webseiten-Grabber</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="75"/>
@@ -568,22 +568,22 @@
     <message>
         <location filename="themestrings.h" line="77"/>
         <source>Not applicable</source>
-        <translation type="unfinished"></translation>
+        <translation>Nicht anwendbar</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="78"/>
         <source>Not available</source>
-        <translation type="unfinished"></translation>
+        <translation>Nicht verfügbar</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="79"/>
         <source>Ok</source>
-        <translation type="unfinished"></translation>
+        <translation>Ok</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="80"/>
         <source>Page</source>
-        <translation type="unfinished"></translation>
+        <translation>Seite</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="81"/>
@@ -593,82 +593,82 @@
     <message>
         <location filename="themestrings.h" line="82"/>
         <source>Posted:</source>
-        <translation type="unfinished"></translation>
+        <translation>Eingestellt:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="84"/>
         <source>Preview</source>
-        <translation type="unfinished"></translation>
+        <translation>Vorschau</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="85"/>
         <source>RSS Author:</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Autor:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="86"/>
         <source>RSS Editor</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Redakteur</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="87"/>
         <source>RSS Feed Name:</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Feed-Name:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="88"/>
         <source>RSS Overview</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Übersicht</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="89"/>
         <source>RSS Subscriptions</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS Abonnements</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="90"/>
         <source>RSS URL:</source>
-        <translation type="unfinished"></translation>
+        <translation>RSS URL:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="92"/>
         <source>Rating:</source>
-        <translation type="unfinished"></translation>
+        <translation>Bewertung:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="95"/>
         <source>Resolution</source>
-        <translation type="unfinished"></translation>
+        <translation>Auflösung</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="96"/>
         <source>Resolution:</source>
-        <translation type="unfinished"></translation>
+        <translation>Auflösung:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="98"/>
         <source>Runtime:</source>
-        <translation type="unfinished"></translation>
+        <translation>Laufzeit:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="100"/>
         <source>SEARCH INTERNET VIDEOS</source>
-        <translation type="unfinished"></translation>
+        <translation>INTERNET VIDEOS SUCHEN</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="103"/>
         <source>Search Internet Videos</source>
-        <translation type="unfinished"></translation>
+        <translation>Internet Videos suchen</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="105"/>
         <source>Search Site:</source>
-        <translation type="unfinished"></translation>
+        <translation>Seite durchsuchen:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="106"/>
         <source>Search String:</source>
-        <translation type="unfinished"></translation>
+        <translation>Suchtext:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="110"/>
@@ -678,7 +678,7 @@
     <message>
         <location filename="themestrings.h" line="136"/>
         <source>rating</source>
-        <translation type="unfinished"></translation>
+        <translation>Bewertung</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="21"/>
@@ -710,7 +710,7 @@
         <source>Type the URL to an RSS 2.0 media feed below.  If editing an existing feed, modify any of the values you like.  Press &quot;Save&quot; to save/subscribe.
 
 For new subscriptions, you can simply enter the URL and click &quot;Save.&quot;</source>
-        <translation>Geben Sie die URL zu einem RSS 2.0 Fedd unten ein. Wenn Sie einen existierenden Feed bearbeiten können Sie alle Werte ändern. Wählen Sie &quot;Speichern&quot; zum Speichern.
+        <translation>Geben Sie die URL zu einem RSS 2.0 Fedd unten ein. Wenn Sie einen existierenden Feed bearbeiten, können Sie alle Werte ändern. Wählen Sie &quot;Speichern&quot; zum Speichern/Anmelden.
 
 Für neue Abonnements brauchen Sie nur die URL einzugeben und auf &quot;Speichern&quot; zu klicken.</translation>
     </message>
@@ -845,12 +845,12 @@ To add a site, press MENU, then choose &quot;Scan/Manage Subscriptions,&quot; th
     <message>
         <location filename="themestrings.h" line="107"/>
         <source>Search Term:</source>
-        <translation>Suche Begriff:</translation>
+        <translation>Suchbegriff:</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="117"/>
         <source>Size: %1</source>
-        <translation>Grösse: %1</translation>
+        <translation>Größe: %1</translation>
     </message>
     <message>
         <location filename="themestrings.h" line="40"/>
@@ -968,7 +968,7 @@ Für neue Abonnements reicht es wenn Sie die URL eingeben und &quot;Speichern&qu
     <message>
         <location filename="themestrings.h" line="59"/>
         <source>Internet Video List</source>
-        <translation>Liste Internetvideos</translation>
+        <translation>Internetvideoliste</translation>
     </message>
     <message>
         <source>You haven&apos;t added any Sites/RSS Feeds yet!  To add a site,press MENU,then choose &quot;Scan/Manage Subscriptions,&quot; then &quot;Manage Site Subscriptions.&quot;</source>
@@ -1015,7 +1015,7 @@ Autor: |AUTHOR%</translation>
     <message>
         <location filename="themestrings.h" line="25"/>
         <source>Browse highlights and entire sites</source>
-        <translation>Highlights und ganze Seiten browsen</translation>
+        <translation>Highlights und ganze Seiten durchsuchen</translation>
     </message>
 </context>
 <context>

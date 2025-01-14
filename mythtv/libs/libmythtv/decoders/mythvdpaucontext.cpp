@@ -1,10 +1,12 @@
+// MythTV other libs
+#include "libmythui/mythmainwindow.h"
+
 // MythTV
-#include "mythmainwindow.h"
 #include "avformatdecoder.h"
-#include "mythvdpauinterop.h"
-#include "mythvdpauhelper.h"
-#include "mythvdpaucontext.h"
+#include "decoders/mythvdpaucontext.h"
+#include "decoders/mythvdpauhelper.h"
 #include "mythplayerui.h"
+#include "opengl/mythvdpauinterop.h"
 
 // FFmpeg
 extern "C" {
@@ -68,7 +70,7 @@ int MythVDPAUContext::InitialiseContext(AVCodecContext* Context)
         return -1;
     }
 
-    // allocate the hardware frames context
+    // Allocate the hardware frames context
     Context->hw_frames_ctx = av_hwframe_ctx_alloc(hwdeviceref);
     if (!Context->hw_frames_ctx)
     {
@@ -116,7 +118,7 @@ int MythVDPAUContext::InitialiseContext(AVCodecContext* Context)
 }
 
 MythCodecID MythVDPAUContext::GetSupportedCodec(AVCodecContext **Context,
-                                                AVCodec ** /*Codec*/,
+                                                const AVCodec ** /*Codec*/,
                                                 const QString &Decoder,
                                                 uint StreamType)
 {
@@ -131,13 +133,13 @@ MythCodecID MythVDPAUContext::GetSupportedCodec(AVCodecContext **Context,
         if (!FrameTypeIsSupported(*Context, FMT_VDPAU))
             return failure;
 
-    QString codec   = ff_codec_id_string((*Context)->codec_id);
+    QString codec   = avcodec_get_name((*Context)->codec_id);
     QString profile = avcodec_profile_name((*Context)->codec_id, (*Context)->profile);
     QString pixfmt  = av_get_pix_fmt_name((*Context)->pix_fmt);
 
     // VDPAU only supports 8bit 420p:(
     VideoFrameType type = MythAVUtil::PixelFormatToFrameType((*Context)->pix_fmt);
-    bool vdpau = (type == FMT_YV12) && MythVDPAUHelper::HaveVDPAU() &&
+    bool vdpau = (type == FMT_YV12 || type == FMT_VDPAU) && MythVDPAUHelper::HaveVDPAU() &&
                  (decodeonly ? codec_is_vdpau_dechw(success) : codec_is_vdpau_hw(success));
 
     if (vdpau)
@@ -146,7 +148,7 @@ MythCodecID MythVDPAUContext::GetSupportedCodec(AVCodecContext **Context,
                 MythCodecContext::FFmpegToMythProfile((*Context)->codec_id, (*Context)->profile);
         const VDPAUProfiles& profiles = MythVDPAUHelper::GetProfiles();
         vdpau = false;
-        for (auto vdpauprofile : profiles)
+        for (const auto& vdpauprofile : profiles)
         {
             bool match = vdpauprofile.first == mythprofile;
             if (match)

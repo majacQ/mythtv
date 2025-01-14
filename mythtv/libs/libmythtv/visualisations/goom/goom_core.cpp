@@ -1,11 +1,7 @@
 #include "../config.h"
-#ifdef HAVE_STDINT_H
-#include <cstdint>
-#endif
 
-#include <cinttypes>
+#include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <random>
 
@@ -19,9 +15,8 @@
 
 //#define VERBOSE
 
-#define STOP_SPEED 128
-
-#define TIME_BTW_CHG 300
+static constexpr gint32  STOP_SPEED   { 128 };
+static constexpr int16_t TIME_BTW_CHG { 300 };
 
 /**-----------------------------------------------------**
  **  SHARED DATA                                        **
@@ -43,8 +38,8 @@ struct GoomState {
 	int m_rangeMax;
 };
 
-#define STATES_NB 8
-#define STATES_RANGEMAX 510
+static constexpr size_t   STATES_NB       {   8 };
+static constexpr uint16_t STATES_RANGEMAX { 510 };
 const std::array<const GoomState,STATES_NB> kStates {{
 	{1,0,0,1,4, 000, 100},
 	{1,0,0,1,1, 101, 140}, // turned on drawScope
@@ -82,13 +77,14 @@ void goom_init (guint32 resx, guint32 resy, int cinemascope) {
 	c_offset = c_black_height * resx;
 	c_resoly = resy - c_black_height * 2;
 
-	pixel = (guint32 *) malloc (buffsize * sizeof (guint32) + 128);
-	back = (guint32 *) malloc (buffsize * sizeof (guint32) + 128);
+	pixel = (guint32 *) malloc ((buffsize * sizeof (guint32)) + 128);
+	back = (guint32 *) malloc ((buffsize * sizeof (guint32)) + 128);
 	//RAND_INIT ();
-        srand ((uintptr_t) pixel);
-        if (!rand_tab) rand_tab = (int *) malloc (NB_RAND * sizeof(int)) ;
-        rand_pos = 1 ;
-        while (rand_pos != 0) rand_tab [rand_pos++] = goom_rand () ;
+	srand ((uintptr_t) pixel);
+	if (!rand_tab) rand_tab = (int *) malloc (NB_RAND * sizeof(int)) ;
+	for (size_t i = 0; i < NB_RAND; i++)
+		rand_tab[i] = goom_rand();
+	rand_pos = 0;
                 
 	cycle = 0;
 
@@ -121,10 +117,10 @@ void goom_set_resolution (guint32 resx, guint32 resy, int cinemascope) {
 	resoly = resy;
 	buffsize = resx * resy;
 
-	pixel = (guint32 *) malloc (buffsize * sizeof (guint32) + 128);
-	memset (pixel, 0, buffsize * sizeof (guint32) + 128);
-	back = (guint32 *) malloc (buffsize * sizeof (guint32) + 128);
-	memset (back, 0,  buffsize * sizeof (guint32) + 128);
+	pixel = (guint32 *) malloc ((buffsize * sizeof (guint32)) + 128);
+	memset (pixel, 0, (buffsize * sizeof (guint32)) + 128);
+	back = (guint32 *) malloc ((buffsize * sizeof (guint32)) + 128);
+	memset (back, 0,  (buffsize * sizeof (guint32)) + 128);
 	p1 = (guint32 *) ((1 + ((uintptr_t) (pixel)) / 128) * 128);
 	p2 = (guint32 *) ((1 + ((uintptr_t) (back)) / 128) * 128);
 
@@ -136,14 +132,13 @@ void goom_set_resolution (guint32 resx, guint32 resy, int cinemascope) {
 
 guint32 * goom_update (GoomDualData& data, int forceMode) {
 	static int s_lockVar = 0;		// pour empecher de nouveaux changements
-	static int s_goomVar = 0;		// boucle des gooms
 	static int s_totalGoom = 0;		// nombre de gooms par seconds
 	static int s_aGoom = 0;			// un goom a eu lieu..
 	static int s_aBigGoom = 0;		// un big goom a eu lieu..
 	static int s_speedVar = 0;		// vitesse des particules
 
 	// duree de la transition entre afficher les lignes ou pas
-#define DRAWLINES 80
+	static constexpr int DRAWLINES { 80 };
 	static int s_lineMode = DRAWLINES;	// l'effet lineaire a dessiner
 	static int s_nombreCddc = 0;		// nombre de Cycle Depuis Dernier Changement
 	static int s_accelVar=0;		// acceleration des particules
@@ -152,14 +147,14 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 	// des points
 	static int s_ifsIncr = 1;		// dessiner l'ifs (0 = non: > = increment)
 	static int s_decayIfs = 0;		// disparition de l'ifs
-	static int s_recayIfs = 0;		// dédisparition de l'ifs
+	static int s_recayIfs = 0;		// dÃ©disparition de l'ifs
 
-#define SWITCHMULT (29.0F/30.0F)
-#define SWITCHINCR 0x7f
+	static constexpr float SWITCHMULT { 29.0F/30.0F };
+	static constexpr int   SWITCHINCR { 0x7f };
 	static float s_switchMult = 1.0F;
 	static int s_switchIncr = SWITCHINCR;
 
-	static char s_goomLimit = 2;		// sensibilité du goom
+	static char s_goomLimit = 2;		// sensibilitÃ© du goom
 	static ZoomFilterData s_zfd = {
 		127, 8, 16,
 		1, 1, false, NORMAL_MODE,
@@ -175,8 +170,7 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 	/* ! etude du signal ... */
 	int incvar = 0;				// volume du son
 	for (int i = 0; i < 512; i++) {
-		if (incvar < data[0][i])
-			incvar = data[0][i];
+		incvar = std::max<int>(incvar, data[0][i]);
 	}
 
 	int i = s_accelVar;
@@ -186,8 +180,7 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 		s_accelVar--;
 		if (s_speedVar > 20)
 			s_accelVar--;
-		if (s_speedVar > 40)
-			s_speedVar = 40;
+		s_speedVar = std::min(s_speedVar, 40);
 	}
 	s_accelVar--;
 
@@ -203,18 +196,14 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 		s_speedVar = (s_speedVar*7)/8;
 	}
 
-	if (s_speedVar < 0)
-		s_speedVar = 0;
-	if (s_speedVar > 50)
-		s_speedVar = 50;
+	s_speedVar = std::clamp(s_speedVar, 0, 50);
 
 
 	/* ! calcul du deplacement des petits points ... */
 
-        // largfactor: elargissement de l'intervalle d'évolution
+        // largfactor: elargissement de l'intervalle d'Ã©volution
 	float largfactor = ((float) s_speedVar / 40.0F + (float) incvar / 50000.0F) / 1.5F;
-	if (largfactor > 1.5F)
-		largfactor = 1.5F;
+	largfactor = std::min(largfactor, 1.5F);
 
 	s_decayIfs--;
 	if (s_decayIfs > 0)
@@ -239,28 +228,28 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 			s_loopVar += s_speedVar*2/3 + 1;
 
 			pointFilter (p1 + c_offset, YELLOW,
-                                     ((pointWidth - 6.0F) * largfactor + 5.0F),
-                                     ((pointHeight - 6.0F) * largfactor + 5.0F),
-                                     i * 152.0F, 128.0F, s_loopVar + i * 2032);
+                                     (((pointWidth - 6.0F) * largfactor) + 5.0F),
+                                     (((pointHeight - 6.0F) * largfactor) + 5.0F),
+                                     i * 152.0F, 128.0F, s_loopVar + (i * 2032));
 			pointFilter (p1 + c_offset, ORANGE,
-                                     ((pointWidth  / 2.0F) * largfactor) / i + 10.0F * i,
-                                     ((pointHeight / 2.0F) * largfactor) / i + 10.0F * i,
+                                     (((pointWidth  / 2.0F) * largfactor) / i) + (10.0F * i),
+                                     (((pointHeight / 2.0F) * largfactor) / i) + (10.0F * i),
                                      96.0F, i * 80.0F, s_loopVar / i);
 			pointFilter (p1 + c_offset, VIOLET,
-                                     ((pointHeight / 3.0F + 5.0F) * largfactor) / i + 10.0F * i,
-                                     ((pointHeight / 3.0F + 5.0F) * largfactor) / i + 10.0F * i,
+                                     (((pointHeight / 3.0F + 5.0F) * largfactor) / i) + (10.0F * i),
+                                     (((pointHeight / 3.0F + 5.0F) * largfactor) / i) + (10.0F * i),
                                      i + 122.0F, 134.0F, s_loopVar / i);
 			pointFilter (p1 + c_offset, BLACK,
-                                     ((pointHeight / 3.0F) * largfactor + 20.0F),
-                                     ((pointHeight / 3.0F) * largfactor + 20.0F),
+                                     (((pointHeight / 3.0F) * largfactor) + 20.0F),
+                                     (((pointHeight / 3.0F) * largfactor) + 20.0F),
                                      58.0F, i * 66.0F, s_loopVar / i);
 			pointFilter (p1 + c_offset, WHITE,
                                      (pointHeight * largfactor + 10.0F * i) / i,
                                      (pointHeight * largfactor + 10.0F * i) / i,
-                                     66.0F, 74.0F, s_loopVar + i * 500); }
+                                     66.0F, 74.0F, s_loopVar + (i * 500)); }
 	}
 
-	// par défaut pas de changement de zoom
+	// par dÃ©faut pas de changement de zoom
 	pzfd = nullptr;
 
 	/* 
@@ -322,7 +311,7 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 			s_zfd.hypercosEffect = iRAND (2);
 			// Checked Fedora26 get-plugins-good sources.
 			// No break statement there.
-			[[clang::fallthrough]];
+			[[fallthrough]];
                     case 13:
                     case 20:
                     case 21:
@@ -404,14 +393,16 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 		if ((s_accelVar > s_goomLimit) || (s_accelVar < -s_goomLimit)) {
 			static int s_rndn = 0;
 			static int s_blocker = 0;
-			s_goomVar++;
 
 			/* SELECTION OF THE GOOM STATE */
 			if ((!s_blocker)&&(iRAND(3))) {
 				s_rndn = iRAND(STATES_RANGEMAX);
 				s_blocker = 3;
 			}
-			else if (s_blocker) s_blocker--;
+			else if (s_blocker)
+			{
+			    s_blocker--;
+			}
 
                         (void)s_rndn; // Used in the lambda. Quiet warning.
                         auto goodstate = [&](auto state)
@@ -578,7 +569,6 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 			s_zfd.vitesse = STOP_SPEED - 1;
 			s_zfd.pertedec = 8;
 			s_zfd.sqrtperte = 16;
-			s_goomVar = 1;
 			s_lockVar += 50;
 			s_switchIncr = SWITCHINCR;
 			s_switchMult = 1.0F;
@@ -593,7 +583,6 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 		s_zfd.vitesse += 3;
 		s_zfd.pertedec = 8;
 		s_zfd.sqrtperte = 16;
-		s_goomVar = 0;
 	}
 
 	/*
@@ -605,7 +594,7 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 	}
 
 	/*
-	 * arreter de decrémenter au bout d'un certain temps
+	 * arreter de decrÃ©menter au bout d'un certain temps
 	 */
 	if ((cycle % 101 == 0) && (s_zfd.pertedec == 7)) {
 		pzfd = &s_zfd;
@@ -656,7 +645,9 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 			s_nombreCddc = 0;
 		}
 		else
+		{
 			s_nombreCddc++;
+		}
 	}
 
 #ifdef VERBOSE
@@ -760,7 +751,9 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 	}
 	else
 		if ((cycle%80==0)&&(iRAND(5)==0)&&s_lineMode)
+		{
 			s_lineMode--;
+		}
 
 	if ((cycle % 120 == 0)
 			&& (iRAND (4) == 0)
@@ -829,7 +822,7 @@ guint32 * goom_update (GoomDualData& data, int forceMode) {
 	// affichage et swappage des buffers..
 	cycle++;
 
-	// toute les 2 secondes : vérifier si le taux de goom est correct
+	// toute les 2 secondes : vÃ©rifier si le taux de goom est correct
 	// et le modifier sinon..
 	if (!(cycle % 64)) {
 		if (s_speedVar<1)

@@ -8,16 +8,16 @@
 #include <QWriteLocker>
 #include <utility>
 
-#include "mythmiscutil.h"
-#include "mythdb.h"
-#include "io/mythmediabuffer.h"
-#include "mythsocket.h"
-#include "mythlogging.h"
-#include "programinfo.h"
-#include "recordinginfo.h"
-#include "storagegroup.h"
-#include "mythcorecontext.h"
-#include "mythdownloadmanager.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsocket.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythtv/io/mythmediabuffer.h"
+#include "libmythtv/recordinginfo.h"
 
 #include "sockethandler/filetransfer.h"
 #include "requesthandler/deletethread.h"
@@ -216,13 +216,13 @@ bool FileServerHandler::HandleAnnounce(MythSocket *socket,
     {
       case 6:
         timeout         = std::chrono::milliseconds(commands[5].toInt());
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case 5:
         usereadahead    = (commands[4].toInt() != 0);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case 4:
         writemode       = (commands[3].toInt() != 0);
-        [[clang::fallthrough]];
+        [[fallthrough]];
       default:
         hostname        = commands[2];
     }
@@ -284,7 +284,9 @@ bool FileServerHandler::HandleAnnounce(MythSocket *socket,
         filename = dir + "/" + path;
     }
     else
+    {
         filename = LocalFilePath(path, wantgroup);
+    }
 
     QFileInfo finfo(filename);
     if (finfo.isDir())
@@ -320,7 +322,9 @@ bool FileServerHandler::HandleAnnounce(MythSocket *socket,
         ft = new FileTransfer(filename, socket, m_parent, writemode);
     }
     else
+    {
         ft = new FileTransfer(filename, socket, m_parent, usereadahead, timeout);
+    }
 
     ft->BlockShutdown(true);
 
@@ -337,7 +341,7 @@ bool FileServerHandler::HandleAnnounce(MythSocket *socket,
     {
         QFileInfo fi(filename);
         QDir dir = fi.absoluteDir();
-        for (const auto & file : qAsConst(checkfiles))
+        for (const auto & file : std::as_const(checkfiles))
         {
             if (dir.exists(file) &&
                 QFileInfo(dir, file).size() >= kReadTestSize)
@@ -408,7 +412,7 @@ bool FileServerHandler::HandleQueryFreeSpace(SocketHandler *socket)
     QStringList res;
 
     QList<FileSystemInfo> disks = QueryFileSystems();
-    for (const auto & disk : qAsConst(disks))
+    for (const auto & disk : std::as_const(disks))
         disk.ToStringList(res);
 
     socket->WriteStringList(res);
@@ -421,7 +425,7 @@ bool FileServerHandler::HandleQueryFreeSpaceList(SocketHandler *socket)
     QStringList hosts;
 
     QList<FileSystemInfo> disks = QueryAllFileSystems();
-    for (const auto & disk : qAsConst(disks))
+    for (const auto & disk : std::as_const(disks))
         if (!hosts.contains(disk.getHostname()))
             hosts << disk.getHostname();
 
@@ -430,7 +434,7 @@ bool FileServerHandler::HandleQueryFreeSpaceList(SocketHandler *socket)
 
     long long total = 0;
     long long used = 0;
-    for (const auto & disk : qAsConst(disks))
+    for (const auto & disk : std::as_const(disks))
     {
         disk.ToStringList(res);
         total += disk.getTotalSpace();
@@ -459,7 +463,7 @@ bool FileServerHandler::HandleQueryFreeSpaceSummary(SocketHandler *socket)
 
     long long total = 0;
     long long used = 0;
-    for (const auto & disk : qAsConst(disks))
+    for (const auto & disk : std::as_const(disks))
     {
         total += disk.getTotalSpace();
         used  += disk.getUsedSpace();
@@ -533,7 +537,9 @@ QList<FileSystemInfo> FileServerHandler::QueryFileSystems(void)
                     foundDirs[currentDir] = true;
                 }
                 else
+                {
                     foundDirs[currentDir] = false;
+                }
             }
         }
     }
@@ -601,9 +607,11 @@ bool FileServerHandler::HandleQueryFileExists(SocketHandler *socket,
             storageGroup = slist[2];
     }
     else if (slist.size() != 2)
+    {
         return false;
+    }
 
-    QString filename = slist[1];
+    const QString& filename = slist[1];
     if ((filename.isEmpty()) || 
         (filename.contains("/../")) || 
         (filename.startsWith("../")))
@@ -649,7 +657,9 @@ bool FileServerHandler::HandleQueryFileExists(SocketHandler *socket,
         }
     }
     else
+    {
         res << "0";
+    }
 
     socket->WriteStringList(res);
     return true;
@@ -671,11 +681,11 @@ bool FileServerHandler::HandleQueryFileHash(SocketHandler *socket,
       case 4:
         if (!slist[3].isEmpty())
             hostname = slist[3];
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case 3:
         if (!slist[2].isEmpty())
             storageGroup = slist[2];
-        [[clang::fallthrough]];
+        [[fallthrough]];
       case 2:
         filename = slist[1];
         if (filename.isEmpty() ||
@@ -1115,7 +1125,9 @@ bool FileServerHandler::HandleDownloadFile(SocketHandler *socket,
                        + filename;
         }
         else
+        {
             res << "ERROR";
+        }
     }
     else
     {

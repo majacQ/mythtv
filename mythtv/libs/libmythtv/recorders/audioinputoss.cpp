@@ -19,18 +19,22 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
  */
-
-#include "mythconfig.h"
-#if HAVE_SYS_SOUNDCARD_H
-    #include <sys/soundcard.h>
-#elif HAVE_SOUNDCARD_H
-    #include <soundcard.h>
-#endif
-
 #include "audioinputoss.h"
-#include "mythlogging.h"
+
 #include <fcntl.h>
 #include <sys/ioctl.h>
+
+#if __has_include(<sys/soundcard.h>)
+#   include <sys/soundcard.h>
+#elif __has_include(<soundcard.h>)
+#   include <soundcard.h>
+#else
+#   error attemping to compile OSS support without soundcard.h
+#endif
+
+#include <QtGlobal>
+
+#include "libmythbase/mythlogging.h"
 
 #define LOC     QString("AudioInOSS: ")
 #define LOC_DEV QString("AudioInOSS(%1): ").arg(m_deviceName.constData())
@@ -79,7 +83,7 @@ bool AudioInputOSS::Open(uint sample_bits, uint sample_rate, uint channels)
             break;
         case 16:
         default:
-#if HAVE_BIGENDIAN
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
             choice = AFMT_S16_BE;
             tag = "AFMT_S16_BE";
 #else
@@ -269,9 +273,13 @@ int AudioInputOSS::GetNumReadyBytes(void)
                 QString("get ready bytes failed, returned %1: ")
                     .arg(ispace.bytes) + ENO);
         }
-        else if ((readies = ispace.bytes) > 0)
-            LOG(VB_AUDIO, LOG_DEBUG, LOC_DEV + QString("ready bytes %1")
+        else
+        {
+            readies = ispace.bytes;
+            if (readies > 0)
+                LOG(VB_AUDIO, LOG_DEBUG, LOC_DEV + QString("ready bytes %1")
                     .arg(readies));
+        }
     }
     return readies;
 }

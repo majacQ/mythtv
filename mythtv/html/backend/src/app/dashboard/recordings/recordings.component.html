@@ -1,0 +1,275 @@
+<form name="recsform" #recsform="ngForm" style="min-width: 960px;">
+
+    <div style="white-space: 'pre-line';">
+        <p-toast position="center"></p-toast>
+    </div>
+
+    <h2>{{ 'dashboard.recordings.heading' | translate }}</h2>
+    <div class="block card w-full" style="height: 90vh">
+
+        <p-menu #menu [popup]="true" [model]="menuToShow" class="font-bold">
+        </p-menu>
+
+
+        <!-- Menu, Refresh button and number of rows. -->
+        <div class="flex align-items-center p-1 font-bold">
+            <button pButton pRipple icon="pi pi-bars" class="p-button-text .p-button-success"
+                (click)="showContextMenu(null, $event)" pTooltip="{{ 'common.selected_menu' | translate }}"
+                tooltipPosition="top"></button> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+
+            <span class="p-input-icon-right">
+                <i class="pi pi-times" (click)="resetSearch()" *ngIf="searchValue"></i>
+                <input type="text" pInputText id="searchValue" [(ngModel)]="searchValue" name="searchValue"
+                    class="text-xl" placeholder="{{ 'common.search_placeholder' | translate }}"
+                    pTooltip="{{ 'dashboard.recordings.regex' | translate }}" tooltipPosition="top" />
+            </span>
+
+            <button pButton pRipple icon="pi pi-search" class="p-button-text w-2rem" (click)="onFilter()"
+                pTooltip="{{ 'dashboard.guide.title_search' | translate }}" tooltipPosition="top"></button>
+
+            &nbsp;&nbsp;&nbsp; {{ 'dashboard.recordings.recgrp' | translate }}: &nbsp;
+
+            <p-dropdown [(ngModel)]="selectedRecGroup" [options]="recGroups" name="filter" (onChange)="onFilter()"
+                placeholder="{{ 'settings.chanedit.all' | translate }}" [showClear]="true" class="'px-3">
+            </p-dropdown>
+
+            <button pButton pRipple icon="pi pi-refresh" class="p-button-text .p-button-success"
+                (click)="refreshing=true;refresh()" pTooltip="{{ 'common.refresh' | translate }}"
+                tooltipPosition="top"></button>
+            &nbsp;&nbsp;&nbsp;{{ programs.length }} {{ 'common.rows' | translate }}
+        </div>
+
+        <p-table #table *ngIf="showTable" [value]="programs" [totalRecords]="totalRecords"
+            styleClass="p-datatable-sm p-datatable-striped" (onLazyLoad)="loadLazy($event)" [rows]="100" [lazy]="true"
+            [rowHover]="true" selectionMode="multiple" [(selection)]="selection" [metaKeySelection]="true"
+            dataKey="Recording.RecordedId" (onRowSelect)="onSelectChange()" (onRowUnselect)="onSelectChange()"
+            sortField="Title" [virtualScroll]="true" scrollHeight="flex" [scrollable]="true">
+
+            <ng-template pTemplate="caption">
+            </ng-template>
+            <ng-template pTemplate="header">
+                <tr>
+                    <!-- Column Headings. -->
+                    <th style="width: 14%" class="p-1" pSortableColumn="Title">
+                        {{ 'dashboard.recordings.title' | translate }} <p-sortIcon field="Title"></p-sortIcon></th>
+                    <th style="width: 2%" class="p-1"></th>
+                    <th style="width: 20%" class="p-1">{{ 'dashboard.recordings.subtitle' | translate
+                        }}</th>
+                    <th style="width: 5%" class="p-1">{{ 'dashboard.recordings.seas_ep' | translate
+                        }}</th>
+                    <th style="width: 9%" class="justify-content-end p-1" pSortableColumn="Airdate">
+                        {{ 'dashboard.recordings.orig_airdate' | translate }} <p-sortIcon field="Airdate"></p-sortIcon>
+                    </th>
+                    <th style="width: 9%" class="justify-content-end p-1" pSortableColumn="StartTime">
+                        {{ 'dashboard.recordings.airdate' | translate }} <p-sortIcon field="StartTime"></p-sortIcon>
+                    </th>
+                    <th style="width: 11%" class="p-1">{{ 'dashboard.recordings.channel' | translate
+                        }}</th>
+                    <th style="width: 9%" class="p-1" pSortableColumn="Recording.RecGroup">
+                        {{ 'dashboard.recordings.recgrp' | translate }} <p-sortIcon
+                            field="Recording.RecGroup"></p-sortIcon> </th>
+                    <th style="width: 7%" class="justify-content-end p-1">
+                        {{ 'dashboard.recordings.duration' | translate }}
+                    </th>
+                    <th style="width: 9%" class="justify-content-end p-1">{{
+                        'dashboard.recordings.file_size' | translate }}</th>
+                    <th style="width: 5%; white-space: nowrap; background: var(--surface-card);" class="p-1">
+                        <a target="_blank">
+                            <i class="pi pi-download"></i></a>
+                        <button pButton pRipple icon="pi pi-ellipsis-v" class="p-button-text p-button-primary"
+                            [disabled]="true"></button>
+                    </th>
+                </tr>
+            </ng-template>
+            <ng-template pTemplate="body" let-program let-rowIndex="rowIndex">
+                <tr #row [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}"
+                    [pSelectableRow]="program" [pSelectableRowIndex]="rowIndex"
+                    (contextmenu)="onContextMenu(program,$event)">
+                    <td class="p-1 overflow-hidden">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}">
+                                <i class="pi pi-exclamation-triangle p-1"
+                                    *ngIf="program.VideoPropNames.indexOf('DAMAGED') > -1"
+                                    pTooltip="{{ 'dashboard.recordings.damaged' | translate }}"
+                                    tooltipPosition="top"></i>
+                                {{program.Title}}
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-1">
+                        <i class="pi pi-eye" *ngIf="program.ProgramFlagNames.indexOf('WATCHED') > -1"
+                            pTooltip="{{ 'dashboard.recordings.watched' | translate }}" tooltipPosition="top"></i>
+                    </td>
+                    <td class="p-1 overflow-hidden" pTooltip="{{program.Description}}" tooltipPosition="top">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}">
+                                {{program.SubTitle}}</div>
+                        </div>
+                    </td>
+                    <td class="p-1">
+                        <div *ngIf="program.Season>0 || program.Episode>0"> {{program.Season}}x{{program.Episode}}
+                        </div>
+                    </td>
+                    <td class="justify-content-end p-1 overflow-hidden">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}"
+                                [innerHTML]="utility.formatDate(program.Airdate,true)"></div>
+                        </div>
+                    </td>
+                    <td class="justify-content-end p-1 overflow-hidden">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}"
+                                [innerHTML]="utility.formatDate(program.StartTime,true)"></div>
+                        </div>
+                    </td>
+                    <td class="p-1">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}">
+                                {{program.Channel.ChanNum}} {{program.Channel.CallSign}}
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-1">{{program.Recording.RecGroup}}</td>
+                    <td class="justify-content-end p-1">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}">
+                                {{ getDuration(program) | number:'1.0-0' }} min
+                            </div>
+                        </div>
+                    </td>
+                    <td class="justify-content-end p-1">
+                        <div class="mycell">
+                            <div class="mytext" [ngClass]="{'line-through' : program.Recording.RecGroup == 'Deleted'}">
+                                {{program.Recording.FileSize / 1000000 | number:'1.0-0'}} MB</div>
+                        </div>
+                    </td>
+                    <td class="pt-1 pb-0" style="background: var(--surface-card); white-space: nowrap;">
+                        <a href="{{URLencode('/Content/GetRecording?RecordedId=' + program.Recording.RecordedId)
+                         + '&Download=' + getDownload(program)}}"
+                            pTooltip="{{ 'dashboard.recordings.download' | translate }}" tooltipPosition="left">
+                            <i class="pi pi-download text-primary" [id]="'download_'+ rowIndex"></i></a>
+                        <button pButton pRipple icon="pi pi-ellipsis-v" class="p-button-text p-button-primary"
+                            (click)="showContextMenu(program,$event)"></button>
+                    </td>
+                </tr>
+            </ng-template>
+
+        </p-table>
+
+        <!-- Edit Metadata Dialog -->
+        <p-dialog header="{{ 'dashboard.recordings.edit_metadata' | translate }}" [(visible)]="displayMetadataDlg"
+            [modal]="true" [style]="{height: '75vw', width: '50vw'}" [closable]="false" [closeOnEscape]="false">
+
+            <div class="form-group field">
+                <label for="Title" class="label block">{{ 'dashboard.recordings.title' | translate }}</label>
+                <input pInputText id="Title" [(ngModel)]="program.Title" name="Title" #Title="ngModel"
+                    class="mb-2 form-control w-full" />
+            </div>
+
+            <div class="form-group field">
+                <label for="SubTitle" class="label block">{{ 'dashboard.recordings.subtitle' | translate }}</label>
+                <input pInputText id="SubTitle" [(ngModel)]="program.SubTitle" name="SubTitle" #SubTitle="ngModel"
+                    class="mb-2 form-control w-full" />
+            </div>
+
+            <div class="form-group field">
+                <label for="Inetref" class="label block">{{ 'dashboard.recordings.inetref' | translate }}</label>
+                <input pInputText id="Inetref" [(ngModel)]="program.Inetref" name="Inetref" #Inetref="ngModel"
+                    class="mb-2 form-control w-full" />
+            </div>
+
+            <div class="form-group field">
+                <label for="Description" class="label block">{{ 'dashboard.recordings.description' | translate
+                    }}</label>
+                <textarea pInputTextarea [rows]="5" [cols]="30" id="Description" [(ngModel)]="program.Description"
+                    name="Description" #Description="ngModel" class="mb-2 form-control w-full"></textarea>
+            </div>
+
+            <div class="form-group field">
+                <label for="Season" class="label block">{{ 'dashboard.recordings.season' | translate
+                    }}</label>
+                <p-inputNumber [(ngModel)]="program.Season" name="Season" id="Season" [showButtons]="true" [min]="1"
+                    [max]="99" [step]="1"></p-inputNumber>
+            </div>
+
+            <div class="form-group field">
+                <label for="Episode" class="label block">{{ 'dashboard.recordings.episode' | translate
+                    }}</label>
+                <p-inputNumber [(ngModel)]="program.Episode" name="Episode" id="Episode" [showButtons]="true" [min]="1"
+                    [max]="99" [step]="1"></p-inputNumber>
+            </div>
+
+            <div class="form-group field">
+                <label for="Airdate" class="label block">{{ 'dashboard.recordings.orig_airdate' | translate
+                    }}</label>
+                <p-calendar [(ngModel)]="program.Airdate" dateFormat="yy-mm-dd" name="Airdate"
+                    id="Airdate"></p-calendar>
+            </div>
+
+            <div class="form-group field">
+                <label for="RecGroup" class="label block">{{ 'dashboard.sched.recgroup_label' | translate
+                    }}</label>
+                <p-dropdown appendTo="body" [options]="recGroups" [(ngModel)]="program.Recording.RecGroup"
+                    [editable]="true" [maxlength]="64" [style]="{'minWidth':'400px'}" name="RecGroup"
+                    #RecGroup="ngModel">
+                </p-dropdown>
+            </div>
+
+            <div class="form-group field">
+                <label for="FileName" class="label block">{{ 'dashboard.recordings.filename_label' | translate
+                    }}</label>
+                <pre>{{ program.FileName}}</pre>
+            </div>
+
+            <ng-template pTemplate="footer">
+                <div class="col-12" style="text-align: left;">
+                    <p-message *ngIf="successCount > 0 && errorCount == 0 && !recsform.dirty" severity="success"
+                        text="{{ 'common.savesuccess' | translate }}"></p-message>
+                    <p-message *ngIf="errorCount > 0" severity="error"
+                        text="{{ 'common.networkfail' | translate }}"></p-message>
+                </div>
+                <p-button icon="pi pi-times-circle" (onClick)="closeDialog()" label="{{ 'common.close' | translate }}"
+                    styleClass="p-button-warning">
+                </p-button>
+                <p-button icon="pi pi-check-circle" (onClick)="saveProgram();" label="{{ 'common.save' | translate }}"
+                    styleClass="p-button-success"
+                    [disabled]="!recsform.dirty || program.Title.trim() == '' "></p-button>
+            </ng-template>
+        </p-dialog>
+
+        <!-- Rec Group Dialog -->
+        <p-dialog header="{{ 'dashboard.recordings.selrecgroup' | translate }}" [(visible)]="displayRecGrpDlg"
+            [modal]="true" [draggable]="false" [resizable]="false">
+            <div class="form-group field">
+                <label for="newrecgroup" class="label block">{{ 'dashboard.sched.recgroup_label' | translate
+                    }}</label>
+                <input pInputText id="newrecgroup" [(ngModel)]="newRecGroup" name="newrecgroup" #newrecgroup="ngModel"
+                    class="mb-2 form-control w-full" />
+            </div>
+            <p-listbox [options]="recGroups" [(ngModel)]="newRecGroup" name="recgrplist" #recgrplist="ngModel">
+            </p-listbox>
+            <ng-template pTemplate="footer">
+                <p-button icon="pi pi-times-circle" (onClick)="displayRecGrpDlg=false"
+                    label="{{ 'common.cancel' | translate }}" styleClass="p-button-plain">
+                </p-button>
+                <p-button icon="pi pi-check-circle" (onClick)="updaterecgrp()" label="{{ 'common.ok' | translate }}"
+                    styleClass="p-button-plain" [disabled]="!newRecGroup.trim()">
+                </p-button>
+            </ng-template>
+        </p-dialog>
+
+        <!-- Unsaved Changes Warning Dialog -->
+        <p-dialog header="{{ 'common.unsaved_heading' | translate }}" [(visible)]="displayUnsaved" [modal]="true">
+            <p>{{ 'common.unsaved_message' | translate }}</p>
+            <ng-template pTemplate="footer">
+                <p-button icon="pi pi-times-circle" (onClick)="closeDialog()" label="{{ 'common.nosave' | translate }}"
+                    styleClass="p-button-danger">
+                </p-button>
+                <p-button icon="pi pi-check-circle" (onClick)="displayUnsaved=false"
+                    label="{{ 'common.continue' | translate }}" styleClass="p-button-success">
+                </p-button>
+            </ng-template>
+        </p-dialog>
+
+    </div>
+</form>

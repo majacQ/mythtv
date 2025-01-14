@@ -2,7 +2,7 @@
 #include <vector>
 
 // MythTV headers
-#include <mythcontext.h>
+#include <libmyth/mythcontext.h>
 
 // MythWeather headers
 #include "weather.h"
@@ -24,7 +24,7 @@ WeatherScreen::WeatherScreen(MythScreenStack *parent,
 
     QStringList types = m_screenDefn->m_dataTypes;
 
-    for (const QString& type : qAsConst(types))
+    for (const QString& type : std::as_const(types))
     {
         m_dataValueMap[type] =  "";
     }
@@ -175,7 +175,7 @@ QString WeatherScreen::formatDataItem(const QString &key, const QString &value)
         key.startsWith("high"))
     {
        if ((value == "NA") || (value == "N/A"))
-          return QString();
+          return {};
        return value + getTemperatureUnit();
     }
 
@@ -223,7 +223,7 @@ QString WeatherScreen::formatDataItem(const QString &key, const QString &value)
     }
 
     if (key == "copyrightlogo" && value == "none")
-        return QString();
+        return {};
 
     return value;
 }

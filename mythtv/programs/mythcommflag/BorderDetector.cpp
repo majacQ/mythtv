@@ -1,18 +1,22 @@
 #include <sys/time.h>
+#include <algorithm>
 
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
 
 extern "C" {
 #include "libavcodec/avcodec.h"        /* AVFrame */
 }
-#include "mythcorecontext.h"    /* gContext */
-#include "mythchrono.h"
-#include "compat.h"
 
+// MythTV
+#include "libmythbase/compat.h"
+#include "libmythbase/mythchrono.h"
+#include "libmythbase/mythcorecontext.h"    /* gContext */
+
+// Commercial Flagging headers
+#include "BorderDetector.h"
 #include "CommDetector2.h"
 #include "FrameAnalyzer.h"
 #include "TemplateFinder.h"
-#include "BorderDetector.h"
 
 using namespace frameAnalyzer;
 using namespace commDetector2;
@@ -27,9 +31,8 @@ BorderDetector::BorderDetector(void)
 }
 
 int
-BorderDetector::MythPlayerInited(const MythPlayer *player)
+BorderDetector::MythPlayerInited([[maybe_unused]] const MythPlayer *player)
 {
-    (void)player;  /* gcc */
     m_timeReported = false;
     memset(&m_analyzeTime, 0, sizeof(m_analyzeTime));
     return 0;
@@ -38,13 +41,16 @@ BorderDetector::MythPlayerInited(const MythPlayer *player)
 void
 BorderDetector::setLogoState(TemplateFinder *finder)
 {
-    if ((m_logoFinder = finder) && (m_logo = m_logoFinder->getTemplate(
-                    &m_logoRow, &m_logoCol, &m_logoWidth, &m_logoHeight)))
-    {
-        LOG(VB_COMMFLAG, LOG_INFO,
-            QString("BorderDetector::setLogoState: %1x%2@(%3,%4)")
-                .arg(m_logoWidth).arg(m_logoHeight).arg(m_logoCol).arg(m_logoRow));
-    }
+    m_logoFinder = finder;
+    if (m_logoFinder == nullptr)
+        return;
+    m_logo = m_logoFinder->getTemplate(&m_logoRow, &m_logoCol,
+                                       &m_logoWidth, &m_logoHeight);
+    if (m_logo == nullptr)
+        return;
+    LOG(VB_COMMFLAG, LOG_INFO,
+        QString("BorderDetector::setLogoState: %1x%2@(%3,%4)")
+        .arg(m_logoWidth).arg(m_logoHeight).arg(m_logoCol).arg(m_logoRow));
 }
 
 int
@@ -149,7 +155,7 @@ BorderDetector::getDimensions(const AVFrame *pgm, int pgmheight,
                             m_logoWidth, m_logoHeight))
                     continue;   /* Exclude logo area from analysis. */
 
-                uchar val = pgm->data[0][rr * pgmwidth + cc];
+                uchar val = pgm->data[0][(rr * pgmwidth) + cc];
                 int range = std::max(maxval, val) - std::min(minval, val) + 1;
                 if (range > kMaxRange)
                 {
@@ -160,10 +166,8 @@ BorderDetector::getDimensions(const AVFrame *pgm, int pgmheight,
                         break;  /* Next column. */
                     goto found_left;
                 }
-                if (val < minval)
-                    minval = val;
-                if (val > maxval)
-                    maxval = val;
+                minval = std::min(val, minval);
+                maxval = std::max(val, maxval);
             }
             if (inrange)
             {
@@ -201,7 +205,7 @@ found_left:
                             m_logoWidth, m_logoHeight))
                     continue;   /* Exclude logo area from analysis. */
 
-                uchar val = pgm->data[0][rr * pgmwidth + cc];
+                uchar val = pgm->data[0][(rr * pgmwidth) + cc];
                 int range = std::max(maxval, val) - std::min(minval, val) + 1;
                 if (range > kMaxRange)
                 {
@@ -212,10 +216,8 @@ found_left:
                         break;  /* Next column. */
                     goto found_right;
                 }
-                if (val < minval)
-                    minval = val;
-                if (val > maxval)
-                    maxval = val;
+                minval = std::min(val, minval);
+                maxval = std::max(val, maxval);
             }
             if (inrange)
             {
@@ -254,7 +256,7 @@ found_right:
                             m_logoWidth, m_logoHeight))
                     continue;   /* Exclude logo area from analysis. */
 
-                uchar val = pgm->data[0][rr * pgmwidth + cc];
+                uchar val = pgm->data[0][(rr * pgmwidth) + cc];
                 int range = std::max(maxval, val) - std::min(minval, val) + 1;
                 if (range > kMaxRange)
                 {
@@ -265,10 +267,8 @@ found_right:
                         break;  /* Next row. */
                     goto found_top;
                 }
-                if (val < minval)
-                    minval = val;
-                if (val > maxval)
-                    maxval = val;
+                minval = std::min(val, minval);
+                maxval = std::max(val, maxval);
             }
             if (inrange)
             {
@@ -303,7 +303,7 @@ found_top:
                             m_logoWidth, m_logoHeight))
                     continue;   /* Exclude logo area from analysis. */
 
-                uchar val = pgm->data[0][rr * pgmwidth + cc];
+                uchar val = pgm->data[0][(rr * pgmwidth) + cc];
                 int range = std::max(maxval, val) - std::min(minval, val) + 1;
                 if (range > kMaxRange)
                 {
@@ -314,10 +314,8 @@ found_top:
                         break;  /* Next row. */
                     goto found_bottom;
                 }
-                if (val < minval)
-                    minval = val;
-                if (val > maxval)
-                    maxval = val;
+                minval = std::min(val, minval);
+                maxval = std::max(val, maxval);
             }
             if (inrange)
             {

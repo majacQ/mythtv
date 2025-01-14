@@ -2,11 +2,8 @@
 
 #include <utility>
 
-#include "mythcorecontext.h"
-
-#if QT_VERSION >= QT_VERSION_CHECK(5,10,0)
-#include <QRandomGenerator>
-#endif
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythrandom.h"
 
 #define LOC QString("Transition: ")
 
@@ -178,8 +175,7 @@ void GroupTransition::Start(Slide &from, Slide &to,
     Transition::Start(from, to, forwards, speed);
 
     // Start group
-    if (m_animation)
-        m_animation->Start(forwards, speed);
+    m_animation->Start(forwards, speed);
 }
 
 
@@ -409,12 +405,7 @@ void TransitionSpin::Finalise()
 void TransitionRandom::Start(Slide &from, Slide &to, bool forwards, float speed)
 {
     // Select a random peer.
-#if QT_VERSION >= QT_VERSION_CHECK(5,10,0)
-    int rand = QRandomGenerator::global()->bounded(m_peers.size());
-#else
-    // cppcheck-suppress qrandCalled
-    int rand = qrand() % m_peers.size();
-#endif
+    int rand = MythRandom(0, m_peers.size() - 1);
     m_current = m_peers[rand];
     // Invoke peer
     connect(m_current, &Transition::finished, this, &TransitionRandom::Finished);

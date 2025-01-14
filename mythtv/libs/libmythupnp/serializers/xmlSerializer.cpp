@@ -6,12 +6,14 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #include "xmlSerializer.h"
-#include "mythdate.h"
+#include "libmythbase/mythdate.h"
+
+#include <utility>
 
 #include <QMetaClassInfo>
 
@@ -20,16 +22,16 @@
 // that changes the schema layout of the rendered XML.
 // --------------------------------------------------------------------------
 
-#define XML_SERIALIZER_VERSION "1.1"
+static constexpr const char* XML_SERIALIZER_VERSION { "1.1" };
 
 //////////////////////////////////////////////////////////////////////////////
 //
 //////////////////////////////////////////////////////////////////////////////
 
-XmlSerializer::XmlSerializer( QIODevice *pDevice, const QString &sRequestName )
+XmlSerializer::XmlSerializer( QIODevice *pDevice, QString sRequestName )
+  : m_pXmlWriter(new QXmlStreamWriter( pDevice )),
+    m_sRequestName(std::move(sRequestName))
 {
-    m_pXmlWriter   = new QXmlStreamWriter( pDevice );
-    m_sRequestName = sRequestName;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -128,7 +130,9 @@ void XmlSerializer::AddProperty( const QString       &sName,
         RenderEnum ( sName, vValue, pMetaProp );
     }
     else
+    {
         RenderValue( GetContentName( sName, pMetaParent, pMetaProp ), vValue );
+    }
 
     m_pXmlWriter->writeEndElement();
 }
@@ -369,11 +373,10 @@ QString XmlSerializer::FindOptionValue( const QStringList &sOptions, const QStri
 {
     QString sKey = sName + "=";
 
-    for (const QString& option : qAsConst(sOptions))
-    {
-        if (option.startsWith( sKey ))
-            return option.mid( sKey.length() );
-    }
+    auto hasKey = [&sKey](const QString& o) { return o.startsWith( sKey ); };
+    auto it = std::find_if(sOptions.cbegin(), sOptions.cend(), hasKey);
+    if (it != sOptions.cend())
+        return (*it).mid( sKey.length() );
 
-    return QString();
+    return {};
 }

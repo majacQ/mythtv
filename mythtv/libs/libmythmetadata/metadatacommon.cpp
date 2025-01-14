@@ -1,16 +1,20 @@
+#include <algorithm>
+#include <utility>
+
 // Qt headers
 #include <QCoreApplication>
 #include <QLocale>
 #include <QMetaType>
-#include <utility>
+#include <QRegularExpression>
 
-#include "rssparse.h"
-#include "programinfo.h"
-#include "mythcorecontext.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlocale.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/rssparse.h"
+
 #include "metadatacommon.h"
-#include "mythlogging.h"
-#include "mythlocale.h"
-#include "mythmiscutil.h"
 
 static int x0 = qRegisterMetaType< RefCountHandler<MetadataLookup> >();
 
@@ -94,6 +98,7 @@ MetadataLookup::MetadataLookup(
     m_host(std::move(host)),
     m_filename(std::move(filename)),
     m_title(title),
+    m_baseTitle(title),
     m_network(std::move(network)),
     m_status(std::move(status)),
     m_categories(std::move(categories)),
@@ -148,7 +153,6 @@ MetadataLookup::MetadataLookup(
     m_downloads(std::move(downloads))
 {
     QString manRecSuffix = QString(" (%1)").arg(QObject::tr("Manual Record"));
-    m_baseTitle = title;
     m_baseTitle.replace(manRecSuffix,"");
 }
 
@@ -207,6 +211,7 @@ MetadataLookup::MetadataLookup(
     m_host(std::move(host)),
     m_filename(std::move(filename)),
     m_title(title),
+    m_baseTitle(title),
     m_categories(std::move(categories)),
     m_userRating(userrating),
     m_subtitle(std::move(subtitle)),
@@ -236,7 +241,6 @@ MetadataLookup::MetadataLookup(
     m_runtimeSecs(runtimesecs)
 {
     QString manRecSuffix = QString(" (%1)").arg(QObject::tr("Manual Record"));
-    m_baseTitle = title;
     m_baseTitle.replace(manRecSuffix,"");
 }
 
@@ -285,6 +289,7 @@ MetadataLookup::MetadataLookup(
     m_host(std::move(host)),
     m_filename(std::move(filename)),
     m_title(title),
+    m_baseTitle(title),
     m_categories(std::move(categories)),
     m_userRating(userrating),
     m_subtitle(std::move(subtitle)),
@@ -304,7 +309,6 @@ MetadataLookup::MetadataLookup(
     m_downloads(std::move(downloads))
 {
     QString manRecSuffix = QString(" (%1)").arg(QObject::tr("Manual Record"));
-    m_baseTitle = title;
     m_baseTitle.replace(manRecSuffix,"");
 }
 
@@ -440,7 +444,7 @@ QDomDocument CreateMetadataXML(MetadataLookupList list)
     QDomElement root = doc.createElement("metadata");
     doc.appendChild(root);
 
-    for (const auto & item : qAsConst(list))
+    for (const auto & item : std::as_const(list))
         CreateMetadataXMLItem(item, root, doc);
 
     return doc;
@@ -464,9 +468,10 @@ QDomDocument CreateMetadataXML(ProgramInfo *pginfo)
 
     MetadataLookup *lookup = LookupFromProgramInfo(pginfo);
     if (lookup)
+    {
         doc = CreateMetadataXML(lookup);
-
-    lookup->DecrRef();
+        lookup->DecrRef();
+    }
     lookup = nullptr;
 
     return doc;
@@ -518,17 +523,14 @@ void CreateMetadataXMLItem(MetadataLookup *lookup,
         item.appendChild(status);
         status.appendChild(docroot.createTextNode(lookup->GetStatus()));
     }
-    // Season
+    // Season and Episode
     if (lookup->GetSeason() > 0 || lookup->GetEpisode() > 0)
     {
         QDomElement season = docroot.createElement("season");
         item.appendChild(season);
         season.appendChild(docroot.createTextNode(
                            QString::number(lookup->GetSeason())));
-    }
-    // Episode
-    if (lookup->GetSeason() > 0 || lookup->GetEpisode() > 0)
-    {
+
         QDomElement episode = docroot.createElement("episode");
         item.appendChild(episode);
         episode.appendChild(docroot.createTextNode(
@@ -848,7 +850,7 @@ void AddCategories(MetadataLookup *lookup,
     QDomElement categories = docroot.createElement("categories");
     placetoadd.appendChild(categories);
 
-    for (const auto & str : qAsConst(cats))
+    for (const auto & str : std::as_const(cats))
     {
         QDomElement cat = docroot.createElement("category");
         categories.appendChild(cat);
@@ -865,7 +867,7 @@ void AddStudios(MetadataLookup *lookup,
     QDomElement studios = docroot.createElement("studios");
     placetoadd.appendChild(studios);
 
-    for (const auto & str : qAsConst(studs))
+    for (const auto & str : std::as_const(studs))
     {
         QDomElement stud = docroot.createElement("studio");
         studios.appendChild(stud);
@@ -881,7 +883,7 @@ void AddCountries(MetadataLookup *lookup,
     QDomElement countries = docroot.createElement("countries");
     placetoadd.appendChild(countries);
 
-    for (const auto & str : qAsConst(counts))
+    for (const auto & str : std::as_const(counts))
     {
         QDomElement count = docroot.createElement("country");
         countries.appendChild(count);
@@ -1192,9 +1194,10 @@ MetadataLookup* ParseMetadataMovieNFO(const QDomElement& item,
     else if (year > 0)
         releasedate = QDate::fromString(QString::number(year), "yyyy");
 
+    static const QRegularExpression kAlphaRE { "[A-Za-z]" };
     auto runtime =
         std::chrono::minutes(item.firstChildElement("runtime").text()
-                                               .remove(QRegularExpression("[A-Za-z]"))
+                                               .remove(kAlphaRE)
                                                .trimmed().toUInt());
 
     QDomElement actor = item.firstChildElement("actor");
@@ -1344,27 +1347,34 @@ ArtworkMap ParseArtwork(const QDomElement& artwork)
 
 int editDistance( const QString& s, const QString& t )
 {
-#define D( i, j ) d[(i) * n + (j)]
-    int m = s.length() + 1;
-    int n = t.length() + 1;
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define D( i, j ) d[((i) * n) + (j)]
+    size_t m = s.length() + 1;
+    size_t n = t.length() + 1;
     int *d = new int[m * n];
 
-    for ( int i = 0; i < m; i++ )
+    for ( size_t i = 0; i < m; i++ )
       D( i, 0 ) = i;
-    for ( int j = 0; j < n; j++ )
+    for ( size_t j = 0; j < n; j++ )
       D( 0, j ) = j;
-    for ( int i = 1; i < m; i++ )
+    for ( size_t i = 1; i < m; i++ )
     {
-        for ( int j = 1; j < n; j++ )
+        for ( size_t j = 1; j < n; j++ )
         {
-            if ( s[i - 1] == t[j - 1] )
+            if (
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+                s[static_cast<int>(i) - 1] == t[static_cast<int>(j) - 1]
+#else
+                s[i - 1] == t[j - 1]
+#endif
+                )
                 D( i, j ) = D( i - 1, j - 1 );
             else
             {
                 int x = D( i - 1, j );
                 int y = D( i - 1, j - 1 );
                 int z = D( i, j - 1 );
-                D( i, j ) = 1 + qMin( qMin(x, y), z );
+                D( i, j ) = 1 + std::min({x, y, z});
             }
         }
     }
@@ -1402,7 +1412,7 @@ QString nearestName(const QString& actual, const QStringList& candidates)
     if ( numBest == 1 && deltaBest <= tolerance &&
        actual.length() + best.length() >= 5 )
         return best;
-    return QString();
+    return {};
 }
 
 QDateTime RFC822TimeToQDateTime(const QString& t)
@@ -1410,7 +1420,7 @@ QDateTime RFC822TimeToQDateTime(const QString& t)
     QMap<QString, int> TimezoneOffsets;
 
     if (t.size() < 20)
-        return QDateTime();
+        return {};
 
     QString time = t.simplified();
     short int hoursShift = 0;
@@ -1418,11 +1428,12 @@ QDateTime RFC822TimeToQDateTime(const QString& t)
 
     QStringList tmp = time.split(' ');
     if (tmp.isEmpty())
-        return QDateTime();
-    if (tmp.at(0).contains(QRegularExpression("\\D")))
+        return {};
+    static const QRegularExpression kNonDigitRE { "\\D" };
+    if (tmp.at(0).contains(kNonDigitRE))
         tmp.removeFirst();
     if (tmp.size() != 5)
-        return QDateTime();
+        return {};
     QString ltimezone = tmp.takeAt(tmp.size() -1);
     if (ltimezone.size() == 5)
     {
@@ -1435,7 +1446,9 @@ QDateTime RFC822TimeToQDateTime(const QString& t)
         }
     }
     else
+    {
         hoursShift = TimezoneOffsets.value(ltimezone, 0);
+    }
 
     if (tmp.at(0).size() == 1)
         tmp[0].prepend("0");
@@ -1449,8 +1462,12 @@ QDateTime RFC822TimeToQDateTime(const QString& t)
     else
         result = QLocale::c().toDateTime(time, "dd MMM yy hh:mm:ss");
     if (result.isNull() || !result.isValid())
-        return QDateTime();
-    result = result.addSecs(hoursShift * 3600 * (-1) + minutesShift *60 * (-1));
+        return {};
+    result = result.addSecs((hoursShift * 3600 * (-1)) + (minutesShift *60 * (-1)));
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     result.setTimeSpec(Qt::UTC);
+#else
+    result.setTimeZone(QTimeZone(QTimeZone::UTC));
+#endif
     return result;
 }

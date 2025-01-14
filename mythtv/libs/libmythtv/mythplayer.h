@@ -1,47 +1,46 @@
 ﻿#ifndef MYTHPLAYER_H
 #define MYTHPLAYER_H
 
+// Std
+#include <cstdint>
+#include <utility>
+#include <thread>
+
 // Qt
 #include <QCoreApplication>
 #include <QList>
 #include <QMutex>
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 #include <QTime>
 #include <QString>
 #include <QRect>
 #include <QSize>
 #include <QStringList>
+#include <QTimer>
 #include <QWaitCondition>
 
 // MythTV
-#include "playercontext.h"
-#include "volumebase.h"
-#include "osd.h"
-#include "mythvideoout.h"
-#include "captions/teletextreader.h"
-#include "captions/subtitlereader.h"
-#include "captions/cc608reader.h"
-#include "captions/cc708reader.h"
-#include "decoders/decoderbase.h"
-#include "deletemap.h"
-#include "commbreakmap.h"
-#include "audioplayer.h"
-#include "mthread.h"
-#include "mythavutil.h"
-#include "mythtypes.h"
-#include "programtypes.h"
-#include "tv.h"
-#include "videoouttypes.h"
-#include "mythmiscutil.h"
-#include "mythplayeravsync.h"
-#include "mythtvexp.h"
-
-// Std
-#include <cstdint>
-#include <utility>
-#include <thread>
+#include "libmyth/audio/volumebase.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythbase/programtypes.h"
+#include "libmythtv/audioplayer.h"
+#include "libmythtv/captions/cc608reader.h"
+#include "libmythtv/captions/cc708reader.h"
+#include "libmythtv/captions/subtitlereader.h"
+#include "libmythtv/captions/teletextreader.h"
+#include "libmythtv/commbreakmap.h"
+#include "libmythtv/decoders/decoderbase.h"
+#include "libmythtv/deletemap.h"
+#include "libmythtv/mythavutil.h"
+#include "libmythtv/mythplayeravsync.h"
+#include "libmythtv/mythtvexp.h"
+#include "libmythtv/mythvideoout.h"
+#include "libmythtv/osd.h"
+#include "libmythtv/playercontext.h"
+#include "libmythtv/tv.h"
+#include "libmythtv/videoouttypes.h"
 
 class ProgramInfo;
 class InteractiveTV;
@@ -52,14 +51,14 @@ class MythDecoderThread;
 using StatusCallback = void (*)(int, void*);
 
 /// Timecode types
-enum TCTypes
+enum TCTypes : std::uint8_t
 {
     TC_VIDEO = 0,
     TC_AUDIO,
     TC_SUB,
     TC_CC
 };
-#define TCTYPESMAX 4
+static constexpr size_t TCTYPESMAX { 4 };
 using tctype_arr = std::array<std::chrono::milliseconds,TCTYPESMAX>;
 
 enum PlayerFlags
@@ -76,8 +75,6 @@ enum PlayerFlags
     kNoITV                = 0x020000,
     kMusicChoice          = 0x040000,
 };
-
-#define FlagIsSet(arg) (m_playerFlags & (arg))
 
 // Padding between class members reduced from 113 to 73 bytes, but its
 // still higher than the default warning threshhold of 24 bytes.
@@ -101,9 +98,9 @@ class MTV_PUBLIC MythPlayer : public QObject
     void CheckCallbacks();
     void SeekingSlow(int Count);
     void SeekingComplete();
+    void SeekingDone();
     void PauseChanged(bool Paused);
     void RequestResetCaptions();
-    void SignalTracksChanged(uint Type);
 
   public:
     explicit MythPlayer(PlayerContext* Context, PlayerFlags Flags = kNoFlags);
@@ -134,7 +131,7 @@ class MTV_PUBLIC MythPlayer : public QObject
     QSize   GetVideoSize(void) const          { return m_videoDispDim; }
     float   GetVideoAspect(void) const        { return m_videoAspect; }
     float   GetFrameRate(void) const          { return m_videoFrameRate; }
-    bool    IsAudioNeeded(void) { return ((FlagIsSet(kVideoIsNull)) == 0); }
+    bool    IsAudioNeeded(void)               { return !FlagIsSet(kVideoIsNull); }
     int     GetFreeVideoFrames(void) const;
 
     int     GetFFRewSkip(void) const          { return m_ffrewSkip; }
@@ -152,7 +149,6 @@ class MTV_PUBLIC MythPlayer : public QObject
 
     // Bool Gets
     bool    IsPaused(void) const              { return m_allPaused;      }
-    bool    GetRawAudioState(void) const;
     bool    GetLimitKeyRepeat(void) const     { return m_limitKeyRepeat; }
     EofState GetEof(void) const;
     bool    IsErrored(void) const;
@@ -201,14 +197,13 @@ class MTV_PUBLIC MythPlayer : public QObject
 
     // Public Audio/Subtitle/EIA-608/EIA-708 stream selection - thread safe
     void EnableForcedSubtitles(bool enable);
-    bool ForcedSubtitlesFavored(void) const {
-        return m_allowForcedSubtitles && !m_captionsEnabledbyDefault;
-    }
     // How to handle forced Subtitles (i.e. when in a movie someone speaks
     // in a different language than the rest of the movie, subtitles are
     // forced on even if the user doesn't have them turned on.)
     // These two functions are not thread-safe (UI thread use only).
     bool GetAllowForcedSubtitles(void) const { return m_allowForcedSubtitles; }
+
+    virtual void tracksChanged([[maybe_unused]] uint TrackType) {}
 
     // LiveTV public stuff
     void CheckTVChain();
@@ -223,12 +218,12 @@ class MTV_PUBLIC MythPlayer : public QObject
     virtual int GetNumTitles(void) const { return 0; }
     virtual int GetCurrentTitle(void) const { return 0; }
     virtual std::chrono::seconds GetTitleDuration(int /*title*/) const { return 0s; }
-    virtual QString GetTitleName(int /*title*/) const { return QString(); }
+    virtual QString GetTitleName(int /*title*/) const { return {}; }
 
     // Angle public stuff
     virtual int GetNumAngles(void) const { return 0; }
     virtual int GetCurrentAngle(void) const { return 0; }
-    virtual QString GetAngleName(int /*title*/) const { return QString(); }
+    virtual QString GetAngleName(int /*title*/) const { return {}; }
 
     // DVD public stuff
     virtual bool IsInStillFrame() const         { return false;     }
@@ -245,6 +240,7 @@ class MTV_PUBLIC MythPlayer : public QObject
     static const double kInaccuracyDefault;
     static const double kInaccuracyEditor;
     static const double kInaccuracyFull;
+    static const double kSeekToEndOffset;
 
     void SaveTotalFrames(void);
     void SetErrored(const QString &reason);
@@ -319,6 +315,8 @@ class MTV_PUBLIC MythPlayer : public QObject
     bool GetEditMode(void) const { return m_deleteMap.IsEditing(); }
     bool IsInDelete(uint64_t frame);
 
+    bool FlagIsSet(PlayerFlags arg) { return (m_playerFlags & arg) != 0; }
+
   protected:
     // Private Sets
     void SetPlayingInfo(const ProgramInfo &pginfo);
@@ -336,8 +334,7 @@ class MTV_PUBLIC MythPlayer : public QObject
     void  SetDecoder(DecoderBase *dec);
     /// Returns the stream decoder currently in use.
     const DecoderBase *GetDecoder(void) const { return m_decoder; }
-    virtual bool DecoderGetFrameFFREW(void);
-    virtual bool DecoderGetFrameREW(void);
+    virtual void DoFFRewSkip(void);
     bool         DecoderGetFrame(DecodeType decodetype, bool unsafe = false);
     bool         DoGetFrame(DecodeType DecodeType);
 
@@ -352,7 +349,6 @@ class MTV_PUBLIC MythPlayer : public QObject
     // Private seeking stuff
     void WaitForSeek(uint64_t frame, uint64_t seeksnap_wanted);
     void ClearAfterSeek(bool clearvideobuffers = true);
-    void ClearBeforeSeek(uint64_t Frames);
 
     // Private chapter stuff
     virtual bool DoJumpChapter(int chapter);
@@ -364,11 +360,7 @@ class MTV_PUBLIC MythPlayer : public QObject
 
   protected:
     DecoderBase     *m_decoder            {nullptr};
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex   m_decoderChangeLock  {QMutex::Recursive};
-#else
     mutable QRecursiveMutex  m_decoderChangeLock;
-#endif
     MythVideoOutput *m_videoOutput        {nullptr};
     const VideoFrameTypes* m_renderFormats { &MythVideoFrame::kDefaultRenderFormats };
     PlayerContext   *m_playerCtx          {nullptr};
@@ -395,6 +387,7 @@ class MTV_PUBLIC MythPlayer : public QObject
     bool           m_unpauseDecoder         {false};
     bool volatile  m_killDecoder            {false};
     bool           m_decodeOneFrame         {false};
+    bool           m_renderOneFrame         {false};
     bool           m_needNewPauseFrame      {false};
     bool           m_bufferPaused           {false};
     bool           m_videoPaused            {false};
@@ -418,7 +411,6 @@ class MTV_PUBLIC MythPlayer : public QObject
 
     // Bookmark stuff
     uint64_t m_bookmarkSeek               {0};
-    int      m_clearSavedPosition         {1};
     int      m_endExitPrompt;
 
     // Seek
@@ -487,11 +479,7 @@ class MTV_PUBLIC MythPlayer : public QObject
 
     // Playback (output) speed control
     /// Lock for next_play_speed and next_normal_speed
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex     m_decoderLock              {QMutex::Recursive};
-#else
     QRecursiveMutex  m_decoderLock;
-#endif
     float      m_nextPlaySpeed            {1.0F};
     float      m_playSpeed                {1.0F};
     std::chrono::microseconds m_frameInterval

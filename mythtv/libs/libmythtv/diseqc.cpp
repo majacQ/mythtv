@@ -16,74 +16,79 @@
 #include <QString>
 
 // MythTV headers
-#include "mythcorecontext.h"
-#include "mythdb.h"
-#include "mythlogging.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythlogging.h"
+
 #include "diseqc.h"
 #include "dtvmultiplex.h"
-#include "compat.h"
 
 #ifdef USING_DVB
-#   include "dvbtypes.h"
+#   include "recorders/dvbtypes.h"
 #else
-#   define SEC_VOLTAGE_13  0
-#   define SEC_VOLTAGE_18  1
-#   define SEC_VOLTAGE_OFF 2
-#   define SEC_MINI_A      0
-#   define SEC_MINI_B      1
+static constexpr uint8_t SEC_VOLTAGE_13  { 0 };
+static constexpr uint8_t SEC_VOLTAGE_18  { 1 };
+static constexpr uint8_t SEC_VOLTAGE_OFF { 2 };
 #endif
 
 // DiSEqC sleep intervals per eutelsat spec
-#define DISEQC_SHORT_WAIT     (15 * 1000)
-#define DISEQC_LONG_WAIT      (100 * 1000)
-#define DISEQC_POWER_OFF_WAIT ((1000 * 1000) - 1)
-#define DISEQC_POWER_ON_WAIT  (500 * 1000)
+static constexpr useconds_t DISEQC_SHORT_WAIT     {  15 * 1000 };
+static constexpr useconds_t DISEQC_LONG_WAIT      { 100 * 1000 };
+static constexpr useconds_t DISEQC_POWER_ON_WAIT  { 500 * 1000 };
+static constexpr useconds_t DISEQC_POWER_OFF_WAIT { (1000 * 1000) - 1 };
 
+#ifdef USING_DVB
 // Number of times to retry ioctls after receiving ETIMEDOUT before giving up
-#define TIMEOUT_RETRIES       10
-#define TIMEOUT_WAIT          (250 * 1000)
+static constexpr uint8_t    TIMEOUT_RETRIES       { 10 };
+static constexpr useconds_t TIMEOUT_WAIT          { 250 * 1000 };
 
 // Framing byte
-#define DISEQC_FRM            0xe0
-#define DISEQC_FRM_REPEAT     (1 << 0)
-#define DISEQC_FRM_REPLY_REQ  (1 << 1)
+static constexpr uint8_t    DISEQC_FRM            { 0xe0 };
+static constexpr uint8_t    DISEQC_FRM_REPEAT     {1 << 0};
+//static constexpr uint8_t  DISEQC_FRM_REPLY_REQ  {1 << 1};
+#endif
 
 // Address byte
-#define DISEQC_ADR_ALL        0x00
-#define DISEQC_ADR_SW_ALL     0x10
-#define DISEQC_ADR_LNB        0x11
-#define DISEQC_ADR_LNB_SW     0x12
-#define DISEQC_ADR_SW_BLK     0x14
-#define DISEQC_ADR_SW         0x15
-#define DISEQC_ADR_SMATV      0x18
-#define DISEQC_ADR_POL_ALL    0x20
-#define DISEQC_ADR_POL_LIN    0x21
-#define DISEQC_ADR_POS_ALL    0x30
-#define DISEQC_ADR_POS_AZ     0x31
-#define DISEQC_ADR_POS_EL     0x32
+enum DISEQC_ADRS : std::uint8_t {
+    DISEQC_ADR_ALL          = 0x00,
+    DISEQC_ADR_SW_ALL       = 0x10,
+    DISEQC_ADR_LNB          = 0x11,
+    DISEQC_ADR_LNB_SW       = 0x12,
+    DISEQC_ADR_SW_BLK       = 0x14,
+    DISEQC_ADR_SW           = 0x15,
+    DISEQC_ADR_SMATV        = 0x18,
+    DISEQC_ADR_POL_ALL      = 0x20,
+    DISEQC_ADR_POL_LIN      = 0x21,
+    DISEQC_ADR_POS_ALL      = 0x30,
+    DISEQC_ADR_POS_AZ       = 0x31,
+    DISEQC_ADR_POS_EL       = 0x32,
+};
 
 // Command byte
-#define DISEQC_CMD_RESET      0x00
-#define DISEQC_CMD_CLR_RESET  0x01
-#define DISEQC_CMD_WRITE_N0   0x38
-#define DISEQC_CMD_WRITE_N1   0x39
-#define DISEQC_CMD_WRITE_FREQ 0x58
-#define DISEQC_CMD_ODU        0x5A
-#define DISEQC_CMD_ODU_MDU    0x5C
-#define DISEQC_CMD_HALT       0x60
-#define DISEQC_CMD_LMT_OFF    0x63
-#define DISEQC_CMD_LMT_E      0x66
-#define DISEQC_CMD_LMT_W      0x67
-#define DISEQC_CMD_DRIVE_E    0x68
-#define DISEQC_CMD_DRIVE_W    0x69
-#define DISEQC_CMD_STORE_POS  0x6a
-#define DISEQC_CMD_GOTO_POS   0x6b
-#define DISEQC_CMD_GOTO_X     0x6e
+enum DISEQC_CMDS : std::uint8_t {
+    DISEQC_CMD_RESET        = 0x00,
+    DISEQC_CMD_CLR_RESET    = 0x01,
+    DISEQC_CMD_WRITE_N0     = 0x38,
+    DISEQC_CMD_WRITE_N1     = 0x39,
+    DISEQC_CMD_WRITE_FREQ   = 0x58,
+    DISEQC_CMD_ODU          = 0x5A,
+    DISEQC_CMD_ODU_MDU      = 0x5C,
+    DISEQC_CMD_HALT         = 0x60,
+    DISEQC_CMD_LMT_OFF      = 0x63,
+    DISEQC_CMD_LMT_E        = 0x66,
+    DISEQC_CMD_LMT_W        = 0x67,
+    DISEQC_CMD_DRIVE_E      = 0x68,
+    DISEQC_CMD_DRIVE_W      = 0x69,
+    DISEQC_CMD_STORE_POS    = 0x6a,
+    DISEQC_CMD_GOTO_POS     = 0x6b,
+    DISEQC_CMD_GOTO_X       = 0x6e,
+};
 
-#define TO_RADS (M_PI / 180.0)
-#define TO_DEC  (180.0 / M_PI)
+static constexpr double TO_RADS { M_PI / 180.0 };
+static constexpr double TO_DEC  { 180.0 / M_PI };
 
-#define EPS     1E-4
+static constexpr double EPS     { 1E-4 };
 
 #define LOC      QString("DiSEqCDevTree: ")
 
@@ -94,7 +99,7 @@ QString DiSEqCDevDevice::TableToString(uint type, const TypeTableVec &table)
     for (const auto &item : table)
         if (type == item.value)
             return item.name;
-    return QString();
+    return {};
 }
 
 uint DiSEqCDevDevice::TableFromString(const QString   &type,
@@ -474,10 +479,8 @@ bool DiSEqCDevTree::Store(uint cardid, const QString &device)
     return true;
 }
 
-bool DiSEqCDevTree::SetTone(bool on) const
+bool DiSEqCDevTree::SetTone([[maybe_unused]] bool on) const
 {
-    (void) on;
-
     bool success = false;
 
 #ifdef USING_DVB
@@ -666,7 +669,9 @@ static bool send_diseqc(int fd, const dvb_diseqc_master_cmd cmd)
  *  \param data_len Length of optional data.
  *  \param data Pointer to optional data.
  */
-bool DiSEqCDevTree::SendCommand(uint adr, uint cmd, uint repeats,
+bool DiSEqCDevTree::SendCommand([[maybe_unused]] uint adr,
+                                [[maybe_unused]] uint cmd,
+                                [[maybe_unused]] uint repeats,
                                 cmd_vec_t &data) const
 {
     // check payload validity
@@ -678,9 +683,6 @@ bool DiSEqCDevTree::SendCommand(uint adr, uint cmd, uint repeats,
 
 #ifndef USING_DVB
 
-    (void) adr;
-    (void) cmd;
-    (void) repeats;
     return false;
 
 #else // if USING_DVB
@@ -795,12 +797,14 @@ void DiSEqCDevTree::Open(int fd_frontend, bool is_SCR)
 
 bool DiSEqCDevTree::SetVoltage(uint voltage)
 {
-
     if (voltage == m_lastVoltage)
         return true;
 
-    int volts = ((voltage == SEC_VOLTAGE_18) ? 18 :
-                 ((voltage == SEC_VOLTAGE_13) ? 13 : 0));
+    int volts {0};
+    if (voltage == SEC_VOLTAGE_18)
+        volts = 18;
+    else if (voltage == SEC_VOLTAGE_13)
+        volts = 13;
 
     LOG(VB_CHANNEL, LOG_INFO, LOC + "Changing LNB voltage to " +
             QString("%1V").arg(volts));
@@ -1355,14 +1359,10 @@ void DiSEqCDevSwitch::SetNumPorts(uint num_ports)
     m_numPorts = num_ports;
 }
 
-bool DiSEqCDevSwitch::ExecuteLegacy(const DiSEqCDevSettings &settings,
-                                    const DTVMultiplex &tuning,
-                                    uint pos)
+bool DiSEqCDevSwitch::ExecuteLegacy([[maybe_unused]] const DiSEqCDevSettings &settings,
+                                    [[maybe_unused]] const DTVMultiplex &tuning,
+                                    [[maybe_unused]] uint pos)
 {
-    (void) settings;
-    (void) tuning;
-    (void) pos;
-
 #if defined(USING_DVB) && defined(FE_DISHNETWORK_SEND_LEGACY_CMD)
     static const cmd_vec_t kSw21Cmds  { 0x34, 0x65, };
     static const cmd_vec_t kSw42Cmds  { 0x46, 0x17, };
@@ -1428,9 +1428,6 @@ bool DiSEqCDevSwitch::ExecuteLegacy(const DiSEqCDevSettings &settings,
 #ifdef USING_DVB
 static bool set_tone(int fd, fe_sec_tone_mode tone)
 {
-    (void) fd;
-    (void) tone;
-
     bool success = false;
 
     for (uint retry = 0; !success && (retry < TIMEOUT_RETRIES); retry++)
@@ -1453,9 +1450,6 @@ static bool set_tone(int fd, fe_sec_tone_mode tone)
 #ifdef USING_DVB
 static bool set_voltage(int fd, fe_sec_voltage volt)
 {
-    (void) fd;
-    (void) volt;
-
     bool success = false;
 
     for (uint retry = 0; !success && (retry < TIMEOUT_RETRIES); retry++)
@@ -1478,9 +1472,6 @@ static bool set_voltage(int fd, fe_sec_voltage volt)
 #ifdef USING_DVB
 static bool mini_diseqc(int fd, fe_sec_mini_cmd cmd)
 {
-    (void) fd;
-    (void) cmd;
-
     bool success = false;
 
     for (uint retry = 0; !success && (retry < TIMEOUT_RETRIES); retry++)
@@ -1517,12 +1508,10 @@ bool DiSEqCDevSwitch::ExecuteTone(const DiSEqCDevSettings &/*settings*/,
     return false;
 }
 
-bool DiSEqCDevSwitch::ExecuteVoltage(const DiSEqCDevSettings &settings,
-                                     const DTVMultiplex &tuning, uint pos)
+bool DiSEqCDevSwitch::ExecuteVoltage([[maybe_unused]] const DiSEqCDevSettings &settings,
+                                     [[maybe_unused]] const DTVMultiplex &tuning,
+                                     uint pos)
 {
-    (void) settings;
-    (void) tuning;
-
     LOG(VB_CHANNEL, LOG_INFO, LOC + "Changing to Voltage Switch port " +
             QString("%1/2").arg(pos + 1));
 
@@ -1539,12 +1528,10 @@ bool DiSEqCDevSwitch::ExecuteVoltage(const DiSEqCDevSettings &settings,
     return false;
 }
 
-bool DiSEqCDevSwitch::ExecuteMiniDiSEqC(const DiSEqCDevSettings &settings,
-                                        const DTVMultiplex &tuning, uint pos)
+bool DiSEqCDevSwitch::ExecuteMiniDiSEqC([[maybe_unused]] const DiSEqCDevSettings &settings,
+                                        [[maybe_unused]] const DTVMultiplex &tuning,
+                                        uint pos)
 {
-    (void) settings;
-    (void) tuning;
-
     LOG(VB_CHANNEL, LOG_INFO, LOC + "Changing to MiniDiSEqC Switch port " +
             QString("%1/2").arg(pos + 1));
 
@@ -1596,7 +1583,9 @@ bool DiSEqCDevSwitch::ShouldSwitch(const DiSEqCDevSettings &settings,
     }
     else if (kTypeVoltage == m_type ||
              kTypeTone == m_type)
+    {
         return true;
+    }
 
     return m_lastPos != (uint)pos;
 }
@@ -1722,7 +1711,7 @@ bool DiSEqCDevRotor::Execute(const DiSEqCDevSettings &settings,
         m_lastPosition = position;
         m_reset = false;
         if (success)
-            // prevent tuning paramaters overiding rotor parameters
+            // prevent tuning parameters overriding rotor parameters
             usleep(DISEQC_LONG_WAIT);
     }
 
@@ -1788,7 +1777,7 @@ bool DiSEqCDevRotor::IsMoving(const DiSEqCDevSettings &settings) const
 }
 
 uint DiSEqCDevRotor::GetVoltage(const DiSEqCDevSettings &settings,
-                                const DTVMultiplex         &tuning) const
+                                const DTVMultiplex      &tuning) const
 {
     // override voltage if the last position is known and the rotor is moving
     if (IsMoving(settings))
@@ -1830,18 +1819,10 @@ bool DiSEqCDevRotor::Load(void)
 
         // form of "angle1=index1:angle2=index2:..."
         QString positions = query.value(1).toString();
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList pos = positions.split(":", QString::SkipEmptyParts);
-#else
         QStringList pos = positions.split(":", Qt::SkipEmptyParts);
-#endif
-        for (const auto & kv : qAsConst(pos))
+        for (const auto & kv : std::as_const(pos))
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            const QStringList eq = kv.split("=", QString::SkipEmptyParts);
-#else
             const QStringList eq = kv.split("=", Qt::SkipEmptyParts);
-#endif
             if (eq.size() == 2)
                 m_posmap[eq[0].toFloat()] = eq[1].toUInt();
         }
@@ -2132,21 +2113,22 @@ bool DiSEqCDevSCR::Execute(const DiSEqCDevSettings &settings, const DTVMultiplex
     bool     high_band  = lnb->IsHighBand(tuning);
     bool     horizontal = lnb->IsHorizontal(tuning);
     uint32_t frequency  = lnb->GetIntermediateFrequency(settings, tuning);
-    uint t = (frequency / 1000 + m_scrFrequency + 2) / 4 - 350;
+    uint t = ((frequency / 1000 + m_scrFrequency + 2) / 4) - 350;
 
     // retrieve position settings (value should be 0 or 1)
     auto scr_position = (dvbdev_pos_t)int(settings.GetValue(GetDeviceID()));
 
     // check parameters
-    if (m_scrUserband > 8)
+    if (m_scrUserband > 7)
     {
-        LOG(VB_GENERAL, LOG_INFO, QString("SCR: Userband ID=%1 is out of standard range!")
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("SCR: Userband ID=%1 is out of range (0-7)!")
         .arg(m_scrUserband));
+        return false;
     }
 
     if (t >= 1024)
     {
-        LOG(VB_GENERAL, LOG_ERR, LOC + "SCR: T out of range!");
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("SCR: T=%1 is out of range!").arg(t));
         return false;
     }
 
@@ -2183,10 +2165,11 @@ bool DiSEqCDevSCR::Execute(const DiSEqCDevSettings &settings, const DTVMultiplex
 bool DiSEqCDevSCR::PowerOff(void) const
 {
     // check parameters
-    if (m_scrUserband > 8)
+    if (m_scrUserband > 7)
     {
-        LOG(VB_GENERAL, LOG_INFO, QString("SCR: Userband ID=%1 is out of standard range!")
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("SCR: Userband ID=%1 is out of range (0-7)!")
         .arg(m_scrUserband));
+        return false;
     }
 
     LOG(VB_CHANNEL, LOG_INFO, LOC + QString("SCR: Power off UB=%1%7")
@@ -2205,10 +2188,10 @@ bool DiSEqCDevSCR::PowerOff(void) const
     return SendCommand(DISEQC_CMD_ODU, m_repeat, data);
 }
 
-bool DiSEqCDevSCR::SendCommand(uint cmd, uint repeats, cmd_vec_t &data) const
+bool DiSEqCDevSCR::SendCommand(uint cmd,
+                               [[maybe_unused]] uint repeats,
+                               cmd_vec_t &data) const
 {
-    (void) repeats;
-
     // power on bus
     if (!m_tree.SetVoltage(SEC_VOLTAGE_18))
         return false;
@@ -2232,8 +2215,8 @@ uint DiSEqCDevSCR::GetVoltage(const DiSEqCDevSettings &/*settings*/,
 
 uint32_t DiSEqCDevSCR::GetIntermediateFrequency(const uint32_t frequency) const
 {
-    uint t = (frequency / 1000 + m_scrFrequency + 2) / 4 - 350;
-    return ((t + 350) * 4) * 1000 - frequency;
+    uint t = ((frequency / 1000 + m_scrFrequency + 2) / 4) - 350;
+    return (((t + 350) * 4) * 1000) - frequency;
 }
 
 bool DiSEqCDevSCR::Load(void)

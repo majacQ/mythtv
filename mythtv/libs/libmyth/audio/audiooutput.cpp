@@ -2,15 +2,15 @@
 #include <cstdlib>
 
 // Qt utils: to parse audio list
+#include <QtGlobal>
 #include <QFile>
 #include <QDateTime>
 #include <QDir>
 
-#include "mythconfig.h"
-#include "audiooutput.h"
-#include "mythmiscutil.h"
-#include "compat.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythmiscutil.h"
 
+#include "audiooutput.h"
 #include "audiooutputnull.h"
 #ifdef _WIN32
 #include "audiooutputdx.h"
@@ -22,7 +22,7 @@
 #ifdef USING_ALSA
 #include "audiooutputalsa.h"
 #endif
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #include "audiooutputca.h"
 #endif
 #ifdef USING_JACK
@@ -43,6 +43,7 @@ extern "C" {
 #include "libavcodec/avcodec.h"  // to get codec id
 }
 #include "audioconvert.h"
+#include "mythaverror.h"
 
 #define LOC QString("AO: ")
 
@@ -76,7 +77,7 @@ AudioOutput *AudioOutput::OpenAudio(
 }
 
 AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
-                                    bool willsuspendpa)
+                                    [[maybe_unused]] bool willsuspendpa)
 {
     QString &main_device = settings.m_mainDevice;
     AudioOutput *ret = nullptr;
@@ -97,7 +98,7 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
                 "WARNING: ***Pulse Audio is running***");
         }
     }
-#endif
+#endif // USING_PULSE
 
     settings.FixPassThrough();
 
@@ -109,7 +110,7 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
         LOG(VB_GENERAL, LOG_ERR, "Audio output device is set to PulseAudio "
                                  "but PulseAudio support is not compiled in!");
         return nullptr;
-#endif
+#endif // USING_PULSEOUTPUT
     }
     if (main_device.startsWith("NULL"))
     {
@@ -140,7 +141,7 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
             }
             delete alsadevs;
         }
-#endif
+#endif // USING_ALSA
         if (main_device.contains("pulse", Qt::CaseInsensitive))
         {
             ispulse = true;
@@ -150,10 +151,7 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
             pulsestatus = PulseHandler::Suspend(PulseHandler::kPulseSuspend);
         }
     }
-#else // USING_PULSE
-    // Quiet warning error when not compiling with pulseaudio
-    Q_UNUSED(willsuspendpa);
-#endif
+#endif // USING_PULSE
 
     if (main_device.startsWith("ALSA:"))
     {
@@ -216,10 +214,14 @@ AudioOutput *AudioOutput::OpenAudio(AudioSettings &settings,
     }
 #if defined(USING_OSS)
     else
+    {
         ret = new AudioOutputOSS(settings);
-#elif CONFIG_DARWIN
+    }
+#elif defined(Q_OS_DARWIN)
     else
+    {
         ret = new AudioOutputCA(settings);
+    }
 #endif
 
     if (!ret)
@@ -397,7 +399,7 @@ static void fillSelectionsFromDir(const QDir &dir,
                                   AudioOutput::ADCVect *list)
 {
     QFileInfoList entries = dir.entryInfoList();
-    for (const auto& fi : qAsConst(entries))
+    for (const auto& fi : std::as_const(entries))
     {
         QString name = fi.absoluteFilePath();
         QString desc = AudioOutput::tr("OSS device");
@@ -468,7 +470,7 @@ AudioOutput::ADCVect* AudioOutput::GetOutputList(void)
         }
     }
 #endif
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 
     {
         QMap<QString, QString> *devs = AudioOutputCA::GetDevices(nullptr);
@@ -599,7 +601,8 @@ int AudioOutput::DecodeAudio(AVCodecContext *ctx,
     data_size = 0;
     if (!m_frame)
     {
-        if (!(m_frame = av_frame_alloc()))
+        m_frame = av_frame_alloc();
+        if (m_frame == nullptr)
         {
             return AVERROR(ENOMEM);
         }
@@ -634,7 +637,9 @@ int AudioOutput::DecodeAudio(AVCodecContext *ctx,
         return ret;
     }
     else
+    {
         ret = pkt->size;
+    }
 
     if (!got_frame)
     {
@@ -647,7 +652,7 @@ int AudioOutput::DecodeAudio(AVCodecContext *ctx,
     AudioFormat fmt =
         AudioOutputSettings::AVSampleFormatToFormat(format, ctx->bits_per_raw_sample);
 
-    data_size = m_frame->nb_samples * m_frame->channels * av_get_bytes_per_sample(format);
+    data_size = m_frame->nb_samples * m_frame->ch_layout.nb_channels * av_get_bytes_per_sample(format);
 
     // May need to convert audio to S16
     AudioConvert converter(fmt, CanProcess(fmt) ? fmt : FORMAT_S16);
@@ -656,7 +661,7 @@ int AudioOutput::DecodeAudio(AVCodecContext *ctx,
     if (av_sample_fmt_is_planar(format))
     {
         src = buffer;
-        converter.InterleaveSamples(m_frame->channels,
+        converter.InterleaveSamples(m_frame->ch_layout.nb_channels,
                                     src,
                                     (const uint8_t **)m_frame->extended_data,
                                     data_size);

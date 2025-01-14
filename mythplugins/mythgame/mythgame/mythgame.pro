@@ -22,7 +22,7 @@ INSTALLS += target installscripts installgiantbomb installgiantbombxsl
 HEADERS += gamehandler.h rominfo.h gamesettings.h gamedbcheck.h gameui.h
 HEADERS += rom_metadata.h romedit.h gamedetails.h gamescan.h
 
-SOURCES += main.cpp gamehandler.cpp rominfo.cpp gameui.cpp
+SOURCES += mythgame.cpp gamehandler.cpp rominfo.cpp gameui.cpp
 SOURCES += gamesettings.cpp gamedbcheck.cpp rom_metadata.cpp romedit.cpp
 SOURCES += gamedetails.cpp gamescan.cpp
 
@@ -31,8 +31,6 @@ DEFINES += MPLUGIN_API NOUNCRYPT
 use_hidesyms {
     QMAKE_CXXFLAGS += -fvisibility=hidden
 }
-
-LIBS += -lz -lminizip
 
 QT += xml sql opengl network widgets
 

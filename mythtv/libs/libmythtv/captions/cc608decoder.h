@@ -10,15 +10,11 @@
 #include <vector>
 
 #include <QString>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QChar>
 
-#include "format.h"
-#include "mythchrono.h"
+#include "libmythtv/format.h"
+#include "libmythbase/mythchrono.h"
 
 using CC608Seen        = std::array<bool,4>;
 using CC608ProgramType = std::array<QString,96>;
@@ -35,14 +31,14 @@ class CC608Input
                              std::chrono::milliseconds timecode, char type) = 0;
 };
 
-enum
+enum : std::uint8_t
 {
     kHasMPAA       = 0x1,
     kHasTPG        = 0x2,
     kHasCanEnglish = 0x4,
     kHasCanFrench  = 0x8,
 };
-enum
+enum : std::uint8_t
 {
     kRatingMPAA = 0,
     kRatingTPG,
@@ -58,7 +54,7 @@ class CC608Decoder
     ~CC608Decoder();
 
     void FormatCC(std::chrono::milliseconds tc, int code1, int code2);
-    void FormatCCField(std::chrono::milliseconds tc, int field, int data);
+    void FormatCCField(std::chrono::milliseconds tc, size_t field, int data);
     bool FalseDup(std::chrono::milliseconds tc, int field, int data);
 
     void DecodeVPS(const unsigned char *buf);
@@ -80,9 +76,9 @@ class CC608Decoder
 
   private:
     QChar CharCC(int code) const { return m_stdChar[code]; }
-    void ResetCC(int mode);
-    void BufferCC(int mode, int len, int clr);
-    int NewRowCC(int mode, int len);
+    void ResetCC(size_t mode);
+    void BufferCC(size_t mode, int len, int clr);
+    int NewRowCC(size_t mode, int len);
 
     QString XDSDecodeString(const std::vector<unsigned char>&buf,
                             uint start, uint end) const;
@@ -146,11 +142,7 @@ class CC608Decoder
     uint            m_xdsCrcPassed          {0};
     uint            m_xdsCrcFailed          {0};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex  m_xdsLock               {QMutex::Recursive};
-#else
     mutable QRecursiveMutex  m_xdsLock;
-#endif
     std::array<uint,2> m_xdsRatingSystems   {0};
     std::array<std::array<uint,4>,2> m_xdsRating       {{}};
     std::array<QString,2>            m_xdsProgramName;

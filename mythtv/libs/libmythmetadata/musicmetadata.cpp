@@ -10,25 +10,19 @@
 #include <utility>
 
 // mythtv
-#include "mythcontext.h"
-#include "mythdate.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythdownloadmanager.h"
-#include "mythlogging.h"
-#include "mythdate.h"
-#include "remotefile.h"
-#include "storagegroup.h"
-#include "mythsystem.h"
-#include "mythcoreutil.h"
-#include "mythmiscutil.h"
-
-// mythbase
-#include "mythsorthelper.h"
-
-// libmythui
-#include "mythprogressdialog.h"
-#include "mythmainwindow.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsorthelper.h"
+#include "libmythbase/mythsystem.h"
+#include "libmythbase/remotefile.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythbase/unziputil.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythprogressdialog.h"
 
 // libmythmetadata
 #include "metaio.h"
@@ -64,12 +58,12 @@ MusicMetadata::MusicMetadata(int lid, QString lbroadcaster, QString lchannel, QS
             m_broadcaster(std::move(lbroadcaster)),
             m_channel(std::move(lchannel)),
             m_description(std::move(ldescription)),
+            m_urls(lurls),
             m_logoUrl(std::move(llogourl)),
             m_metaFormat(std::move(lmetaformat)),
             m_country(std::move(lcountry)),
             m_language(std::move(llanguage))
 {
-    m_urls = lurls;
     setRepo(RT_Radio);
     ensureSortFields();
 }
@@ -128,7 +122,10 @@ MusicMetadata& MusicMetadata::operator=(const MusicMetadata &rhs)
     m_compartistId = rhs.m_compartistId;
     m_albumId = rhs.m_albumId;
     m_genreId = rhs.m_genreId;
-    m_albumArt = nullptr;
+    if (rhs.m_albumArt)
+    {
+        m_albumArt = new AlbumArtImages(this, *rhs.m_albumArt);
+    }
     m_lyricsData = nullptr;
     m_format = rhs.m_format;
     m_changed = rhs.m_changed;
@@ -347,7 +344,7 @@ bool MusicMetadata::updateStreamList(void)
     LOG(VB_GENERAL, LOG_INFO, "MusicMetadata: downloading radio streams list");
 
     // download compressed stream file
-    if (!GetMythDownloadManager()->download(QString(STREAMUPDATEURL), &compressedData), false)
+    if (!GetMythDownloadManager()->download(QString(STREAMUPDATEURL), &compressedData, false))
     {
         LOG(VB_GENERAL, LOG_ERR, "MusicMetadata: failed to download radio stream list");
         gCoreContext->SaveSettingOnHost("MusicStreamListModified", "", nullptr);
@@ -357,12 +354,13 @@ bool MusicMetadata::updateStreamList(void)
     // uncompress the data
     uncompressedData = gzipUncompress(compressedData);
 
+    // load the xml
+    QDomDocument domDoc;
+
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QString errorMsg;
     int errorLine = 0;
     int errorColumn = 0;
-
-    // load the xml
-    QDomDocument domDoc;
 
     if (!domDoc.setContent(uncompressedData, false, &errorMsg,
                            &errorLine, &errorColumn))
@@ -375,6 +373,20 @@ bool MusicMetadata::updateStreamList(void)
         gCoreContext->SaveSettingOnHost("MusicStreamListModified", "", nullptr);
         return false;
     }
+#else
+    auto parseResult = domDoc.setContent(uncompressedData);
+    if (!parseResult)
+    {
+        LOG(VB_GENERAL, LOG_ERR,
+            "MusicMetadata: Could not read content of streams.xml" +
+                QString("\n\t\t\tError parsing %1").arg(STREAMUPDATEURL) +
+                QString("\n\t\t\tat line: %1  column: %2 msg: %3")
+                .arg(parseResult.errorLine).arg(parseResult.errorColumn)
+                .arg(parseResult.errorMessage));
+        gCoreContext->SaveSettingOnHost("MusicStreamListModified", "", nullptr);
+        return false;
+    }
+#endif
 
     MSqlQuery query(MSqlQuery::InitCon());
     query.prepare("DELETE FROM music_streams;");
@@ -654,18 +666,18 @@ int MusicMetadata::getGenreId()
     return m_genreId;
 }
 
-void MusicMetadata::setUrl(const QString& url, uint index)
+void MusicMetadata::setUrl(const QString& url, size_t index)
 {
     if (index < STREAMURLCOUNT)
         m_urls[index] = url;
 }
 
-QString MusicMetadata::Url(uint index)
+QString MusicMetadata::Url(size_t index)
 {
     if (index < STREAMURLCOUNT)
         return m_urls[index];
 
-    return QString();
+    return {};
 }
 
 void MusicMetadata::dumpToDatabase()
@@ -1104,7 +1116,9 @@ void MusicMetadata::toMap(InfoMap &metadataMap, const QString &prefix)
             metadataMap[prefix + "album"] = QString("%1 - %2").arg(m_broadcaster, m_channel);
     }
     else
+    {
         metadataMap[prefix + "album"] = m_album;
+    }
 
     metadataMap[prefix + "title"] = m_title;
     metadataMap[prefix + "formattitle"] = FormatTitle();
@@ -1116,7 +1130,7 @@ void MusicMetadata::toMap(InfoMap &metadataMap, const QString &prefix)
     metadataMap[prefix + "year"] = (m_year > 0 ? QString("%1").arg(m_year) : "");
 
     QString fmt = (m_length >= 1h) ? "H:mm:ss" : "mm:ss";
-    metadataMap[prefix + "length"] = MythFormatTime(m_length, fmt);
+    metadataMap[prefix + "length"] = MythDate::formatTime(m_length, fmt);
 
     if (m_lastPlay.isValid())
     {
@@ -1158,7 +1172,9 @@ void MusicMetadata::toMap(InfoMap &metadataMap, const QString &prefix)
         metadataMap[prefix + "url"] = url.toString(QUrl::RemoveUserInfo);
     }
     else
+    {
         metadataMap[prefix + "url"] = m_filename;
+    }
 
     metadataMap[prefix + "logourl"] = m_logoUrl;
     metadataMap[prefix + "metadataformat"] = m_metaFormat;
@@ -1207,7 +1223,7 @@ void MusicMetadata::setEmbeddedAlbumArt(AlbumArtList &albumart)
     if (!m_albumArt)
         m_albumArt = new AlbumArtImages(this, false);
 
-    for (auto *art : qAsConst(albumart))
+    for (auto *art : std::as_const(albumart))
     {
         art->m_filename = QString("%1-%2").arg(m_id).arg(art->m_filename);
         m_albumArt->addImage(art);
@@ -1266,16 +1282,14 @@ QString MusicMetadata::getAlbumArtFile(void)
     AlbumArtImage *albumart_image = nullptr;
     QString res;
 
-    if ((albumart_image = m_albumArt->getImage(IT_FRONTCOVER)))
-        res = albumart_image->m_filename; // NOLINT(bugprone-branch-clone)
-    else if ((albumart_image = m_albumArt->getImage(IT_UNKNOWN)))
+    for (ImageType Type : {IT_FRONTCOVER, IT_UNKNOWN, IT_BACKCOVER, IT_INLAY, IT_CD})
+    {
+        albumart_image = m_albumArt->getImage(Type);
+        if (albumart_image == nullptr)
+            continue;
         res = albumart_image->m_filename;
-    else if ((albumart_image = m_albumArt->getImage(IT_BACKCOVER)))
-        res = albumart_image->m_filename;
-    else if ((albumart_image = m_albumArt->getImage(IT_INLAY)))
-        res = albumart_image->m_filename;
-    else if ((albumart_image = m_albumArt->getImage(IT_CD)))
-        res = albumart_image->m_filename;
+        break;
+    }
 
     // check file exists
     if (!res.isEmpty() && albumart_image)
@@ -1296,11 +1310,16 @@ QString MusicMetadata::getAlbumArtFile(void)
                 if (!GetMythDownloadManager()->download(res, albumart_image->m_filename))
                 {
                     m_albumArt->getImageList()->removeAll(albumart_image);
-                    return QString("");
+                    return {""};
                 }
             }
 
             res = albumart_image->m_filename;
+        }
+        else if (repo == RT_CD)
+        {
+            // CD tracks can only be played locally, so coverart is local too
+            return res;
         }
         else
         {
@@ -1309,7 +1328,7 @@ QString MusicMetadata::getAlbumArtFile(void)
 
             if (url.path().isEmpty() || url.host().isEmpty() || url.userName().isEmpty())
             {
-                return QString("");
+                return {""};
             }
 
             if (!RemoteFile::Exists(res))
@@ -1346,7 +1365,7 @@ QString MusicMetadata::getAlbumArtFile(void)
         return res;
     }
 
-    return QString("");
+    return {""};
 }
 
 QString MusicMetadata::getAlbumArtFile(ImageType type)
@@ -1358,7 +1377,7 @@ QString MusicMetadata::getAlbumArtFile(ImageType type)
     if (albumart_image)
         return albumart_image->m_filename;
 
-    return QString("");
+    return {""};
 }
 
 AlbumArtImages *MusicMetadata::getAlbumArtImages(void)
@@ -1603,7 +1622,7 @@ void AllMusic::resync()
 
     // get a list of tracks in our cache that's now not in the database
     QList<MusicMetadata::IdType> deleteList;
-    for (const auto *track : qAsConst(m_allMusic))
+    for (const auto *track : std::as_const(m_allMusic))
     {
         if (!idList.contains(track->ID()))
         {
@@ -1659,7 +1678,7 @@ bool AllMusic::updateMetadata(int an_id, MusicMetadata *the_track)
 /// \brief Check each MusicMetadata entry and save those that have changed (ratings, etc.)
 void AllMusic::save(void)
 {
-    for (auto *item : qAsConst(m_allMusic))
+    for (auto *item : std::as_const(m_allMusic))
     {
         if (item->hasChanged())
             item->persist();
@@ -1701,7 +1720,7 @@ bool AllMusic::checkCDTrack(MusicMetadata *the_track)
 
 MusicMetadata* AllMusic::getCDMetadata(int the_track)
 {
-    for (auto *anit : qAsConst(m_cdData))
+    for (auto *anit : std::as_const(m_cdData))
     {
         if (anit->Track() == the_track)
         {
@@ -1772,7 +1791,7 @@ void AllStream::loadStreams(void)
         while (query.next())
         {
             UrlList urls;
-            for (int x = 0; x < STREAMURLCOUNT; x++)
+            for (size_t x = 0; x < STREAMURLCOUNT; x++)
                 urls[x] = query.value(4 + x).toString();
 
             auto *mdata = new MusicMetadata(
@@ -1894,6 +1913,15 @@ AlbumArtImages::AlbumArtImages(MusicMetadata *metadata, bool loadFromDB)
 {
     if (loadFromDB)
         findImages();
+}
+
+AlbumArtImages::AlbumArtImages(MusicMetadata *metadata, const AlbumArtImages &other)
+    : m_parent(metadata)
+{
+    for (const auto &srcImage : std::as_const(other.m_imageList))
+    {
+        m_imageList.append(new AlbumArtImage(srcImage));
+    }
 }
 
 AlbumArtImages::~AlbumArtImages()
@@ -2105,7 +2133,7 @@ void AlbumArtImages::scanForImages()
 
 AlbumArtImage *AlbumArtImages::getImage(ImageType type)
 {
-    for (auto *item : qAsConst(m_imageList))
+    for (auto *item : std::as_const(m_imageList))
     {
         if (item->m_imageType == type)
             return item;
@@ -2116,7 +2144,7 @@ AlbumArtImage *AlbumArtImages::getImage(ImageType type)
 
 AlbumArtImage *AlbumArtImages::getImageByID(int imageID)
 {
-    for (auto *item : qAsConst(m_imageList))
+    for (auto *item : std::as_const(m_imageList))
     {
         if (item->m_id == imageID)
             return item;
@@ -2129,7 +2157,7 @@ QStringList AlbumArtImages::getImageFilenames(void) const
 {
     QStringList paths;
 
-    for (const auto *item : qAsConst(m_imageList))
+    for (const auto *item : std::as_const(m_imageList))
         paths += item->m_filename;
 
     return paths;
@@ -2226,7 +2254,7 @@ void AlbumArtImages::addImage(const AlbumArtImage * const newImage)
     // do we already have an image of this type?
     AlbumArtImage *image = nullptr;
 
-    for (auto *item : qAsConst(m_imageList))
+    for (auto *item : std::as_const(m_imageList))
     {
         if (item->m_imageType == newImage->m_imageType
             && item->m_embedded == newImage->m_embedded)
@@ -2284,7 +2312,7 @@ void AlbumArtImages::dumpToDatabase(void)
     }
 
     // now add the albumart to the db
-    for (auto *image : qAsConst(m_imageList))
+    for (auto *image : std::as_const(m_imageList))
     {
         //TODO: for the moment just ignore artist images
         if (image->m_imageType == IT_ARTIST)

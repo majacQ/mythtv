@@ -12,17 +12,19 @@
  *
  * ============================================================ */
 
-#include <iostream>
+// C++
+#include <algorithm>
 #include <cstdlib>
+#include <iostream>
 
 // qt
 #include <QKeyEvent>
 
-// myth
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythmainwindow.h>
-#include <mythdate.h>
+// MythTV
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythui/mythmainwindow.h>
 
 // zoneminder
 #include "zmevents.h"
@@ -109,7 +111,7 @@ bool ZMEvents::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -140,13 +142,21 @@ bool ZMEvents::keyPressEvent(QKeyEvent *event)
             getEventList();
         }
         else if (action == "1")
+        {
             setGridLayout(1);
+        }
         else if (action == "2")
+        {
             setGridLayout(2);
+        }
         else if (action == "3")
+        {
             setGridLayout(3);
+        }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -219,10 +229,8 @@ void ZMEvents::dateChanged()
     getEventList();
 }
 
-void ZMEvents::eventChanged(MythUIButtonListItem *item)
+void ZMEvents::eventChanged([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void) item;
-
     if (m_eventNoText)
     {
         if (m_eventGrid->GetCount() > 0)
@@ -290,8 +298,7 @@ void ZMEvents::playerExited(void)
 {
     // refresh the grid and restore the saved position
 
-    if (m_savedPosition > m_eventList->size() - 1)
-        m_savedPosition = m_eventList->size() - 1;
+    m_savedPosition = std::min(m_savedPosition, m_eventList->size() - 1);
 
     updateUIList();
     m_eventGrid->SetItemCurrent(m_savedPosition);
@@ -385,7 +392,7 @@ void ZMEvents::setGridLayout(int layout)
     QString layoutName = QString("layout%1").arg(layout);
     QList<MythUIType *> *children = GetAllChildren();
 
-    for (auto *type : qAsConst(*children))
+    for (auto *type : std::as_const(*children))
     {
         name = type->objectName();
         if (name.startsWith("layout"))

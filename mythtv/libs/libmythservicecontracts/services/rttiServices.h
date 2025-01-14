@@ -6,15 +6,15 @@
 //
 // Copyright (c) 2014 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef RTTISERVICES_H_
 #define RTTISERVICES_H_
 
-#include "service.h"
-#include "datacontracts/enum.h"
+#include "libmythservicecontracts/datacontracts/enum.h"
+#include "libmythservicecontracts/service.h"
 
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////

@@ -1,25 +1,26 @@
 // -*- Mode: c++ -*-
 
 // POSIX headers
-#include <fcntl.h>
-#include <sys/select.h>
-#include <sys/ioctl.h>
 #include <chrono> // for milliseconds
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
 #include <thread> // for sleep_for
 
 // Qt headers
 #include <QString>
 
 // MythTV headers
-#include "dvbstreamhandler.h"
-#include "dvbchannel.h"
-#include "dtvsignalmonitor.h"
-#include "streamlisteners.h"
-#include "mpegstreamdata.h"
+#include "libmythbase/mythlogging.h"
+
 #include "cardutil.h"
-#include "dvbtypes.h" // for pid filtering
 #include "diseqc.h" // for rotor retune
-#include "mythlogging.h"
+#include "dtvsignalmonitor.h"
+#include "dvbchannel.h"
+#include "dvbstreamhandler.h"
+#include "dvbtypes.h" // for pid filtering
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/streamlisteners.h"
 
 #define LOC      QString("DVBSH[%1](%2): ").arg(m_inputId).arg(m_device)
 
@@ -29,6 +30,16 @@ QMutex             DVBStreamHandler::s_rec_supportsTsMonitoringLock;
 QMap<QString,DVBStreamHandler*> DVBStreamHandler::s_handlers;
 QMap<QString,uint>              DVBStreamHandler::s_handlersRefCnt;
 QMutex                          DVBStreamHandler::s_handlersLock;
+
+#if !defined(__suseconds_t)
+#ifdef Q_OS_MACOS
+using __suseconds_t = __darwin_suseconds_t;
+#else
+using __suseconds_t = long int;
+#endif
+#endif
+static constexpr __suseconds_t k50Milliseconds {static_cast<__suseconds_t>(50 * 1000)};
+
 
 DVBStreamHandler *DVBStreamHandler::Get(const QString &devname,
                                         int inputid)
@@ -100,10 +111,6 @@ void DVBStreamHandler::Return(DVBStreamHandler * & ref, int inputid)
 DVBStreamHandler::DVBStreamHandler(const QString &dvb_device, int inputid)
     : StreamHandler(dvb_device, inputid)
     , m_dvrDevPath(CardUtil::GetDeviceName(DVB_DEV_DVR, m_device))
-    , m_allowRetune(false)
-    , m_sigMon(nullptr)
-    , m_dvbChannel(nullptr)
-    , m_drb(nullptr)
 {
     setObjectName("DVBRead");
 }
@@ -227,7 +234,7 @@ void DVBStreamHandler::RunTS(void)
         else
         {
             // timeout gets reset by select, so we need to create new one
-            struct timeval timeout = { 0, 50 /* ms */ * 1000 /* -> usec */ };
+            struct timeval timeout = { 0, k50Milliseconds };
             int ret = select(dvr_fd+1, &fd_select_set, nullptr, nullptr, &timeout);
             if (ret == -1 && errno != EINTR)
             {

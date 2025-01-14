@@ -1,21 +1,16 @@
 #ifndef SCHEDULERECORDING_H_
 #define SCHEDULERECORDING_H_
 
-#include "mythscreentype.h"
+// MythTV
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythmetadata/metadatafactory.h"
+#include "libmythtv/recordinginfo.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythui/mythscreentype.h"
+
+// MythFrontend
 #include "schedulecommon.h"
-
-// libmythbase
-#include "mythdb.h"
-
-// libmyth
-#include "mythcontext.h"
-
-// libmythtv
-#include "recordingrule.h"
-#include "recordinginfo.h"
-
-// libmythmetadata
-#include "metadatafactory.h"
 
 class ProgramInfo;
 class MythUIText;
@@ -46,6 +41,7 @@ class SchedOptMixin
     MythUISpinBox    *m_endoffsetSpin   {nullptr};
     MythUIButtonList *m_dupmethodList   {nullptr};
     MythUIButtonList *m_dupscopeList    {nullptr};
+    MythUIButtonList *m_autoExtendList  {nullptr};
     MythUIButtonList *m_inputList       {nullptr};
     MythUICheckBox   *m_ruleactiveCheck {nullptr};
     MythUIButtonList *m_newrepeatList   {nullptr};
@@ -228,7 +224,7 @@ class ScheduleEditor : public ScheduleCommon,
 
     bool              m_loaded          {false};
 
-    enum View
+    enum View : std::uint8_t
     {
         kMainView,
         kSchedOptView,

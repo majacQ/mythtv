@@ -1,17 +1,18 @@
 // C++
+#include <algorithm>
 #include <iostream>
 
 // Qt
 #include <QString>
 
 // MythTV
-#include <mythmainwindow.h>
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdirs.h>
-#include <mythuicheckbox.h>
-#include <mythuibuttonlist.h>
-#include <mythsystemlegacy.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
 
 // mythbrowser
 #include "bookmarkmanager.h"
@@ -77,10 +78,7 @@ bool BrowserConfig::Create()
 void BrowserConfig::slotSave(void)
 {
     float zoom = m_zoomEdit->GetText().toFloat();
-    if (zoom > 5.0F)
-        zoom = 5.0F;
-    if (zoom < 0.3F)
-        zoom = 0.3F; 
+    zoom = std::clamp(zoom, 0.3F, 5.0F);
     gCoreContext->SaveSetting("WebBrowserZoomLevel", QString("%1").arg(zoom));
     gCoreContext->SaveSetting("WebBrowserCommand", m_commandEdit->GetText());
     int checkstate = 0;
@@ -247,7 +245,7 @@ bool BookmarkManager::keyPressEvent(QKeyEvent *event)
     for (int i = 0; i < actions.size() && !handled; i++)
     {
 
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -311,11 +309,17 @@ bool BookmarkManager::keyPressEvent(QKeyEvent *event)
             }
         }
         else if (action == "DELETE")
+        {
             slotDeleteCurrent();
+        }
         else if (action == "EDIT")
+        {
             slotEditBookmark();
+        }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -324,10 +328,8 @@ bool BookmarkManager::keyPressEvent(QKeyEvent *event)
     return handled;
 }
 
-void BookmarkManager::slotGroupSelected(MythUIButtonListItem *item)
+void BookmarkManager::slotGroupSelected([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void) item;
-
     UpdateURLList();
     m_bookmarkList->Refresh();
 }
@@ -365,7 +367,9 @@ void BookmarkManager::slotBookmarkClicked(MythUIButtonListItem *item)
             mainStack->AddScreen(mythbrowser);
         }
         else
+        {
             delete mythbrowser;
+        }
     }
     else
     {
@@ -553,7 +557,7 @@ void BookmarkManager::slotDoDeleteMarked(bool doDelete)
 
     QString category = m_groupList->GetValue();
 
-    for (auto *site : qAsConst(m_siteList))
+    for (auto *site : std::as_const(m_siteList))
     {
         if (site && site->m_selected)
             RemoveFromDB(site);
@@ -592,7 +596,7 @@ void BookmarkManager::slotShowMarked(void)
     QString zoom = gCoreContext->GetSetting("WebBrowserZoomLevel", "1.0");
     QStringList urls;
 
-    for (const auto *site : qAsConst(m_siteList))
+    for (const auto *site : std::as_const(m_siteList))
     {
         if (site && site->m_selected)
             urls.append(site->m_url);
@@ -610,7 +614,9 @@ void BookmarkManager::slotShowMarked(void)
             mainStack->AddScreen(mythbrowser);
         }
         else
+        {
             delete mythbrowser;
+        }
     }
     else
     {

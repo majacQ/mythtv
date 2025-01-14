@@ -9,7 +9,6 @@
 #include <QUdpSocket>
 #include <QStringList>
 
-#include "mythqtcompat.h"
 #include "mythbaseexp.h"
 
 /** \class ServerPool
@@ -21,12 +20,13 @@
  *  collectively for any new connections.
  *
  *  This can be subclassed with new 'newTcpConnection()' and 'newConnection()'
- *  methods to allow signalling for alternate socket types.
+ *  methods to allow signalling for alternate socket types.  For a minimal
+ *  example see MythServer.
  */
 
 class PrivUdpSocket;
 
-enum PoolServerType
+enum PoolServerType : std::uint8_t
 {
     kTCPServer,
     kUDPServer,
@@ -47,10 +47,10 @@ class MBASE_PUBLIC PrivTcpServer : public QTcpServer
    PoolServerType GetServerType(void) { return m_serverType; }
 
   signals:
-    void newConnection(qt_socket_fd_t socket);
+    void newConnection(qintptr socket);
 
   protected:
-    void incomingConnection(qt_socket_fd_t socket) override; // QTcpServer
+    void incomingConnection(qintptr socket) override; // QTcpServer
 
   private:
     PoolServerType m_serverType;
@@ -113,7 +113,7 @@ class MBASE_PUBLIC ServerPool : public QObject
 
   protected slots:
     virtual void newUdpDatagram(void);
-    virtual void newTcpConnection(qt_socket_fd_t socket);
+    virtual void newTcpConnection(qintptr socket);
 
   private:
     static void SelectDefaultListen(bool force=false);
@@ -126,6 +126,22 @@ class MBASE_PUBLIC ServerPool : public QObject
     QList<PrivTcpServer*>   m_tcpServers;
     QList<PrivUdpSocket*>   m_udpSockets;
     PrivUdpSocket          *m_lastUdpSocket {nullptr};
+};
+
+class MBASE_PUBLIC MythServer : public ServerPool
+{
+    Q_OBJECT
+  public:
+    explicit MythServer(QObject *parent = nullptr) : ServerPool(parent) {}
+
+  signals:
+    void newConnection(qintptr socket);
+
+  protected slots:
+    void newTcpConnection(qintptr socket) override // ServerPool
+    {
+        emit newConnection(socket);
+    }
 };
 
 #endif

@@ -1,23 +1,25 @@
 // ANSI C++ headers
 #include <chrono> // for milliseconds
 #include <thread> // for sleep_for
+#include <utility>
 
 // QT headers
 #include <QMap>                         // for QMap
-#include <utility>
 
 // MythTV headers
-#include "mythcorecontext.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythlogging.h"      // for LOG
+#include "libmythbase/programinfo.h"      // for ProgramInfo
+#include "libmythbase/referencecounter.h"
+#include "libmythprotoserver/requesthandler/fileserverutil.h"
+#include "libmythtv/inputinfo.h"          // for InputInfo
+#include "libmythtv/tv_rec.h"
+
+// MythBackend
 #include "encoderlink.h"
 #include "playbacksock.h"
-#include "tv_rec.h"
-#include "mythdate.h"
-#include "requesthandler/fileserverutil.h"
-#include "compat.h"
-#include "referencecounter.h"
-#include "inputinfo.h"                  // for InputInfo
-#include "mythlogging.h"                // for LOG
-#include "programinfo.h"                // for ProgramInfo
 
 #define LOC QString("EncoderLink(%1): ").arg(m_inputid)
 #define LOC_ERR QString("EncoderLink(%1) Error: ").arg(m_inputid)
@@ -205,8 +207,10 @@ TVState EncoderLink::GetState(void)
         retval = (TVState)m_sock->GetEncoderState(m_inputid);
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, QString("Broken for input: %1")
             .arg(m_inputid));
+    }
 
     return retval;
 }
@@ -230,7 +234,9 @@ uint EncoderLink::GetFlags(void)
         retval = m_sock->GetEncoderState(m_inputid);
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, LOC + "GetFlags failed");
+    }
 
     return retval;
 }
@@ -330,7 +336,6 @@ bool EncoderLink::CheckFile(ProgramInfo *pginfo)
         ReferenceLocker rlocker(m_sock);
         return m_sock->CheckFile(pginfo);
     }
-
     pginfo->SetPathname(GetPlaybackURL(pginfo));
     return pginfo->IsLocal();
 }
@@ -779,7 +784,7 @@ QString EncoderLink::GetInput(void) const
         return m_tv->GetInput();
 
     LOG(VB_GENERAL, LOG_ERR, "Should be local only query: GetInput");
-    return QString();
+    return {};
 }
 
 /** \fn EncoderLink::SetInput(QString)
@@ -798,7 +803,7 @@ QString EncoderLink::SetInput(QString input)
         return m_tv->SetInput(std::move(input));
 
     LOG(VB_GENERAL, LOG_ERR, "Should be local only query: SetInput");
-    return QString();
+    return {};
 }
 
 /**
@@ -971,7 +976,9 @@ void EncoderLink::GetNextProgram(BrowseDirection direction,
                            _chanid, seriesid, programid);
     }
     else
+    {
         LOG(VB_GENERAL, LOG_ERR, "Should be local only query: GetNextProgram");
+    }
 }
 
 bool EncoderLink::GetChannelInfo(uint &chanid, uint &sourceid,

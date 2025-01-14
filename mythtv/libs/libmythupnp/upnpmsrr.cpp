@@ -5,18 +5,21 @@
 //                                                                            
 //////////////////////////////////////////////////////////////////////////////
 
+#include <cmath>
+
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythlogging.h"
+
 #include "upnp.h"
 #include "upnpmsrr.h"
-#include "mythlogging.h"
-
-#include <cmath>
 
 /////////////////////////////////////////////////////////////////////////////
 //
 /////////////////////////////////////////////////////////////////////////////
 
 UPnpMSRR::UPnpMSRR( UPnpDevice *pDevice, const QString &sSharePath ) 
-               : Eventing( "UPnpMSRR", "MSRR_Event", sSharePath)
+               : Eventing( "UPnpMSRR", "MSRR_Event", sSharePath),
+                 m_sControlUrl("/MSRR_Control")
 {
     AddVariable(
         new StateVariable<unsigned short>("AuthorizationGrantedUpdateID",
@@ -33,11 +36,9 @@ UPnpMSRR::UPnpMSRR( UPnpDevice *pDevice, const QString &sSharePath )
     SetValue<unsigned short>("ValidationSucceededUpdateID" , 0);
     SetValue<unsigned short>("ValidationRevokedUpdateID"   , 0);
 
-    QString sUPnpDescPath =
-        UPnp::GetConfiguration()->GetValue( "UPnP/DescXmlPath", m_sSharePath );
+    QString sUPnpDescPath = XmlConfiguration().GetValue("UPnP/DescXmlPath", m_sSharePath);
 
     m_sServiceDescFileName = sUPnpDescPath + "MSRR_scpd.xml";
-    m_sControlUrl          = "/MSRR_Control";
 
     // Add our Service Definition to the device.
     RegisterService( pDevice );

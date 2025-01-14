@@ -2,10 +2,9 @@
 
 """API Client."""
 
-from __future__ import print_function
-from __future__ import absolute_import
 from os import fdopen
 
+from lxml import html
 from xml.etree import ElementTree
 import re
 import sys
@@ -19,16 +18,7 @@ except ImportError:
     sys.exit('Install python-requests or python3-requests')
 
 from ._version import __version__
-
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
-# If MYTHTV_VERSION_LIST needs to be changed, be sure to     #
-# test with the new back/frontend version. If you're just    #
-# getting data, no harm will be done. But if you Add/Delete/ #
-# Update anything, then all bets are off! Anything requiring #
-# an HTTP POST is potentially dangerous.                     #
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
-
-MYTHTV_VERSION_LIST = ('0.27', '0.28', '29', '30', '31', '32')
+from .mythversions import MYTHTV_VERSION_LIST
 
 
 class Send(object):
@@ -240,11 +230,9 @@ class Send(object):
         ##############################################################
 
         try:
-            if self.postdata:
+            if self.postdata is not None or self.jsondata is not None:
                 response = self.session.post(url, data=self.postdata,
-                                             timeout=self.opts['timeout'])
-            elif self.jsondata:
-                response = self.session.post(url, json=self.jsondata,
+                                             json=self.jsondata,
                                              timeout=self.opts['timeout'])
             else:
                 response = self.session.get(url, timeout=self.opts['timeout'])
@@ -262,7 +250,11 @@ class Send(object):
                 reason = (ElementTree.fromstring(response.text)
                           .find('errorDescription').text)
             except ElementTree.ParseError:
-                reason = 'N/A'
+                try:
+                    doc = html.fromstring(response.text)
+                    reason = doc.text_content()
+                except:
+                    reason = 'N/A'
             raise RuntimeError('Unexpected status returned: {}: Reason: "{}" '
                                'URL was: {}'
                                .format(response.status_code,

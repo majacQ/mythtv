@@ -15,8 +15,6 @@ TARGET = mythmusic
 target.path = $${LIBDIR}/mythtv/plugins
 INSTALLS += target
 
-INCLUDEPATH += $${SYSROOT}$${PREFIX}/include/mythtv/metadata
-INCLUDEPATH += $${SYSROOT}$${PREFIX}/include/mythtv/goom
 INCLUDEPATH += $${CONFIG_TAGLIB_INCLUDES}
 
 LIBS += -lmythavformat
@@ -46,7 +44,7 @@ HEADERS += importsettings.h playersettings.h ratingsettings.h
 HEADERS += remoteavformatcontext.h lyricsview.h
 
 SOURCES += decoder.cpp
-SOURCES += flacencoder.cpp main.cpp
+SOURCES += flacencoder.cpp mythmusic.cpp
 SOURCES += mainvisual.cpp playlist.cpp
 SOURCES += encoder.cpp musicdbcheck.cpp
 SOURCES += synaesthesia.cpp lameencoder.cpp
@@ -70,6 +68,11 @@ cdio {
     SOURCES += cddecoder.cpp cdrip.cpp
     QT += network
     LIBS += -lcdio -lcdio_cdda -lcdio_paranoia
+}
+
+musicbrainz {
+    HEADERS += musicbrainz.h
+    SOURCES += musicbrainz.cpp
 }
 
 mingw {

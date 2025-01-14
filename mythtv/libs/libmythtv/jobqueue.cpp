@@ -11,47 +11,34 @@
 #include <QFileInfo>
 #include <QEvent>
 #include <QCoreApplication>
+#include <QTimeZone>
 
-#include "mythconfig.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/programinfo.h"
 
-#include "exitcodes.h"
 #include "jobqueue.h"
-#include "programinfo.h"
-#include "mythcorecontext.h"
-#include "mythdate.h"
 #include "previewgenerator.h"
-#include "compat.h"
-#include "recordingprofile.h"
 #include "recordinginfo.h"
-#include "mthread.h"
-
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythsystemlegacy.h"
-#include "mythlogging.h"
-#include "mythmiscutil.h"
-
-#ifndef O_STREAMING
-#define O_STREAMING 0
-#endif
-
-#ifndef O_LARGEFILE
-#define O_LARGEFILE 0
-#endif
-
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#define qEnvironmentVariable getenv
-#endif
+#include "recordingprofile.h"
 
 #define LOC     QString("JobQueue: ")
 
+// Consider anything less than 4 hours as a "recent" job.
+static constexpr int64_t kRecentInterval {4LL * 60 * 60};
+
 JobQueue::JobQueue(bool master) :
     m_hostname(gCoreContext->GetHostName()),
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    m_runningJobsLock(new QMutex(QMutex::Recursive)),
-#else
     m_runningJobsLock(new QRecursiveMutex()),
-#endif
     m_isMaster(master),
     m_queueThread(new MThread("JobQueue", this))
 {
@@ -59,6 +46,7 @@ JobQueue::JobQueue(bool master) :
 
 #ifndef USING_VALGRIND
     QMutexLocker locker(&m_queueThreadCondLock);
+    //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     m_processQueue = true;
     m_queueThread->start();
 #else
@@ -88,7 +76,7 @@ JobQueue::~JobQueue(void)
 
 void JobQueue::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(e);
         if (me == nullptr)
@@ -101,12 +89,8 @@ void JobQueue::customEvent(QEvent *e)
             // LOCAL_JOB action type chanid recstartts hostname
             QString msg;
             message = message.simplified();
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList tokens = message.split(" ", QString::SkipEmptyParts);
-#else
             QStringList tokens = message.split(" ", Qt::SkipEmptyParts);
-#endif
-            QString action = tokens[1];
+            const QString& action = tokens[1];
             int jobID = -1;
 
             if (tokens[2] == "ID")
@@ -165,7 +149,7 @@ void JobQueue::run(void)
     RecoverQueue();
 
     m_queueThreadCondLock.lock();
-    m_queueThreadCond.wait(&m_queueThreadCondLock, 10 * 1000);
+    m_queueThreadCond.wait(&m_queueThreadCondLock, 10 * 1000UL);
     m_queueThreadCondLock.unlock();
 
     ProcessQueue();
@@ -214,7 +198,7 @@ void JobQueue::ProcessQueue(void)
         if (!jobs.empty())
         {
             bool inTimeWindow = InJobRunWindow();
-            for (const auto & job : qAsConst(jobs))
+            for (const auto & job : std::as_const(jobs))
             {
                 int status = job.status;
                 hostname = job.hostname;
@@ -629,8 +613,14 @@ bool JobQueue::QueueJobs(int jobTypes, uint chanid, const QDateTime &recstartts,
             int defer = gCoreContext->GetNumSetting("DeferAutoTranscodeDays", 0);
             if (defer)
             {
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
                 schedruntime = QDateTime(schedruntime.addDays(defer).date(),
                                          QTime(0,0,0), Qt::UTC);
+#else
+                schedruntime = QDateTime(schedruntime.addDays(defer).date(),
+                                         QTime(0,0,0),
+                                         QTimeZone(QTimeZone::UTC));
+#endif
             }
 
             QueueJob(JOB_TRANSCODE, chanid, recstartts, args, comment, host,
@@ -1066,7 +1056,7 @@ bool JobQueue::ChangeJobArgs(int jobID, const QString& args)
 int JobQueue::GetRunningJobID(uint chanid, const QDateTime &recstartts)
 {
     m_runningJobsLock->lock();
-    for (const auto& jInfo : qAsConst(m_runningJobs))
+    for (const auto& jInfo : std::as_const(m_runningJobs))
     {
         if ((jInfo.pginfo->GetChanID()             == chanid) &&
             (jInfo.pginfo->GetRecordingStartTime() == recstartts))
@@ -1125,6 +1115,7 @@ QString JobQueue::JobText(int jobType)
         case JOB_TRANSCODE:  return tr("Transcode");
         case JOB_COMMFLAG:   return tr("Flag Commercials");
         case JOB_METADATA:   return tr("Look up Metadata");
+        case JOB_PREVIEW:    return tr("Preview Generation");
     }
 
     if (jobType & JOB_USERJOB)
@@ -1137,11 +1128,13 @@ QString JobQueue::JobText(int jobType)
     return tr("Unknown Job");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define JOBSTATUS_STATUSTEXT(A,B,C) case A: return C;
+
 QString JobQueue::StatusText(int status)
 {
     switch (status)
     {
-#define JOBSTATUS_STATUSTEXT(A,B,C) case A: return C;
         JOBSTATUS_MAP(JOBSTATUS_STATUSTEXT)
         default: break;
     }
@@ -1210,8 +1203,14 @@ bool JobQueue::InJobRunWindow(std::chrono::minutes orStartsWithinMins)
         {
             // We passed the start time for today, try tomorrow
             QDateTime curDateTime = MythDate::current();
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
             QDateTime startDateTime = QDateTime(
                 curDateTime.date(), queueStartTime, Qt::UTC).addDays(1);
+#else
+            QDateTime startDateTime =
+                QDateTime(curDateTime.date(), queueStartTime,
+                          QTimeZone(QTimeZone::UTC)).addDays(1);
+#endif
 
             if (curDateTime.secsTo(startDateTime) <= duration_cast<std::chrono::seconds>(orStartsWithinMins).count())
             {
@@ -1283,7 +1282,7 @@ int JobQueue::GetJobsInQueue(QMap<int, JobQueueEntry> &jobs, int findJobs)
 {
     JobQueueEntry thisJob;
     MSqlQuery query(MSqlQuery::InitCon());
-    QDateTime recentDate = MythDate::current().addSecs(-4 * 3600);
+    QDateTime recentDate = MythDate::current().addSecs(-kRecentInterval);
     QString logInfo;
     int jobCount = 0;
     bool commflagWhileRecording =
@@ -1501,7 +1500,7 @@ QString JobQueue::GetJobArgs(int jobID)
         MythDB::DBError("Error in JobQueue::GetJobArgs()", query);
     }
 
-    return QString("");
+    return {""};
 }
 
 enum JobFlags JobQueue::GetJobFlags(int jobID)
@@ -1968,11 +1967,7 @@ void JobQueue::DoTranscodeThread(int jobID)
     {
         command = m_runningJobs[jobID].command;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = command.split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = command.split(" ", Qt::SkipEmptyParts);
-#endif
         if (!tokens.empty())
             path = tokens[0];
     }
@@ -2326,11 +2321,7 @@ void JobQueue::DoFlagCommercialsThread(int jobID)
     else
     {
         command = m_runningJobs[jobID].command;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = command.split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = command.split(" ", Qt::SkipEmptyParts);
-#endif
         if (!tokens.empty())
             path = tokens[0];
     }
@@ -2436,7 +2427,9 @@ void JobQueue::DoUserJobThread(int jobID)
                  pginfo->toString(ProgramInfo::kRecordingKey));
     }
     else
+    {
         msg = QString("Started %1 for jobID %2").arg(jobDesc).arg(jobID);
+    }
 
     LOG(VB_GENERAL, LOG_INFO, LOC + QString(msg.toLocal8Bit().constData()));
 
@@ -2488,7 +2481,9 @@ void JobQueue::DoUserJobThread(int jobID)
                      pginfo->toString(ProgramInfo::kRecordingKey));
         }
         else
+        {
             msg = QString("Finished %1 for jobID %2").arg(jobDesc).arg(jobID);
+        }
 
         LOG(VB_GENERAL, LOG_INFO, LOC + QString(msg.toLocal8Bit().constData()));
 

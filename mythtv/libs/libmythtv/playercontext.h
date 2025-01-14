@@ -7,23 +7,20 @@
 // Qt headers
 #include <QWidget>
 #include <QString>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
 #include <QRecursiveMutex>
-#endif
 #include <QHash>
 #include <QRect>
 #include <QObject>
+#include <QDateTime>
 
 // MythTV headers
-#include "videoouttypes.h"
-#include "mythtimer.h"
-#include "mythtvexp.h"
-#include "mythdeque.h"
-#include "mythdate.h"
-#include "mythtypes.h"
-#include "tv.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdeque.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythtv/mythtvexp.h"
+#include "libmythtv/tv.h"
+#include "libmythtv/videoouttypes.h"
 
 class TV;
 class RemoteEncoder;
@@ -40,14 +37,14 @@ struct osdInfo
     QHash<QString,int>  values;
 };
 
-enum PseudoState
+enum PseudoState : std::uint8_t
 {
     kPseudoNormalLiveTV  = 0,
     kPseudoChangeChannel = 1,
     kPseudoRecording     = 2,
 };
 
-using StringDeque = deque<QString>;
+using StringDeque = std::deque<QString>;
 
 class MTV_PUBLIC PlayerContext
 {
@@ -119,6 +116,7 @@ class MTV_PUBLIC PlayerContext
     MythMediaBuffer    *m_buffer             {nullptr};
     ProgramInfo        *m_playingInfo        {nullptr}; ///< Currently playing info
     std::chrono::seconds m_playingLen        {0s};  ///< Initial CalculateLength()
+    QDateTime           m_playingRecStart;
     int                 m_lastCardid         {-1}; ///< CardID of current/last recorder
     /// 0 == normal, +1 == fast forward, -1 == rewind
     int                 m_ffRewState         {0};
@@ -149,15 +147,9 @@ class MTV_PUBLIC PlayerContext
     float               m_tsNormal           {1.0F};
     float               m_tsAlt              {1.5F};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex      m_playingInfoLock    {QMutex::Recursive};
-    mutable QMutex      m_deletePlayerLock   {QMutex::Recursive};
-    mutable QMutex      m_stateLock          {QMutex::Recursive};
-#else
     mutable QRecursiveMutex  m_playingInfoLock;
     mutable QRecursiveMutex  m_deletePlayerLock;
     mutable QRecursiveMutex  m_stateLock;
-#endif
 
     // Signal info
     mutable QStringList m_lastSignalMsg;

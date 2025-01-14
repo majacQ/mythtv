@@ -20,36 +20,39 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
-
-#include <cinttypes>
-#include <cmath>
-#include <sys/types.h>
-
-#include "mythconfig.h"
-#include "mythlogging.h"
-#include "mythaverror.h"
 #include "audioconvert.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
+// FFmpeg
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswresample/swresample.h"
 }
 
+#include <QtGlobal>
+
+#include "libmythbase/mythlogging.h"
+
+#include "mythaverror.h"
+
 #define LOC QString("AudioConvert: ")
 
-#define ISALIGN(x) (((unsigned long)(x) & 0xf) == 0)
-
-#if ARCH_X86
-static int has_sse2 = -1;
-
+#ifdef Q_PROCESSOR_X86
 // Check cpuid for SSE2 support on x86 / x86_64
-static inline bool sse_check()
+static inline bool sse2_check()
 {
+#ifdef Q_PROCESSOR_X86_64
+    return true;
+#endif
+    static int has_sse2 = -1;
     if (has_sse2 != -1)
         return (bool)has_sse2;
     __asm__(
             // -fPIC - we may not clobber ebx/rbx
-#if ARCH_X86_64
+#ifdef Q_PROCESSOR_X86_64
             "push       %%rbx               \n\t"
 #else
             "push       %%ebx               \n\t"
@@ -58,7 +61,7 @@ static inline bool sse_check()
             "cpuid                          \n\t"
             "and        $0x4000000, %%edx   \n\t"
             "shr        $26, %%edx          \n\t"
-#if ARCH_X86_64
+#ifdef Q_PROCESSOR_X86_64
             "pop        %%rbx               \n\t"
 #else
             "pop        %%ebx               \n\t"
@@ -68,33 +71,24 @@ static inline bool sse_check()
             );
     return (bool)has_sse2;
 }
-#endif //ARCH_x86
-
-#if !HAVE_LRINTF
-static av_always_inline av_const long int lrintf(float x)
-{
-    return (int)(rint(x));
-}
-#endif /* HAVE_LRINTF */
+#endif //Q_PROCESSOR_X86
 
 static inline float clipcheck(float f)
 {
-    if (f > 1.0F) f = 1.0F;
-    else if (f < -1.0F) f = -1.0F;
-    return f;
+    return std::clamp(f, -1.0F, 1.0F);
 }
 
 /*
  The SSE code processes 16 bytes at a time and leaves any remainder for the C
  */
 
-static int toFloat8(float* out, const uchar* in, int len)
+static int toFloat8(float* out, const uint8_t* in, int len)
 {
     int i = 0;
     float f = 1.0F / ((1<<7));
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         i = loops << 4;
@@ -146,7 +140,7 @@ static int toFloat8(float* out, const uchar* in, int len)
                           :"xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (; i < len; i++)
         *out++ = (*in++ - 0x80) * f;
     return len << 2;
@@ -156,20 +150,20 @@ static int toFloat8(float* out, const uchar* in, int len)
  The SSE code processes 16 bytes at a time and leaves any remainder for the C
  - there is no remainder in practice */
 
-static inline uchar clip_uchar(int a)
+static inline uint8_t clip_uint8(long a)
 {
     if (a&(~0xFF))
         return (-a)>>31;
     return a;
 }
 
-static int fromFloat8(uchar* out, const float* in, int len)
+static int fromFloat8(uint8_t* out, const float* in, int len)
 {
     int i = 0;
     float f = (1<<7);
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         i = loops << 4;
@@ -209,9 +203,9 @@ static int fromFloat8(uchar* out, const float* in, int len)
                           :"xmm0","xmm1","xmm2","xmm3","xmm4","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (;i < len; i++)
-        *out++ = clip_uchar(lrintf(*in++ * f) + 0x80);
+        *out++ = clip_uint8(lrintf(*in++ * f) + 0x80);
     return len;
 }
 
@@ -220,8 +214,8 @@ static int toFloat16(float* out, const short* in, int len)
     int i = 0;
     float f = 1.0F / ((1<<15));
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         i = loops << 4;
@@ -264,13 +258,13 @@ static int toFloat16(float* out, const short* in, int len)
                           :"xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (; i < len; i++)
         *out++ = *in++ * f;
     return len << 2;
 }
 
-static inline short clip_short(int a)
+static inline short clip_short(long a)
 {
     if ((a+0x8000) & ~0xFFFF)
         return (a>>31) ^ 0x7FFF;
@@ -282,8 +276,8 @@ static int fromFloat16(short* out, const float* in, int len)
     int i = 0;
     float f = (1<<15);
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         i = loops << 4;
@@ -318,7 +312,7 @@ static int fromFloat16(short* out, const float* in, int len)
                           :"xmm1","xmm2","xmm3","xmm4","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (;i < len;i++)
         *out++ = clip_short(lrintf(*in++ * f));
     return len << 1;
@@ -334,8 +328,8 @@ static int toFloat32(AudioFormat format, float* out, const int* in, int len)
     if (format == FORMAT_S24LSB)
         shift = 0;
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         i = loops << 4;
@@ -375,7 +369,7 @@ static int toFloat32(AudioFormat format, float* out, const int* in, int len)
                           :"xmm1","xmm2","xmm3","xmm4","xmm6","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (; i < len; i++)
         *out++ = (*in++ >> shift) * f;
     return len << 2;
@@ -391,8 +385,8 @@ static int fromFloat32(AudioFormat format, int* out, const float* in, int len)
     if (format == FORMAT_S24LSB)
         shift = 0;
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         float o = 0.99999995;
         float mo = -1;
@@ -448,7 +442,7 @@ static int fromFloat32(AudioFormat format, int* out, const float* in, int len)
                           :"xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     uint range = 1<<(bits-1);
     for (; i < len; i++)
     {
@@ -473,8 +467,8 @@ static int fromFloatFLT(float* out, const float* in, int len)
 {
     int i = 0;
 
-#if ARCH_X86
-    if (sse_check() && len >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && len >= 16)
     {
         int loops = len >> 4;
         float o = 1;
@@ -514,7 +508,7 @@ static int fromFloatFLT(float* out, const float* in, int len)
                           :"xmm1","xmm2","xmm3","xmm4","xmm6","xmm7"
                           );
     }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
     for (;i < len;i++)
         *out++ = clipcheck(*in++);
     return len << 2;
@@ -534,7 +528,7 @@ int AudioConvert::toFloat(AudioFormat format, void* out, const void* in,
     switch (format)
     {
         case FORMAT_U8:
-            return toFloat8((float*)out,  (uchar*)in, bytes);
+            return toFloat8((float*)out,  (uint8_t*)in, bytes);
         case FORMAT_S16:
             return toFloat16((float*)out, (short*)in, bytes >> 1);
         case FORMAT_S24:
@@ -564,7 +558,7 @@ int AudioConvert::fromFloat(AudioFormat format, void* out, const void* in,
     switch (format)
     {
         case FORMAT_U8:
-            return fromFloat8((uchar*)out, (float*)in, bytes >> 2);
+            return fromFloat8((uint8_t*)out, (float*)in, bytes >> 2);
         case FORMAT_S16:
             return fromFloat16((short*)out, (float*)in, bytes >> 2);
         case FORMAT_S24:
@@ -587,21 +581,26 @@ public:
     AudioConvertInternal(AVSampleFormat in, AVSampleFormat out) :
     m_in(in), m_out(out)
     {
-        m_swr = swr_alloc_set_opts(nullptr,
-                                   av_get_default_channel_layout(1),
+        AVChannelLayout channel_layout;
+        av_channel_layout_default(&channel_layout, 1);
+        int ret = swr_alloc_set_opts2(&m_swr,
+                                   &channel_layout,
                                    m_out,
                                    48000,
-                                   av_get_default_channel_layout(1),
+                                   &channel_layout,
                                    m_in,
                                    48000,
                                    0, nullptr);
-        if (!m_swr)
+        if (!m_swr || ret < 0)
         {
-            LOG(VB_AUDIO, LOG_ERR, LOC + "error allocating resampler context");
+            std::string error;
+            LOG(VB_AUDIO, LOG_ERR, LOC +
+                QString("error allocating resampler context (%1)")
+                .arg(av_make_error_stdstring(error, ret)));
             return;
         }
         /* initialize the resampling context */
-        int ret = swr_init(m_swr);
+        ret = swr_init(m_swr);
         if (ret < 0)
         {
             std::string error;
@@ -700,14 +699,14 @@ int AudioConvert::Process(void* out, const void* in, int bytes, bool noclip)
             if (left >= 65536)
             {
                 s       = toFloat(m_in, buffer.data(), in, buffer.size());
-                in      = (void*)((long)in + s);
-                out     = (void*)((long)out + fromFloat(m_out, out, buffer.data(), s));
+                in      = static_cast<const uint8_t *>(in) + s;
+                out     = static_cast<uint8_t *>(out) + fromFloat(m_out, out, buffer.data(), s);
                 left   -= buffer.size();
                 continue;
             }
             s       = toFloat(m_in, buffer.data(), in, left);
-            in      = (void*)((long)in + s);
-            out     = (void*)((long)out + fromFloat(m_out, out, buffer.data(), s));
+            in      = static_cast<const uint8_t *>(in) + s;
+            out     = static_cast<uint8_t *>(out) + fromFloat(m_out, out, buffer.data(), s);
             left    = 0;
         }
         return bytes * AudioOutputSettings::SampleSize(m_out) / AudioOutputSettings::SampleSize(m_in);

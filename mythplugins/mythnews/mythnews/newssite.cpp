@@ -2,12 +2,12 @@
 #include <QFile>
 
 // MythTV headers
-#include <mythdate.h>
-#include <mythlogging.h>
-#include <mythdirs.h>
-#include <mythdownloadmanager.h>
-#include <mythevent.h>
-#include <mythsorthelper.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythbase/mythevent.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/mythsorthelper.h>
 
 // MythNews headers
 #include "newssite.h"
@@ -154,16 +154,12 @@ std::chrono::minutes NewsSite::timeSinceLastUpdate(void) const
 
 void NewsSite::customEvent(QEvent *event)
 {
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
 
         if (tokens.isEmpty())
             return;
@@ -178,10 +174,10 @@ void NewsSite::customEvent(QEvent *event)
             }
             else if (tokens[1] == "FINISHED")
             {
-                QString url = args[0];
-                QString filename = args[1];
+                const QString& url = args[0];
+                const QString& filename = args[1];
                 int fileSize  = args[2].toInt();
-                QString errorStr = args[3];
+                const QString& errorStr = args[3];
                 int errorCode = args[4].toInt();
 
                 if ((errorCode != 0) || (fileSize == 0))

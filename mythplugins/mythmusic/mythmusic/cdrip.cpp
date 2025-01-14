@@ -1,7 +1,3 @@
-// ANSI C includes
-#include <cstdio>
-#include <cstring>
-
 // Unix C includes
 #include <sys/types.h>
 #include <fcntl.h>
@@ -10,6 +6,8 @@
 
 // C++ includes
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <memory>
 
@@ -24,29 +22,27 @@
 #include <QUrl>
 #include <utility>
 
-// MythTV plugin includes
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <lcddevice.h>
-#include <mythmediamonitor.h>
-#include <mythdirs.h>
-#include <mythmiscutil.h>
-
-// MythUI
-#include <mythdialogbox.h>
-#include <mythuitext.h>
-#include <mythuicheckbox.h>
-#include <mythuitextedit.h>
-#include <mythuibutton.h>
-#include <mythuiprogressbar.h>
-#include <mythuibuttonlist.h>
-#include <mythsystemlegacy.h>
-#include <storagegroup.h>
-#include <remotefile.h>
-
-// MythUI headers
-#include <mythtv/libmythui/mythscreenstack.h>
-#include <mythtv/libmythui/mythprogressdialog.h>
+// MythTV includes
+#include <libmyth/mythcontext.h>
+#include <libmythbase/lcddevice.h>
+#include <libmythbase/mythdate.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/mythsystemlegacy.h>
+#include <libmythbase/remotefile.h>
+#include <libmythbase/storagegroup.h>
+#include <libmythmetadata/musicutils.h>
+#include <libmythui/mediamonitor.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythprogressdialog.h>
+#include <libmythui/mythscreenstack.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
 
 // MythMusic includes
 #include "cdrip.h"
@@ -58,8 +54,6 @@
 #include "flacencoder.h"
 #include "genres.h"
 #include "lameencoder.h"
-#include "musicutils.h"
-#include "mythlogging.h"
 #include "vorbisencoder.h"
 
 #ifdef HAVE_CDIO
@@ -73,31 +67,31 @@
 #endif // CD_FRAMESIZE_RAW
 #endif // HAVE_CDIO
 
-QEvent::Type RipStatusEvent::kTrackTextEvent =
+const QEvent::Type RipStatusEvent::kTrackTextEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kOverallTextEvent =
+const QEvent::Type RipStatusEvent::kOverallTextEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kStatusTextEvent =
+const QEvent::Type RipStatusEvent::kStatusTextEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kTrackProgressEvent =
+const QEvent::Type RipStatusEvent::kTrackProgressEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kTrackPercentEvent =
+const QEvent::Type RipStatusEvent::kTrackPercentEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kTrackStartEvent =
+const QEvent::Type RipStatusEvent::kTrackStartEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kOverallProgressEvent =
+const QEvent::Type RipStatusEvent::kOverallProgressEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kOverallPercentEvent =
+const QEvent::Type RipStatusEvent::kOverallPercentEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kOverallStartEvent =
+const QEvent::Type RipStatusEvent::kOverallStartEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kCopyStartEvent =
+const QEvent::Type RipStatusEvent::kCopyStartEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kCopyEndEvent =
+const QEvent::Type RipStatusEvent::kCopyEndEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kFinishedEvent =
+const QEvent::Type RipStatusEvent::kFinishedEvent =
     (QEvent::Type) QEvent::registerEventType();
-QEvent::Type RipStatusEvent::kEncoderErrorEvent =
+const QEvent::Type RipStatusEvent::kEncoderErrorEvent =
     (QEvent::Type) QEvent::registerEventType();
 
 void CDScannerThread::run()
@@ -118,7 +112,8 @@ void CDEjectorThread::run()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static long int getSectorCount (QString &cddevice, int tracknum)
+static long int getSectorCount ([[maybe_unused]] QString &cddevice,
+                                [[maybe_unused]] int tracknum)
 {
 #ifdef HAVE_CDIO
     QByteArray devname = cddevice.toLatin1();
@@ -154,8 +149,6 @@ static long int getSectorCount (QString &cddevice, int tracknum)
         QString("Error: cdrip - cdda_track_audiop(%1) returned 0").arg(cddevice));
 
     cdda_close(device);
-#else
-    (void)cddevice; (void)tracknum;
 #endif // HAVE_CDIO
     return 0;
 }
@@ -396,7 +389,9 @@ void CDRipperThread::run(void)
     RunEpilog();
 }
 
-int CDRipperThread::ripTrack(QString &cddevice, Encoder *encoder, int tracknum)
+int CDRipperThread::ripTrack([[maybe_unused]] QString &cddevice,
+                             [[maybe_unused]] Encoder *encoder,
+                             [[maybe_unused]] int tracknum)
 {
 #ifdef HAVE_CDIO
     QByteArray devname = cddevice.toLatin1();
@@ -514,7 +509,6 @@ int CDRipperThread::ripTrack(QString &cddevice, Encoder *encoder, int tracknum)
 
     return (curpos - start + 1) * CD_FRAMESIZE_RAW;
 #else
-    (void)cddevice; (void)encoder; (void)tracknum;
     return 0;
 #endif // HAVE_CDIO
 }
@@ -528,7 +522,6 @@ Ripper::Ripper(MythScreenStack *parent, QString device) :
 {
 #ifndef _WIN32
     // if the MediaMonitor is running stop it
-    m_mediaMonitorActive = false;
     MediaMonitor *mon = MediaMonitor::GetMediaMonitor();
     if (mon && mon->IsActive())
     {
@@ -646,7 +639,7 @@ bool Ripper::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "EDIT" || action == "INFO") // INFO purely for historical reasons
@@ -808,7 +801,9 @@ void Ripper::ScanFinished()
 
             }
             else
+            {
                 delete ripTrack;
+            }
         }
 
         m_artistEdit->SetText(m_artistName);
@@ -951,7 +946,7 @@ void Ripper::artistChanged()
 
     if (!m_tracks->empty())
     {
-        for (const auto *track : qAsConst(*m_tracks))
+        for (const auto *track : std::as_const(*m_tracks))
         {
             MusicMetadata *data = track->metadata;
             if (data)
@@ -980,7 +975,7 @@ void Ripper::albumChanged()
 
     if (!m_tracks->empty())
     {
-        for (const auto *track : qAsConst(*m_tracks))
+        for (const auto *track : std::as_const(*m_tracks))
         {
             MusicMetadata *data = track->metadata;
             if (data)
@@ -997,7 +992,7 @@ void Ripper::genreChanged()
 
     if (!m_tracks->empty())
     {
-        for (const auto *track : qAsConst(*m_tracks))
+        for (const auto *track : std::as_const(*m_tracks))
         {
             MusicMetadata *data = track->metadata;
             if (data)
@@ -1014,7 +1009,7 @@ void Ripper::yearChanged()
 
     if (!m_tracks->empty())
     {
-        for (const auto *track : qAsConst(*m_tracks))
+        for (const auto *track : std::as_const(*m_tracks))
         {
             MusicMetadata *data = track->metadata;
             if (data)
@@ -1032,7 +1027,7 @@ void Ripper::compilationChanged(bool state)
         if (!m_tracks->empty())
         {
             // Update artist MetaData of each track on the ablum...
-            for (const auto *track : qAsConst(*m_tracks))
+            for (const auto *track : std::as_const(*m_tracks))
             {
                 MusicMetadata *data = track->metadata;
                 if (data)
@@ -1051,7 +1046,7 @@ void Ripper::compilationChanged(bool state)
         if (!m_tracks->empty())
         {
             // Update artist MetaData of each track on the album...
-            for (const auto *track : qAsConst(*m_tracks))
+            for (const auto *track : std::as_const(*m_tracks))
             {
                 MusicMetadata *data = track->metadata;
 
@@ -1079,7 +1074,7 @@ void Ripper::switchTitlesAndArtists()
     QString tmp;
     if (!m_tracks->empty())
     {
-        for (const auto *track : qAsConst(*m_tracks))
+        for (const auto *track : std::as_const(*m_tracks))
         {
             MusicMetadata *data = track->metadata;
 
@@ -1115,7 +1110,9 @@ void Ripper::startRipper(void)
         mainStack->AddScreen(statusDialog);
     }
     else
+    {
         delete statusDialog;
+    }
 }
 
 void Ripper::RipComplete(bool result)
@@ -1224,10 +1221,12 @@ void Ripper::updateTrackList(void)
 
             if (track->length >= 1s)
             {
-                item->SetText(MythFormatTime(track->length, "mm:ss"), "length");
+                item->SetText(MythDate::formatTime(track->length, "mm:ss"), "length");
             }
             else
+            {
                 item->SetText("", "length");
+            }
 
 //             if (i == m_currentTrack)
 //                 m_trackList->SetItemCurrent(i);
@@ -1508,7 +1507,7 @@ bool RipStatus::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
 
@@ -1521,7 +1520,9 @@ bool RipStatus::keyPressEvent(QKeyEvent *event)
                 dialog->SetReturnEvent(this, "stop_ripping");
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))

@@ -4,6 +4,10 @@
 #include <QVector>
 #include "videovisual.h"
 
+extern "C" {
+#include "libavutil/tx.h"
+}
+
 #define SPECTRUM_NAME QString("Spectrum")
 
 class VideoVisualSpectrum : public VideoVisual
@@ -28,12 +32,12 @@ class VideoVisualSpectrum : public VideoVisual
     double             m_scaleFactor { 2.0 };
     double             m_falloff     { 3.0 };
 
-    fftw_plan          m_lplan;
-    fftw_plan          m_rplan;
-    myth_fftw_float*   m_lin         { nullptr };
-    myth_fftw_float*   m_rin         { nullptr };
-    myth_fftw_complex* m_lout        { nullptr };
-    myth_fftw_complex* m_rout        { nullptr };
+    AVComplexFloat*    m_dftL        { nullptr };
+    AVComplexFloat*    m_dftR        { nullptr };
+    static constexpr float kScale    { 1.0F };
+    AVTXContext       *m_fftContext  { nullptr };
+    av_tx_fn           m_fft         { nullptr };
+
 
   private:
     QVector<QRect>     m_rects;

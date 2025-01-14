@@ -1,23 +1,25 @@
 #ifndef THUMBFINDER_H_
 #define THUMBFINDER_H_
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+}
+
 // qt
 #include <QString>
 #include <QStringList>
 #include <QScopedPointer>
 
 // mythtv
-#include <mythscreentype.h>
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-}
-#include "programtypes.h"
+#include <libmyth/mythavframe.h>
+#include <libmythbase/programtypes.h>
+#include <libmythtv/mythavutil.h>
+#include <libmythui/mythscreentype.h>
 
 // mytharchive
 #include "archiveutil.h"
 #include "remoteavformatcontext.h"
-#include "mythavutil.h"
 
 struct SeekAmount
 {
@@ -75,10 +77,10 @@ class ThumbFinder : public MythScreenType
     void updatePositionBar(int64_t frame);
     int  calcFinalDuration(void);
 
-    RemoteAVFormatContext m_inputFC      {nullptr};
+    ArchiveRemoteAVFormatContext m_inputFC {nullptr};
     AVCodecContext  *m_codecCtx          {nullptr};
-    MythCodecMap     m_codecMap          {};
-    AVCodec         *m_codec             {nullptr};
+    MythCodecMap     m_codecMap;
+    const AVCodec   *m_codec             {nullptr};
     MythAVFrame      m_frame;
     MythAVCopy       m_copy;
 
@@ -93,7 +95,7 @@ class ThumbFinder : public MythScreenType
     int64_t          m_startPTS          {-1}; // in time_base units
     int64_t          m_currentPTS        {-1}; // in time_base units
     int64_t          m_firstIFramePTS    {-1};
-    int              m_frameTime         { 0};   // in time_base units
+    int64_t          m_frameTime         { 0};   // in time_base units
     bool             m_updateFrame       {false};
     frm_dir_map_t    m_deleteMap;
     int              m_finalDuration     { 0};

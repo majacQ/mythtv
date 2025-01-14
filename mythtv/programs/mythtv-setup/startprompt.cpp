@@ -2,14 +2,15 @@
 #include <QCoreApplication>
 
 // MythTV stuff
-#include "exitcodes.h"
-#include "mythcorecontext.h"
-#include "mythdialogbox.h"
-#include "mythmainwindow.h"
-#include "mythscreenstack.h"
-#include "mythsystemlegacy.h"
-#include "tvremoteutil.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythtv/tvremoteutil.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythscreenstack.h"
 
+// MythTV Setup
 #include "startprompt.h"
 
 struct StartPrompterPrivate
@@ -23,8 +24,8 @@ struct StartPrompterPrivate
 };
 
 StartPrompter::StartPrompter()
+  : m_d(new StartPrompterPrivate)
 {
-    m_d = new StartPrompterPrivate;
 }
 
 StartPrompter::~StartPrompter()
@@ -38,7 +39,7 @@ void StartPrompter::handleStart()
     if (MythCoreContext::BackendIsRunning() && gCoreContext->IsMasterHost())
     {
         backendRunningPrompt();
-    }    
+    }
 }
 
 void StartPrompter::leaveBackendRunning()
@@ -68,7 +69,7 @@ void StartPrompter::backendRunningPrompt(void)
     {
         backendIsRecording = RemoteGetRecordingStatus(nullptr, false);
     }
-    
+
     QString warning = tr("WARNING: The backend is currently running.")+"\n\n"+
                       tr("Changing existing card inputs, deleting anything, "
                      "or scanning for channels may not work.")+"\n\n";

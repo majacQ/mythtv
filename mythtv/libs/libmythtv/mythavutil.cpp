@@ -7,12 +7,14 @@
 //
 
 // Qt
+#include <QtGlobal>
 #include <QMutexLocker>
 #include <QFile>
 
 // MythTV
-#include "mythconfig.h"
-#include "mythlogging.h"
+#include "libmyth/mythaverror.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
 #include "mythdeinterlacer.h"
 #include "mythavutil.h"
 
@@ -140,25 +142,57 @@ void MythAVUtil::DeinterlaceAVFrame(AVFrame *Frame)
     if (VideoFrameType type = PixelFormatToFrameType(static_cast<AVPixelFormat>(Frame->format));
         MythVideoFrame::YUVFormat(type))
     {
-        MythVideoFrame mythframe(type, Frame->data[0],
-                                 MythVideoFrame::GetBufferSize(type, Frame->width, Frame->height),
-                                 Frame->width, Frame->height);
-        mythframe.m_offsets[0] = 0;
-        mythframe.m_offsets[1] = static_cast<int>(Frame->data[1] - Frame->data[0]);
-        mythframe.m_offsets[2] = static_cast<int>(Frame->data[2] - Frame->data[0]);
-        mythframe.m_pitches[0] = Frame->linesize[0];
-        mythframe.m_pitches[1] = Frame->linesize[1];
-        mythframe.m_pitches[2] = Frame->linesize[2];
+        // AVFrame video data consists of 3 independent buffers.
+        // MythVideoFrame requires video data to be in one memory block.
+        // Create a copy of the frame with all video data in one memory block.
+        AVFrame tempFrame = *Frame;
+        AVFrame *tf = &tempFrame;
 
+        size_t b0 = tf->buf[0]->size;
+        size_t b1 = tf->buf[1]->size;
+        size_t b2 = tf->buf[2]->size;
+
+        // Extend size to a multiple of 16 bytes for MythVideoFrame alignment constraints
+        size_t b0a = ((b0 + 15) / 16) * 16;
+        size_t b1a = ((b1 + 15) / 16) * 16;
+        size_t b2a = ((b2 + 15) / 16) * 16;
+
+        // Allocate contiguous buffer with enough space for the three segments
+        uint8_t *tbuf{ new uint8_t[b0a + b1a + b2a]{} };
+
+        tf->data[0] = tbuf;
+        tf->data[1] = tbuf + b0a;
+        tf->data[2] = tbuf + b0a + b1a;
+        memcpy(tf->data[0], tf->buf[0]->data, b0);
+        memcpy(tf->data[1], tf->buf[1]->data, b1);
+        memcpy(tf->data[2], tf->buf[2]->data, b2);
+
+        // Create a MythVideoFrame from the temporary AVFrame
+        MythVideoFrame mythframe(type, tf->data[0],
+                                 MythVideoFrame::GetBufferSize(type, tf->width, tf->height),
+                                 tf->width, tf->height);
+        mythframe.m_offsets[0] = 0;
+        mythframe.m_offsets[1] = tf->data[1] - tf->data[0];
+        mythframe.m_offsets[2] = tf->data[2] - tf->data[0];
+        mythframe.m_pitches[0] = tf->linesize[0];
+        mythframe.m_pitches[1] = tf->linesize[1];
+        mythframe.m_pitches[2] = tf->linesize[2];
+
+        // Deinterlacing
         mythframe.m_deinterlaceSingle = DEINT_CPU | DEINT_MEDIUM;
         mythframe.m_deinterlaceAllowed = DEINT_ALL;
         MythDeinterlacer deinterlacer;
         deinterlacer.Filter(&mythframe, kScan_Interlaced, nullptr, true);
+
+        // Copy back our deinterlaced frame and free the video buffer of the temporary AVFrame
+        memcpy(Frame->data[0], tf->data[0], b0);
+        memcpy(Frame->data[1], tf->data[1], b1);
+        memcpy(Frame->data[2], tf->data[2], b2);
+        delete[] tbuf;
+
         // Must remove buffer before mythframe is deleted
         mythframe.m_buffer = nullptr;
     }
-
-
 }
 
 /// \brief Initialise AVFrame with content from MythVideoFrame
@@ -201,7 +235,11 @@ int MythAVCopy::Copy(AVFrame* To, AVPixelFormat ToFmt, const AVFrame* From, AVPi
                      int Width, int Height)
 {
     int newwidth = Width;
-#if ARCH_ARM
+#ifdef Q_PROCESSOR_ARM
+    // references https://code.mythtv.org/trac/ticket/12888 and
+    // https://trac.ffmpeg.org/ticket/6192
+    // TODO: This is from 2017-02-17 and probably needs to be tested again.
+
     // The ARM build of FFMPEG has a bug that if sws_scale is
     // called with source and dest sizes the same, and
     // formats as shown below, it causes a bus error and the
@@ -251,23 +289,20 @@ AVCodecContext *MythCodecMap::GetCodecContext(const AVStream* Stream,
                                               const AVCodec* Codec,
                                               bool NullCodec)
 {
+    if (Stream == nullptr || Stream->codecpar == nullptr)
+        return nullptr;
     QMutexLocker lock(&m_mapLock);
     AVCodecContext* avctx = m_streamMap.value(Stream, nullptr);
-    if (!avctx)
+    if (avctx == nullptr)
     {
-        if (Stream == nullptr || Stream->codecpar == nullptr)
-            return nullptr;
-
         if (NullCodec)
         {
             Codec = nullptr;
         }
-        else
+        else if (Codec == nullptr)
         {
-            if (!Codec)
-                Codec = avcodec_find_decoder(Stream->codecpar->codec_id);
-
-            if (!Codec)
+            Codec = avcodec_find_decoder(Stream->codecpar->codec_id);
+            if (Codec == nullptr)
             {
                 LOG(VB_GENERAL, LOG_WARNING, QString("avcodec_find_decoder fail for %1")
                     .arg(Stream->codecpar->codec_id));
@@ -275,10 +310,10 @@ AVCodecContext *MythCodecMap::GetCodecContext(const AVStream* Stream,
             }
         }
         avctx = avcodec_alloc_context3(Codec);
-        if (avcodec_parameters_to_context(avctx, Stream->codecpar) < 0)
+        if (avctx != nullptr && avcodec_parameters_to_context(avctx, Stream->codecpar) < 0)
             avcodec_free_context(&avctx);
 
-        if (avctx)
+        if (avctx != nullptr)
         {
             avctx->pkt_timebase = Stream->time_base;
             m_streamMap.insert(Stream, avctx);
@@ -322,7 +357,7 @@ void MythCodecMap::FreeAllContexts()
 MythStreamInfoList::MythStreamInfoList(const QString& filename)
 {
     const int probeBufferSize = 8 * 1024;
-    AVInputFormat *fmt      = nullptr;
+    const AVInputFormat *fmt      = nullptr;
     AVProbeData probe;
     memset(&probe, 0, sizeof(AVProbeData));
     probe.filename = "";
@@ -330,7 +365,6 @@ MythStreamInfoList::MythStreamInfoList(const QString& filename)
     probe.buf_size = probeBufferSize;
     memset(probe.buf, 0, probeBufferSize + AVPROBE_PADDING_SIZE);
     av_log_set_level(AV_LOG_FATAL);
-    m_errorCode = 0;
     if (filename == "")
         m_errorCode = 97;
     QFile infile(filename);
@@ -420,7 +454,7 @@ MythStreamInfoList::MythStreamInfoList(const QString& filename)
                     / static_cast<float>(stream->avg_frame_rate.den);
             }
             if (info.m_codecType == 'A')
-                info.m_channels = codecpar->channels;
+                info.m_channels = codecpar->ch_layout.nb_channels;
             m_streamInfoList.append(info);
         }
     }
@@ -437,11 +471,7 @@ MythStreamInfoList::MythStreamInfoList(const QString& filename)
                 m_errorMsg = "File could not be opened";
                 break;
             default:
-                std::string errbuf;
-                if (av_strerror_stdstring(m_errorCode, errbuf) == 0)
-                    m_errorMsg = QString::fromStdString(errbuf);
-                else
-                    m_errorMsg = "UNKNOWN";
+                m_errorMsg = QString::fromStdString(av_make_error_stdstring_unknown(m_errorCode));
         }
         LOG(VB_GENERAL, LOG_ERR,
             QString("MythStreamInfoList failed for %1. Error code:%2 Message:%3")

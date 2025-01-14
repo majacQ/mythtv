@@ -1,10 +1,10 @@
 // POSIX
 #include <pthread.h>
 
-// C
+// C++
 #include <cstdlib>
 
-#include "mythconfig.h"
+#include "libmythbase/mythconfig.h"
 
 extern "C"
 {
@@ -13,19 +13,18 @@ extern "C"
 #include "libavformat/avformat.h"
 
 //libmpeg2
-#include "config.h"
 #if CONFIG_LIBMPEG2EXTERNAL
 #include <mpeg2dec/mpeg2.h>
 #else
-#include "mpeg2.h"
+#include "libmythmpeg2/mpeg2.h"
 #endif
 }
 
 //replex
-#include "external/replex/ringbuffer.h"
 #include "external/replex/multiplex.h"
+#include "external/replex/ringbuffer.h"
 
-//Qt
+// Qt
 #include <QMap>
 #include <QList>
 #include <QQueue>
@@ -33,11 +32,13 @@ extern "C"
 #include <QDateTime>
 
 // MythTV
-#include "transcodedefs.h"
-#include "programtypes.h"
-#include "mythavutil.h"
+#include "libmythbase/programtypes.h"
+#include "libmythtv/mythavutil.h"
 
-enum MPFListType {
+// MythTranscode
+#include "transcodedefs.h"
+
+enum MPFListType : std::uint8_t {
     MPF_TYPE_CUTLIST = 0,
     MPF_TYPE_SAVELIST,
 };
@@ -47,10 +48,10 @@ class MPEG2frame
   public:
     explicit MPEG2frame(int size);
     ~MPEG2frame();
-    void ensure_size(int size);
-    void set_pkt(AVPacket *newpkt);
+    void ensure_size(int size) const;
+    void set_pkt(AVPacket *newpkt) const;
 
-    AVPacket          m_pkt        {};
+    AVPacket         *m_pkt        {nullptr};
     bool              m_isSequence {false};
     bool              m_isGop      {false};
     uint8_t          *m_framePos   {nullptr};
@@ -187,8 +188,13 @@ class MPEG2fixup
     static char GetFrameTypeT(const MPEG2frame *frame)
     {
         int type = GetFrameTypeN(frame);
-        return (type == 1 ? 'I' :
-                (type == 2 ? 'P' : (type == 3 ? 'B' : 'X')));
+        if (type == 1)
+            return 'I';
+        if (type == 2)
+            return 'P';
+        if (type == 3)
+            return 'B';
+        return 'X';
     }
     static int GetNbFields(const MPEG2frame *frame)
     {
@@ -209,7 +215,7 @@ class MPEG2fixup
     {
         if (id >= m_inputFC->nb_streams)
             return nullptr;
-        return m_inputFC->streams[id]->parser;
+        return av_stream_get_parser(m_inputFC->streams[id]);
     }
 
     static void dumpList(FrameList *list);
@@ -233,7 +239,7 @@ class MPEG2fixup
 
     pthread_t     m_thread          {};
 
-    MythCodecMap     m_codecMap     {};
+    MythCodecMap     m_codecMap;
     AVFormatContext *m_inputFC      {nullptr};
     AVFrame         *m_picture      {nullptr};
 
@@ -263,8 +269,6 @@ class MPEG2fixup
     int             m_frameNum              {0};
     int             m_statusUpdateTime      {5};
     uint64_t        m_lastWrittenPos        {0};
-    std::array<uint16_t,64> m_invZigzagDirect16 {};
-    bool            m_zigzagInit            {false};
 };
 
 #ifdef NO_MYTH
@@ -288,8 +292,8 @@ class MPEG2fixup
     #define GENERIC_EXIT_WRITE_FRAME_ERROR    149
     #define GENERIC_EXIT_DEADLOCK             150
 #else
-   #include "exitcodes.h"
-   #include "mythcontext.h"
+   #include "libmythbase/exitcodes.h"
+   #include "libmyth/mythcontext.h"
 #endif
 
 /*

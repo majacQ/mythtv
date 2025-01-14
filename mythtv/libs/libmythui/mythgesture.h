@@ -41,7 +41,7 @@ class MUI_PUBLIC MythGestureEvent : public QEvent
     Q_GADGET
 
   public:
-    enum Gesture
+    enum Gesture : std::uint8_t
     {
         Unknown,
 
@@ -82,13 +82,13 @@ class MUI_PUBLIC MythGestureEvent : public QEvent
     ~MythGestureEvent() override = default;
 
     QString         GetName     () const;
-    inline Gesture  GetGesture  () const { return m_gesture; }
+    Gesture         GetGesture  () const { return m_gesture; }
     void            SetPosition (QPoint Position) { m_position = Position; }
     QPoint          GetPosition () const { return m_position; }
     Qt::MouseButton GetButton   () const { return m_button; }
     QString         GetButtonName() const;
 
-    static Type kEventType;
+    static const Type kEventType;
 
   private:
     Gesture m_gesture { Unknown  };

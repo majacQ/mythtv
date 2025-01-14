@@ -3,7 +3,7 @@
 
 #include <QMap>
 
-#include "compat.h"
+#include "libmythbase/compat.h"
 #include <d3d9.h>
 
 #include "mythimage.h"
@@ -11,13 +11,15 @@
 #include "mythrender_base.h"
 
 #ifdef USING_DXVA2
+#if defined (_WIN32)
+#define CINTERFACE
+#define COBJMACROS
+#endif
 #include "dxva2api.h"
 #else
 using IDirect3DDeviceManager9 = void*;
 #endif
 
-class MythD3DVertexBuffer;
-class MythD3DSurface;
 class MythRenderD3D9;
 
 class MUI_PUBLIC D3D9Image
@@ -57,6 +59,33 @@ class MUI_PUBLIC D3D9Locker
     IDirect3DDevice9* Acquire(void);
   private:
     MythRenderD3D9 *m_render {nullptr};
+};
+
+class MythD3DVertexBuffer
+{
+  public:
+    explicit MythD3DVertexBuffer(IDirect3DTexture9* tex = nullptr) :
+        m_dest(QRect(QPoint(0,0),QSize(0,0))),
+        m_src(QRect(QPoint(0,0),QSize(0,0))), m_texture(tex)
+    {
+    }
+
+    uint32_t           m_color {0xFFFFFFFF};
+    QRect              m_dest;
+    QRect              m_src;
+    IDirect3DTexture9 *m_texture;
+};
+
+class MythD3DSurface
+{
+  public:
+    MythD3DSurface(QSize size = QSize(0,0), D3DFORMAT fmt = D3DFMT_UNKNOWN) :
+        m_size(size), m_fmt(fmt)
+    {
+    }
+
+    QSize     m_size;
+    D3DFORMAT m_fmt;
 };
 
 class MUI_PUBLIC MythRenderD3D9 : public MythRender
@@ -109,7 +138,7 @@ class MUI_PUBLIC MythRenderD3D9 : public MythRender
     void                    Init2DState(void);
     void                    EnableBlending(IDirect3DDevice9* dev, bool enable);
     void                    MultiTexturing(IDirect3DDevice9* dev, bool enable,
-                                           IDirect3DTexture9 *texture = nullptrptr);
+                                           IDirect3DTexture9 *texture = nullptr);
     void                    SetTextureVertices(IDirect3DDevice9* dev, bool enable);
 
   private:
@@ -127,11 +156,7 @@ class MUI_PUBLIC MythRenderD3D9 : public MythRender
     IDirect3DSurface9      *m_default_surface     {nullptr};
     IDirect3DSurface9      *m_current_surface     {nullptr};
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex                  m_lock                {QMutex::Recursive};
-#else
     QRecursiveMutex         m_lock;
-#endif
     bool                    m_blend               {true};
     bool                    m_multi_texturing     {true};
     bool                    m_texture_vertices    {true};

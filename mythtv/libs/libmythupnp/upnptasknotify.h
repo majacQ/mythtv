@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -25,7 +25,8 @@
 #include <QMutex>
 
 // MythTV headers
-#include "compat.h"
+#include "libmythbase/compat.h"
+
 #include "taskqueue.h"
 
 class MSocketDevice;
@@ -35,7 +36,7 @@ class UPnpDevice;
 // Typedefs
 /////////////////////////////////////////////////////////////////////////////
 
-enum UPnpNotifyNTS
+enum UPnpNotifyNTS : std::uint8_t
 {
     NTS_alive   = 0,
     NTS_byebye  = 1

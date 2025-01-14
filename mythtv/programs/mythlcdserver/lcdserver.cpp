@@ -55,18 +55,22 @@
 
 */
 
+// c/c++
 #include <cstdlib>
+#include <utility>
 
+//qt
 #include <QCoreApplication>
 #include <QDir>
 #include <QList>
 #include <QStringList>
-#include <utility>
 
-#include "mythdate.h"
-#include "mythcontext.h"
-#include "lcddevice.h"
+// mythtv
+#include "libmyth/mythcontext.h"
+#include "libmythbase/lcddevice.h"
+#include "libmythbase/mythdate.h"
 
+// mythlcdserver
 #include "lcdserver.h"
 
 int debug_level = 0;
@@ -77,8 +81,7 @@ int debug_level = 0;
 
 LCDServer::LCDServer(int port, QString message, std::chrono::seconds messageTime)
     : m_lcd(new LCDProcClient(this)),
-     m_serverPool(new ServerPool()),
-     m_lastSocket(nullptr)
+     m_serverPool(new ServerPool())
 {
     if (!m_lcd->SetupLCD())
     {
@@ -157,7 +160,7 @@ QStringList LCDServer::parseCommand(QString &command)
     QChar c;
     bool bInString = false;
 
-    for (auto && x : qAsConst(command))
+    for (auto && x : std::as_const(command))
     {
         c = x;
         if (!bInString && c == '"')
@@ -170,7 +173,9 @@ QStringList LCDServer::parseCommand(QString &command)
             s = "";
         }
         else
+        {
             s = s + c;
+        }
     }
 
     tokens.append(s);
@@ -397,8 +402,8 @@ void LCDServer::switchToGeneric(const QStringList &tokens, QTcpSocket *socket)
             return;
         }
 
-        QString text = tokens[x + 2];
-        QString screen = tokens[x + 3];
+        const QString& text = tokens[x + 2];
+        const QString& screen = tokens[x + 3];
         bool scrollable = false;
         if (tokens[x + 4] == "TRUE")
             scrollable = true;
@@ -491,7 +496,7 @@ void LCDServer::switchToMenu(const QStringList &tokens, QTcpSocket *socket)
         return;
     }
 
-    QString appName = tokens[1];
+    const QString& appName = tokens[1];
 
     bool bPopup = false;
     if (tokens[2] == "TRUE")
@@ -511,7 +516,7 @@ void LCDServer::switchToMenu(const QStringList &tokens, QTcpSocket *socket)
 
     for (int x = 3; x < tokens.count(); x += 5)
     {
-        QString text = tokens[x];
+        const QString& text = tokens[x];
 
         CHECKED_STATE checked = CHECKED;
         if (tokens[x + 1] == "CHECKED")

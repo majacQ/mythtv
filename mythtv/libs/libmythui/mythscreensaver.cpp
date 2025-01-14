@@ -1,8 +1,8 @@
 // Qt
+#include <QtGlobal>
 #include <QGuiApplication>
 
 // MythTV
-#include "config.h"
 #include "mythmainwindow.h"
 #include "mythscreensaver.h"
 
@@ -14,7 +14,7 @@
 #include "platforms/mythscreensaverdbus.h"
 #endif
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #include "platforms/mythscreensaverosx.h"
 #endif
 
@@ -37,7 +37,8 @@
  * use the MythMainWindow object here (or in any MythScreenSaver constructor) as
  * it is not complete. Instead listen for the MythMainWindow::signalWindowReady signal.
 */
-MythScreenSaverControl::MythScreenSaverControl(MythMainWindow* MainWin, MythDisplay* mDisplay)
+MythScreenSaverControl::MythScreenSaverControl([[maybe_unused]] MythMainWindow* MainWin,
+                                               [[maybe_unused]] MythDisplay* mDisplay)
 {
 #if defined(USING_DBUS)
     m_screenSavers.push_back(new MythScreenSaverDBus(this));
@@ -49,7 +50,7 @@ MythScreenSaverControl::MythScreenSaverControl(MythMainWindow* MainWin, MythDisp
         m_screenSavers.push_back(new MythScreenSaverX11(this));
         delete display;
     }
-#elif CONFIG_DARWIN
+#elif defined(Q_OS_DARWIN)
     m_screenSavers.push_back(new MythScreenSaverOSX(this));
 #endif
 #if defined(ANDROID)
@@ -59,14 +60,10 @@ MythScreenSaverControl::MythScreenSaverControl(MythMainWindow* MainWin, MythDisp
     MythScreenSaverDRM* drmsaver = MythScreenSaverDRM::Create(this, mDisplay);
     if (drmsaver)
         m_screenSavers.push_back(drmsaver);
-#else
-    (void)mDisplay;
 #endif
 #ifdef USING_WAYLANDEXTRAS
     if (QGuiApplication::platformName().toLower().contains("wayland"))
         m_screenSavers.push_back(new MythScreenSaverWayland(this, MainWin));
-#else
-    (void)MainWin;
 #endif
 
     for (auto * screensaver : m_screenSavers)

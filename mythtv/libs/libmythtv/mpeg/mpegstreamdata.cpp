@@ -12,7 +12,6 @@
 // MythTV headers
 #include "mpegstreamdata.h"
 #include "mpegtables.h"
-#include "mpegtables.h"
 
 #include "atscstreamdata.h"
 #include "atsctables.h"
@@ -150,15 +149,15 @@ void MPEGStreamData::Reset(int desiredProgram)
     {
         QMutexLocker locker(&m_cacheLock);
 
-        for (const auto & cached : qAsConst(m_cachedPats))
+        for (const auto & cached : std::as_const(m_cachedPats))
             DeleteCachedTable(cached);
         m_cachedPats.clear();
 
-        for (const auto & cached : qAsConst(m_cachedPmts))
+        for (const auto & cached : std::as_const(m_cachedPmts))
             DeleteCachedTable(cached);
         m_cachedPmts.clear();
 
-        for (const auto & cached : qAsConst(m_cachedCats))
+        for (const auto & cached : std::as_const(m_cachedCats))
             DeleteCachedTable(cached);
         m_cachedCats.clear();
     }
@@ -504,9 +503,6 @@ bool MPEGStreamData::CreatePMTSingleProgram(const ProgramMapTable &pmt)
     std::vector<uint> types;
     std::vector<desc_list_t> pdesc;
 
-    uint video_cnt = 0;
-    uint audio_cnt = 0;
-
     std::vector<uint> videoPIDs;
     std::vector<uint> audioPIDs;
     std::vector<uint> dataPIDs;
@@ -527,7 +523,6 @@ bool MPEGStreamData::CreatePMTSingleProgram(const ProgramMapTable &pmt)
 
         if (is_audio)
         {
-            audio_cnt++;
             audioPIDs.push_back(pid);
         }
         else if (m_recordingType == "audio" )
@@ -544,7 +539,6 @@ bool MPEGStreamData::CreatePMTSingleProgram(const ProgramMapTable &pmt)
 
         if (is_video)
         {
-            video_cnt++;
             videoPIDs.push_back(pid);
         }
 
@@ -568,11 +562,11 @@ bool MPEGStreamData::CreatePMTSingleProgram(const ProgramMapTable &pmt)
         types.push_back(type);
     }
 
-    if (video_cnt < m_pmtSingleProgramNumVideo)
+    if (videoPIDs.size() < m_pmtSingleProgramNumVideo)
     {
         LOG(VB_RECORD, LOG_ERR, LOC +
             QString("Only %1 video streams seen in PMT, but %2 are required.")
-                .arg(video_cnt).arg(m_pmtSingleProgramNumVideo));
+                .arg(videoPIDs.size()).arg(m_pmtSingleProgramNumVideo));
         return false;
     }
 
@@ -644,9 +638,9 @@ bool MPEGStreamData::CreatePMTSingleProgram(const ProgramMapTable &pmt)
 /** \fn MPEGStreamData::IsRedundant(uint pid, const PSIPTable&) const
  *  \brief Returns true if table already seen.
  */
-bool MPEGStreamData::IsRedundant(uint pid, const PSIPTable &psip) const
+bool MPEGStreamData::IsRedundant([[maybe_unused]] uint pid,
+                                 const PSIPTable &psip) const
 {
-    (void) pid;
     const int table_id = psip.TableID();
     const int version  = psip.Version();
 
@@ -853,13 +847,13 @@ void MPEGStreamData::UpdateTimeOffset(uint64_t _si_utc_time)
     QMutexLocker locker(&m_siTimeLock);
     m_siTimeOffsets[m_siTimeOffsetIndx] = si_time - utc_time;
 
-    if (m_siTimeOffsetIndx + 1 > m_siTimeOffsetCnt)
-        m_siTimeOffsetCnt = m_siTimeOffsetIndx + 1;
+    m_siTimeOffsetCnt = std::max(m_siTimeOffsetIndx + 1, m_siTimeOffsetCnt);
 
     m_siTimeOffsetIndx = (m_siTimeOffsetIndx + 1) & 0xf;
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define DONE_WITH_PSIP_PACKET() { delete psip; \
     if (morePSIPTables) goto HAS_ANOTHER_PSIP; else return; }
 
@@ -914,7 +908,7 @@ void MPEGStreamData::HandleTSTables(const TSPacket* tspacket)
     if (tspacket->Scrambled())
     { // scrambled! ATSC, DVB require tables not to be scrambled
         LOG(VB_RECORD, LOG_ERR, LOC +
-            "PSIP packet is scrambled, not ATSC/DVB compiant");
+            "PSIP packet is scrambled, not ATSC/DVB compliant");
         DONE_WITH_PSIP_PACKET();
     }
 
@@ -1018,6 +1012,23 @@ bool MPEGStreamData::ProcessTSPacket(const TSPacket& tspacket)
     if (tspacket.Scrambled())
         return true;
 
+    // Discard broken packets with invalid adaptation field length
+    // See ISO/IEC 13818-1 : 2000 (E). 2.4.3.5 Semantic definition of fields in adaptation field
+    if (tspacket.HasAdaptationField())
+    {
+        size_t afsize = tspacket.AdaptationFieldSize();
+        bool validsize = (tspacket.HasPayload())
+            ? afsize <= 182
+            : afsize == 183;
+        if (!validsize)
+        {
+            LOG(VB_RECORD, LOG_DEBUG, QString("Invalid adaptation field, type %3, size %4")
+                .arg(tspacket.AdaptationFieldControl()).arg(afsize) + "\n" +
+                tspacket.toString());
+            return false;
+        }
+    }
+
     if (VERBOSE_LEVEL_CHECK(VB_RECORD, LOG_DEBUG))
     {
         if (m_pmtSingleProgram && tspacket.PID() ==
@@ -1037,6 +1048,8 @@ bool MPEGStreamData::ProcessTSPacket(const TSPacket& tspacket)
 
     if (IsVideoPID(tspacket.PID()))
     {
+        QMutexLocker locker(&m_listenerLock);
+
         for (auto & listener : m_tsAvListeners)
             listener->ProcessVideoTSPacket(tspacket);
 
@@ -1045,6 +1058,8 @@ bool MPEGStreamData::ProcessTSPacket(const TSPacket& tspacket)
 
     if (IsAudioPID(tspacket.PID()))
     {
+        QMutexLocker locker(&m_listenerLock);
+
         for (auto & listener : m_tsAvListeners)
             listener->ProcessAudioTSPacket(tspacket);
 
@@ -1053,6 +1068,8 @@ bool MPEGStreamData::ProcessTSPacket(const TSPacket& tspacket)
 
     if (IsWritingPID(tspacket.PID()))
     {
+        QMutexLocker locker(&m_listenerLock);
+
         for (auto & listener : m_tsWritingListeners)
             listener->ProcessTSPacket(tspacket);
     }
@@ -1307,7 +1324,7 @@ bool MPEGStreamData::HasCachedAllPMTs(void) const
     if (m_cachedPats.empty())
         return false;
 
-    for (auto *pat : qAsConst(m_cachedPats))
+    for (auto *pat : std::as_const(m_cachedPats))
     {
         if (!HasCachedAllPAT(pat->TransportStreamID()))
             return false;
@@ -1362,7 +1379,7 @@ pat_vec_t MPEGStreamData::GetCachedPATs(void) const
     QMutexLocker locker(&m_cacheLock);
     pat_vec_t pats;
 
-    for (auto *pat : qAsConst(m_cachedPats))
+    for (auto *pat : std::as_const(m_cachedPats))
     {
         IncrementRefCnt(pat);
         pats.push_back(pat);
@@ -1404,7 +1421,7 @@ cat_vec_t MPEGStreamData::GetCachedCATs(void) const
     QMutexLocker locker(&m_cacheLock);
     cat_vec_t cats;
 
-    for (auto *cat : qAsConst(m_cachedCats))
+    for (auto *cat : std::as_const(m_cachedCats))
     {
         IncrementRefCnt(cat);
         cats.push_back(cat);
@@ -1432,7 +1449,7 @@ pmt_vec_t MPEGStreamData::GetCachedPMTs(void) const
     QMutexLocker locker(&m_cacheLock);
     std::vector<const ProgramMapTable*> pmts;
 
-    for (auto *pmt : qAsConst(m_cachedPmts))
+    for (auto *pmt : std::as_const(m_cachedPmts))
     {
         IncrementRefCnt(pmt);
         pmts.push_back(pmt);
@@ -1446,7 +1463,7 @@ pmt_map_t MPEGStreamData::GetCachedPMTMap(void) const
     QMutexLocker locker(&m_cacheLock);
     pmt_map_t pmts;
 
-    for (auto *pmt : qAsConst(m_cachedPmts))
+    for (auto *pmt : std::as_const(m_cachedPmts))
     {
         IncrementRefCnt(pmt);
         pmts[pmt->ProgramNumber()].push_back(pmt);
@@ -1664,10 +1681,20 @@ void MPEGStreamData::AddAVListener(TSPacketListenerAV *val)
     QMutexLocker locker(&m_listenerLock);
 
     for (auto & listener : m_tsAvListeners)
+    {
         if (((void*)val) == ((void*)listener))
+        {
+            LOG(VB_RECORD, LOG_ERR, LOC + QString("AddAVListener 0x%1 already present")
+                .arg((uint64_t)val, 0, 16));
             return;
+        }
+    }
 
     m_tsAvListeners.push_back(val);
+#if 0
+    LOG(VB_RECORD, LOG_DEBUG, LOC + QString("AddAVListener 0x%1 added")
+        .arg((uint64_t)val, 0, 16));
+#endif
 }
 
 void MPEGStreamData::RemoveAVListener(TSPacketListenerAV *val)
@@ -1679,9 +1706,16 @@ void MPEGStreamData::RemoveAVListener(TSPacketListenerAV *val)
         if (((void*)val) == ((void*)*it))
         {
             m_tsAvListeners.erase(it);
+#if 0
+            LOG(VB_RECORD, LOG_DEBUG, LOC + QString("RemoveAVListener 0x%1 found and removed")
+                .arg((uint64_t)val, 0, 16));
+#endif
             return;
         }
     }
+
+    LOG(VB_RECORD, LOG_ERR, LOC + QString("RemoveAVListener 0x%1 NOT found")
+        .arg((uint64_t)val, 0, 16));
 }
 
 void MPEGStreamData::AddMPEGSPListener(MPEGSingleProgramStreamListener *val)

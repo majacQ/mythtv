@@ -4,25 +4,23 @@
 // warranty, or liability of any kind.
 //
 
-// C
-#include <cmath>
-#include <cstdio>
-
 // C++
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <iostream>
 
 // Qt
 #include <QPainter>
 
-// mythtv
-#include <mythuivideo.h>
+// MythTV
+#include <libmythui/mythuivideo.h>
 
 // mythmusic
-#include "visualize.h"
-#include "mainvisual.h"
 #include "constants.h"
+#include "mainvisual.h"
 #include "musicplayer.h"
+#include "visualize.h"
 
 // fast inlines
 #include "inlines.h"
@@ -165,8 +163,7 @@ void MainVisual::add(const void *buffer, unsigned long b_len,
     len /= source_channels;
     len /= (bits_per_sample / 8);
 
-    if (len > m_samples)
-        len = m_samples;
+    len = std::min(len, m_samples);
 
     int cnt = len;
 
@@ -202,7 +199,9 @@ void MainVisual::add(const void *buffer, unsigned long b_len,
             len = 0;
     }
     else
+    {
         len = 0;
+    }
 
     m_nodes.append(new VisualNode(l, r, len, timecode));
 }
@@ -216,11 +215,20 @@ void MainVisual::timeout()
         std::chrono::milliseconds timestamp = gPlayer->getOutput()->GetAudiotime();
         while (m_nodes.size() > 1)
         {
-            if (m_nodes.first()->m_offset > timestamp)
-                break;
+            // LOG(VB_PLAYBACK, LOG_DEBUG,
+            //  QString("\tMV %1 first > %2 timestamp").
+            //  arg(m_nodes.first()->m_offset.count()).arg(timestamp.count()));
+            if (m_nodes.first()->m_offset >= timestamp + 5s)
+            {
+                // REW seek: drain buffer and start over
+            }
+            else if (m_nodes.first()->m_offset > timestamp)
+            {
+                break;          // at current time
+            }
 
             if (m_vis)
-                m_vis->processUndisplayed(node);
+                m_vis->processUndisplayed(m_nodes.first());
 
             delete m_nodes.first();
             m_nodes.removeFirst();
@@ -256,17 +264,17 @@ void MainVisual::resize(const QSize size)
 
 void MainVisual::customEvent(QEvent *event)
 {
-    if ((event->type() == OutputEvent::Playing)   ||
-        (event->type() == OutputEvent::Info)      ||
-        (event->type() == OutputEvent::Buffering) ||
-        (event->type() == OutputEvent::Paused))
+    if ((event->type() == OutputEvent::kPlaying)   ||
+        (event->type() == OutputEvent::kInfo)      ||
+        (event->type() == OutputEvent::kBuffering) ||
+        (event->type() == OutputEvent::kPaused))
     {
         m_playing = true;
         if (!m_updateTimer->isActive())
             m_updateTimer->start();
     }
-    else if ((event->type() == OutputEvent::Stopped) ||
-             (event->type() == OutputEvent::Error))
+    else if ((event->type() == OutputEvent::kStopped) ||
+             (event->type() == OutputEvent::kError))
     {
         m_playing = false;
     }

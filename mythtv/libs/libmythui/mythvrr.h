@@ -5,6 +5,7 @@
 #include <QString>
 
 // Std
+#include <cstdint>
 #include <memory>
 #include <tuple>
 
@@ -14,7 +15,7 @@ using MythVRRRange = std::tuple<int,int,bool>;
 class MythVRR
 {
   public:
-    enum VRRType
+    enum VRRType : std::uint8_t
     {
         Unknown = 0,
         FreeSync,
@@ -22,7 +23,7 @@ class MythVRR
         GSyncCompat
     };
 
-    static MythVRRPtr Create(class MythDisplay* _Display);
+    static MythVRRPtr Create(class MythDisplay* MDisplay);
     virtual ~MythVRR() = default;
     virtual void SetEnabled(bool Enable = true) = 0;
     QString      TypeToString() const;

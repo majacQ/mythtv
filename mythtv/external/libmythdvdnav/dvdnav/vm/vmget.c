@@ -193,7 +193,7 @@ int vm_set_audio_active_stream(vm_t *vm, int audioN) {
       return -1;
 
     /* verify that stream exists */
-    if(! (vm->state).pgc->audio_control[audioN] & (1<<15))
+    if(! ((vm->state).pgc->audio_control[audioN] & (1<<15)))
         return -1;
 
     (vm->state).AST_REG = audioN;
@@ -339,7 +339,7 @@ video_attr_t vm_get_video_attr(vm_t *vm) {
   default:
     assert(0);
   }
-  video_attr_t ret;
+  video_attr_t ret = {};
   return ret;
 }
 
@@ -356,7 +356,7 @@ audio_attr_t vm_get_audio_attr(vm_t *vm, int streamN) {
     assert(0);
   }
 
-  audio_attr_t ret;
+  audio_attr_t ret = {};
   return ret;
 }
 
@@ -373,6 +373,6 @@ subp_attr_t vm_get_subp_attr(vm_t *vm, int streamN) {
     assert(0);
   }
 
-  subp_attr_t ret;
+  subp_attr_t ret = {};
   return ret;
 }

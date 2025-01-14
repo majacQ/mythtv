@@ -7,7 +7,7 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -35,15 +35,17 @@
 #include <QSslSocket>
 
 // MythTV headers
-#include "mythqtcompat.h"
-#include "serverpool.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/serverpool.h"
+
 #include "httprequest.h"
-#include "mthreadpool.h"
 #include "upnputil.h"
-#include "compat.h"
 
 class HttpWorkerThread;
+#if CONFIG_QTSCRIPT
 class QScriptEngine;
+#endif
 class HttpServer;
 #ifndef QT_NO_OPENSSL
 class QSslKey;
@@ -51,7 +53,7 @@ class QSslCertificate;
 class QSslConfiguration;
 #endif
 
-enum ContentProtection
+enum ContentProtection : std::uint8_t
 {
     cpLocalNoAuth = 0x00,  // Can only be accessed locally, but no authentication is required
     cpLocalAuth   = 0x01,  // Can only be accessed locally, authentication is required
@@ -74,17 +76,17 @@ class UPNP_PUBLIC HttpServerExtension : public QObject
 
         QString     m_sName;
         QString     m_sSharePath;
-        int         m_nSocketTimeout; // Extension may wish to adjust the default e.g. UPnP
+        int         m_nSocketTimeout { -1 }; // Extension may wish to adjust the default e.g. UPnP
 
-        uint        m_nSupportedMethods; // Bit flags - HTTP::RequestType
+        // HTTP::RequestType. Defaults, extensions may extend the list
+        uint        m_nSupportedMethods
+	  {RequestTypeGet | RequestTypePost |
+	   RequestTypeHead | RequestTypeOptions};
         
     public:
 
         HttpServerExtension( QString sName, QString sSharePath)
-           : m_sName(std::move( sName )), m_sSharePath(std::move( sSharePath )),
-             m_nSocketTimeout(-1),
-             m_nSupportedMethods((RequestTypeGet | RequestTypePost | // Defaults, extensions may extend the list
-                                  RequestTypeHead | RequestTypeOptions)) {};
+           : m_sName(std::move( sName )), m_sSharePath(std::move( sSharePath )) {};
 
         ~HttpServerExtension() override = default;
 
@@ -158,7 +160,7 @@ class UPNP_PUBLIC HttpServer : public ServerPool
     const QString m_privateToken; // Private token; Used to salt digest auth nonce, changes on backend restart
 
   protected slots:
-    void newTcpConnection(qt_socket_fd_t socket) override; // QTcpServer
+    void newTcpConnection(qintptr socket) override; // QTcpServer
 
   private:
     void LoadSSLConfig();
@@ -182,7 +184,7 @@ class HttpWorker : public QRunnable
      * \param type       The type of connection - Plain TCP, SSL or other?
      * \param sslConfig  The SSL configuration (for SSL sockets)
      */
-    HttpWorker(HttpServer &httpServer, qt_socket_fd_t sock, PoolServerType type
+    HttpWorker(HttpServer &httpServer, qintptr sock, PoolServerType type
 #ifndef QT_NO_OPENSSL
                , const QSslConfiguration& sslConfig
 #endif
@@ -192,7 +194,7 @@ class HttpWorker : public QRunnable
 
   protected:
     HttpServer &m_httpServer; 
-    qt_socket_fd_t m_socket;
+    qintptr m_socket;
     std::chrono::milliseconds m_socketTimeout;
     PoolServerType m_connectionType;
 

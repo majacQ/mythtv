@@ -6,9 +6,10 @@
 //                                                                            
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
+#include "upnptasknotify.h"
 
 // ANSI C headers
 #include <cstdlib>
@@ -22,10 +23,12 @@
 #include <QFile>
 
 // MythTV headers
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythbase/mythversion.h"
+
 #include "mmulticastsocketdevice.h"
-#include "mythlogging.h"
-#include "mythversion.h"
-#include "mythmiscutil.h"
 #include "upnp.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -41,11 +44,10 @@
 /////////////////////////////////////////////////////////////////////////////
 
 UPnpNotifyTask::UPnpNotifyTask( int nServicePort ) :
-    Task("UPnpNotifyTask")
+    Task("UPnpNotifyTask"),
+    m_nServicePort(nServicePort)
 {
-    m_nServicePort = nServicePort;
-
-    m_nMaxAge      = UPnp::GetConfiguration()->GetDuration<std::chrono::seconds>( "UPnP/SSDP/MaxAge" , 1h );
+    m_nMaxAge      = XmlConfiguration().GetDuration<std::chrono::seconds>("UPnP/SSDP/MaxAge" , 1h);
 } 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -88,7 +90,7 @@ void UPnpNotifyTask::SendNotifyMsg( MSocketDevice *pSocket,
 
     QList<QHostAddress> addressList = UPnp::g_IPAddrList;
 
-    for (const auto & addr : qAsConst(addressList))
+    for (const auto & addr : std::as_const(addressList))
     {
         if (addr.toString().isEmpty())
         {
@@ -124,9 +126,13 @@ void UPnpNotifyTask::SendNotifyMsg( MSocketDevice *pSocket,
 
         pSocket->writeBlock( scPacket, scPacket.length(),
                              pSocket->address(), pSocket->port() );
-        std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom() % 250));
-        pSocket->writeBlock( scPacket, scPacket.length(),
-                             pSocket->address(), pSocket->port() );
+        if (m_eNTS != NTS_byebye)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(MythRandom(0, 250)));
+
+            pSocket->writeBlock( scPacket, scPacket.length(),
+                                pSocket->address(), pSocket->port() );
+        }
     }
 }
 
@@ -198,6 +204,6 @@ void UPnpNotifyTask::ProcessDevice(
     // Process any Embedded Devices
     // ----------------------------------------------------------------------
 
-    for (const auto & dev : qAsConst(pDevice->m_listDevices))
+    for (const auto & dev : std::as_const(pDevice->m_listDevices))
         ProcessDevice( pSocket, dev);
 }

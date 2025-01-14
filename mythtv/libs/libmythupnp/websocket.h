@@ -6,16 +6,17 @@
 //
 // Copyright (c) 2015 Stuart Morgan <smorgan@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
 #ifndef WEBSOCKET_H
 #define WEBSOCKET_H
 
-#include "serverpool.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/serverpool.h"
+
 #include "upnpexp.h"
-#include "mthreadpool.h"
 
 #include <QRunnable>
 #include <QSslConfiguration>
@@ -51,7 +52,7 @@ class UPNP_PUBLIC WebSocketServer : public ServerPool
     }
 
   protected slots:
-    void newTcpConnection(qt_socket_fd_t socket) override; // QTcpServer
+    void newTcpConnection(qintptr socket) override; // QTcpServer
 
   protected:
     mutable QReadWriteLock  m_rwlock;
@@ -98,7 +99,7 @@ class WebSocketFrame
         m_fragmented = false;
     }
 
-    enum OpCode
+    enum OpCode : std::uint8_t
     {
         kOpContinuation = 0x0,
         kOpTextFrame    = 0x1,
@@ -157,7 +158,7 @@ class WebSocketExtension : public QObject
 class WebSocketWorkerThread : public QRunnable
 {
   public:
-    WebSocketWorkerThread(WebSocketServer &webSocketServer, qt_socket_fd_t sock,
+    WebSocketWorkerThread(WebSocketServer &webSocketServer, qintptr sock,
                           PoolServerType type
 #ifndef QT_NO_OPENSSL
                           , const QSslConfiguration& sslConfig
@@ -169,7 +170,7 @@ class WebSocketWorkerThread : public QRunnable
 
   private:
     WebSocketServer  &m_webSocketServer;
-    qt_socket_fd_t    m_socketFD;
+    qintptr           m_socketFD;
     PoolServerType    m_connectionType;
 #ifndef QT_NO_OPENSSL
     QSslConfiguration m_sslConfig;
@@ -206,7 +207,7 @@ class WebSocketWorker : public QObject
      * \param type       The type of connection - Plain TCP or TLS?
      * \param sslConfig  The TLS (ssl) configuration (for TLS sockets)
      */
-    WebSocketWorker(WebSocketServer &webSocketServer, qt_socket_fd_t sock,
+    WebSocketWorker(WebSocketServer &webSocketServer, qintptr sock,
                     PoolServerType type
 #ifndef QT_NO_OPENSSL
                     , const QSslConfiguration& sslConfig
@@ -216,7 +217,7 @@ class WebSocketWorker : public QObject
 
     void Exec();
 
-    enum ErrorCode
+    enum ErrorCode : std::uint16_t
     {
         kCloseNormal        = 1000,
         kCloseGoingAway     = 1001,
@@ -272,7 +273,7 @@ class WebSocketWorker : public QObject
 
     QEventLoop     *m_eventLoop    {nullptr};
     WebSocketServer &m_webSocketServer;
-    qt_socket_fd_t m_socketFD;
+    qintptr        m_socketFD;
     QTcpSocket    *m_socket        {nullptr};
     PoolServerType m_connectionType;
 

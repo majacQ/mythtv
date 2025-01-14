@@ -6,12 +6,10 @@
 #include <QString>
 #include <cstdint>  // uint32_t
 
-#include "dvbdescriptors.h"
-#include "mpegtables.h"
-#include "mythtvexp.h"
+#include "libmythtv/mpeg/dvbdescriptors.h"
+#include "libmythtv/mpeg/mpegtables.h"
+#include "libmythtv/mythtvexp.h"
 
-MTV_PUBLIC QDateTime dvbdate2qt(const unsigned char *buf);
-MTV_PUBLIC time_t dvbdate2unix(const unsigned char *buf);
 uint32_t dvbdate2key(const unsigned char *buf);
 
 static inline QDateTime dvbdate2qt(const std::array<uint8_t,5> buf)
@@ -150,14 +148,14 @@ class MTV_PUBLIC ServiceDescriptionTable : public PSIPTable
     uint ServiceID(uint i) const { return (m_ptrs[i][0]<<8) | (m_ptrs[i][1]); }
     //   reserved_future_use    6  2.0+p
     //   EIT_schedule_flag      1  2.6+p
-    bool HasEITSchedule(uint i) const { return bool(m_ptrs[i][2] & 0x2); }
+    bool HasEITSchedule(uint i) const { return ( m_ptrs[i][2] & 0x02 ) != 0; }
     //   EIT_present_following  1  2.7+p
     bool HasEITPresentFollowing(uint i) const
-        { return bool(m_ptrs[i][2] & 0x1); }
+        { return ( m_ptrs[i][2] & 0x01 ) != 0; }
     ///   running_status        3  3.0+p
     uint RunningStatus(uint i) const { return (m_ptrs[i][3] & 0xE0) >> 5; }
     ///  free_CA_mode           1  3.3+p
-    bool IsEncrypted(uint i) const { return bool(m_ptrs[i][3] & 0x10); }
+    bool IsEncrypted(uint i) const { return ( m_ptrs[i][3] & 0x10 ) != 0; }
     ///  desc_loop_length      12  3.4+p
     uint ServiceDescriptorsLength(uint i) const
         { return ((m_ptrs[i][3]<<8) | (m_ptrs[i][4])) & 0xfff; }
@@ -358,7 +356,7 @@ class MTV_PUBLIC DVBEventInformationTable : public PSIPTable
     //   running_status         3  10.0+x
     uint RunningStatus(uint i) const { return m_ptrs[i][10] >> 5; }
     //   free_CA_mode           1  10.3+x
-    bool IsScrambled(uint i) const { return bool(m_ptrs[i][10] & 0x10); }
+    bool IsScrambled(uint i) const { return ( m_ptrs[i][10] & 0x10 ) != 0; }
     //   descriptors_loop_len  12  10.4+x
     uint DescriptorsLength(uint i) const
         { return ((m_ptrs[i][10]<<8) | (m_ptrs[i][11])) & 0xfff; }
@@ -401,6 +399,41 @@ class MTV_PUBLIC TimeDateTable : public PSIPTable
 
     QDateTime UTC(void)  const { return dvbdate2qt(UTCdata());   }
     time_t UTCUnix(void) const { return dvbdate2unix(UTCdata()); }
+};
+
+/** \class TimeOffsetTable
+ *  \brief This table gives the current DVB stream time, plus descriptors
+ */
+class MTV_PUBLIC TimeOffsetTable : public PSIPTable
+{
+  public:
+    explicit TimeOffsetTable(const PSIPTable& table)
+        : PSIPTable(table)
+    {
+        assert(TableID::TOT == TableID());
+    }
+    ~TimeOffsetTable() override { ; }
+
+    // table_id                 8   0.0       0x70
+    // section_syntax_indicator 1   1.0          0
+    // reserved_future_use      1   1.1          1
+    // reserved                 2   1.2          3
+    // section_length          12   1.4         40
+    // UTC_time                40   3.0          0
+    const unsigned char *UTCdata(void) const
+        { return pesdata() + 3; }
+
+    QDateTime UTC(void)  const { return dvbdate2qt(UTCdata());   }
+    time_t UTCUnix(void) const { return dvbdate2unix(UTCdata()); }
+
+    // Reserved                 4   8.0       0x0F
+    // Descriptors Length      12   8.4          0
+    uint DescriptorsLength(void) const
+        { return ((pesdata()[8]<<8) | pesdata()[9]) & 0x0fff; }
+    // for (i=0;i<N;i++)
+    // Descriptor();
+    const unsigned char* Descriptors(void) const
+        { return pesdata() + 10; }
 };
 
 #endif // DVB_TABLES_H

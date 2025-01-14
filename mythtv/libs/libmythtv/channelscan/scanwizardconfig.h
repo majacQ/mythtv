@@ -31,10 +31,11 @@
 #define SCAN_WIZARD_CONFIG_H
 
 // MythTV headers
-#include "standardsettings.h"
+#include "libmythui/standardsettings.h"
+#include "libmythtv/dtvmultiplex.h"
+
 #include "inputselectorsetting.h"
 #include "channelscantypes.h"
-#include "dtvmultiplex.h"
 
 class ScanWizard;
 class VideoSourceSelector;
@@ -68,7 +69,7 @@ class ScanTypeSetting : public TransMythUIComboBoxSetting
     friend class ScanWizard;
     Q_OBJECT
   public:
-    enum Type
+    enum Type : std::uint8_t
     {
         Error_Open = 0,
         Error_Probe,
@@ -102,13 +103,14 @@ class ScanTypeSetting : public TransMythUIComboBoxSetting
         // Import using the VBox API to get the channel list
         VBoxImport,
         // Import using the ExternalRecorder API to get the channel list
-        ExternRecImport
+        ExternRecImport,
+        // Import using the HDHomeRun API to get the channel list
+        HDHRImport
     };
 
     ScanTypeSetting()
     {
         setLabel(QObject::tr("Scan Type"));
-        setHelpText(QObject::tr("For scan type 'Full Scan' select a country to get the correct set of frequencies."));
     }
 
   protected slots:

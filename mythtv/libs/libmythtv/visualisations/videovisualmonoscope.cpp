@@ -1,4 +1,7 @@
+#include <algorithm>
+
 // MythTV
+#include "libmythbase/mythchrono.h"
 #include "videovisualmonoscope.h"
 
 #ifdef USING_OPENGL
@@ -25,7 +28,7 @@ void VideoVisualMonoScope::InitCommon(QRect Area)
     m_area = Area;
     m_rate = 1.0;
     m_lastTime = nowAsDuration<std::chrono::milliseconds>();
-    m_lineWidth = qMax(1.0F, m_area.height() * 0.004F);
+    m_lineWidth = std::max(1.0F, m_area.height() * 0.004F);
 }
 
 bool VideoVisualMonoScope::UpdateVertices(float* Buffer)
@@ -57,12 +60,12 @@ bool VideoVisualMonoScope::UpdateVertices(float* Buffer)
             double temp = (static_cast<double>(node->m_left[s]) +
                           (node->m_right ? static_cast<double>(node->m_right[s]) : 0.0) *
                           (static_cast<double>(m_area.height())) ) / 65536.0;
-            value = temp > 0.0 ? qMax(temp, value) : qMin(temp, value);
+            value = temp > 0.0 ? std::max(temp, value) : std::min(temp, value);
         }
 
         index += step;
         Buffer[i * 2] = x;
-        Buffer[i * 2 + 1] = y + static_cast<float>(value);
+        Buffer[(i * 2) + 1] = y + static_cast<float>(value);
         x += xstep;
     }
     return true;

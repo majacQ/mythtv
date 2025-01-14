@@ -1,32 +1,25 @@
-
-#include "manualschedule.h"
-
-// qt
+// Qt
 #include <QDateTime>
+#include <QTimeZone>
 
-// libmythbase
-#include "mythdbcon.h"
-#include "mythlogging.h"
-#include "mythdate.h"
+// MythTV
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/recordingtypes.h"
+#include "libmythtv/channelinfo.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/recordingrule.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuibutton.h"
+#include "libmythui/mythuibuttonlist.h"
+#include "libmythui/mythuispinbox.h"
+#include "libmythui/mythuitextedit.h"
 
-// libmyth
-#include "mythcorecontext.h"
-#include "programinfo.h"
-
-// libmythtv
-#include "recordingrule.h"
-#include "recordingtypes.h"
-#include "channelinfo.h"
-#include "channelutil.h"
-
-// libmythui
-#include "mythuitextedit.h"
-#include "mythuibutton.h"
-#include "mythuibuttonlist.h"
-#include "mythuispinbox.h"
-#include "mythmainwindow.h"
-
-// mythfrontend
+// MythFrontend
+#include "manualschedule.h"
 #include "scheduleeditor.h"
 
 ManualSchedule::ManualSchedule(MythScreenStack *parent)
@@ -64,6 +57,8 @@ bool ManualSchedule::Create(void)
 
     QString startchan = gCoreContext->GetSetting("DefaultTVChannel", "");
     QString chanorder = gCoreContext->GetSetting("ChannelOrdering", "channum");
+    QString lastManualRecordChan = gCoreContext->GetSetting("LastManualRecordChan", startchan);
+    int manStartChanType = gCoreContext->GetNumSetting("ManualRecordStartChanType", 1);
     ChannelInfoList channels = ChannelUtil::GetChannels(0, true, "channum,callsign");
     ChannelUtil::SortChannels(channels, chanorder);
 
@@ -75,10 +70,23 @@ bool ManualSchedule::Create(void)
         InfoMap infomap;
         channels[i].ToMap(infomap);
         item->SetTextFromMap(infomap);
-        if (channels[i].m_chanNum == startchan)
+        if (manStartChanType == 1)
         {
-            m_channelList->SetItemCurrent(i);
-            startchan = "";
+            // Use DefaultTVChannel as starting channel
+            if (channels[i].m_chanNum == startchan)
+            {
+                m_channelList->SetItemCurrent(i);
+                startchan = "";
+            }
+        }
+        else
+        {
+            // Use LastManualRecordChan as starting channel
+            if (channels[i].m_chanNum == lastManualRecordChan)
+            {
+                m_channelList->SetItemCurrent(i);
+                lastManualRecordChan = "";
+            }
         }
         m_chanids.push_back(channels[i].m_chanId);
     }
@@ -176,9 +184,17 @@ void ManualSchedule::dateChanged(void)
     int hr = m_starthourSpin->GetIntValue();
     int min = m_startminuteSpin->GetIntValue();
 
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     m_startDateTime = QDateTime(
         m_nowDateTime.toLocalTime().addDays(m_daysahead).date(),
         QTime(hr, min), Qt::LocalTime).toUTC();
+#else
+    m_startDateTime =
+        QDateTime(m_nowDateTime.toLocalTime().addDays(m_daysahead).date(),
+                  QTime(hr, min),
+                  QTimeZone(QTimeZone::LocalTime))
+        .toUTC();
+#endif
 
     LOG(VB_SCHEDULE, LOG_INFO, QString("Start Date Time: %1")
         .arg(m_startDateTime.toString(Qt::ISODate)));
@@ -186,17 +202,32 @@ void ManualSchedule::dateChanged(void)
     // Note we allow start times up to one hour in the past so
     // if it is 20:25 the user can start a recording at 20:30
     // by first setting the hour and then the minute.
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
     QDateTime tmp = QDateTime(
         m_startDateTime.toLocalTime().date(),
         QTime(m_startDateTime.toLocalTime().time().hour(),59,59),
         Qt::LocalTime).toUTC();
+#else
+    QDateTime tmp =
+        QDateTime(m_startDateTime.toLocalTime().date(),
+                  QTime(m_startDateTime.toLocalTime().time().hour(),59,59),
+                  QTimeZone(QTimeZone::LocalTime))
+        .toUTC();
+#endif
     if (tmp < m_nowDateTime)
     {
         hr = m_nowDateTime.toLocalTime().time().hour();
         m_starthourSpin->SetValue(hr);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
         m_startDateTime =
             QDateTime(m_nowDateTime.toLocalTime().date(),
                       QTime(hr, min), Qt::LocalTime).toUTC();
+#else
+        m_startDateTime = QDateTime(m_nowDateTime.toLocalTime().date(),
+                                    QTime(hr, min),
+                                    QTimeZone(QTimeZone::LocalTime))
+            .toUTC();
+#endif
     }
     connectSignals();
 }
@@ -216,6 +247,11 @@ void ManualSchedule::recordClicked(void)
                   m_chanids[m_channelList->GetCurrentPos()],
                   m_startDateTime, endts);
 
+    // Save the channel because we might want to use it as the
+    // starting channel for the next Manual Record rule.
+    gCoreContext->SaveSetting("LastManualRecordChan",
+        ChannelUtil::GetChanNum(m_chanids[m_channelList->GetCurrentPos()]));
+
     auto *record = new RecordingRule();
     record->LoadByProgram(&p);
     record->m_searchType = kManualSearch;
@@ -229,7 +265,9 @@ void ManualSchedule::recordClicked(void)
         connect(schededit, &ScheduleEditor::ruleSaved, this, &ManualSchedule::scheduleCreated);
     }
     else
+    {
         delete schededit;
+    }
 }
 
 void ManualSchedule::scheduleCreated(int ruleid)

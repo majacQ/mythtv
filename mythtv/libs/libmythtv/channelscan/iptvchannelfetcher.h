@@ -17,8 +17,8 @@
 #include <QString>
 
 // MythTV headers
-#include "iptvtuningdata.h"
-#include "mthread.h"
+#include "libmythtv/iptvtuningdata.h"
+#include "libmythbase/mthread.h"
 
 class ScanMonitor;
 class IPTVChannelFetcher;
@@ -31,6 +31,7 @@ class IPTVChannelInfo
     IPTVChannelInfo() = default;
     IPTVChannelInfo(QString name,
                     QString xmltvid,
+                    QString logo,
                     const QString &data_url,
                     uint data_bitrate,
                     const QString &fec_type,
@@ -39,7 +40,8 @@ class IPTVChannelInfo
                     const QString &fec_url1,
                     uint fec_bitrate1,
                     uint programnumber) :
-        m_name(std::move(name)), m_xmltvid(std::move(xmltvid)), m_programNumber(programnumber),
+        m_name(std::move(name)), m_xmltvid(std::move(xmltvid)), m_logo(std::move(logo)),
+        m_programNumber(programnumber),
         m_tuning(data_url, data_bitrate,
                  fec_type, fec_url0, fec_bitrate0, fec_url1, fec_bitrate1,
                  IPTVTuningData::inValid)
@@ -56,6 +58,7 @@ class IPTVChannelInfo
   public:
     QString        m_name;
     QString        m_xmltvid;
+    QString        m_logo;
     uint           m_programNumber {0};
     IPTVTuningData m_tuning;
 };
@@ -75,7 +78,7 @@ class IPTVChannelFetcher : public QRunnable
     fbox_chan_map_t GetChannels(void);
 
     static QString DownloadPlaylist(const QString &url);
-    static fbox_chan_map_t ParsePlaylist(
+    MTV_PUBLIC static fbox_chan_map_t ParsePlaylist(
         const QString &rawdata, IPTVChannelFetcher *fetcher = nullptr);
 
   private:

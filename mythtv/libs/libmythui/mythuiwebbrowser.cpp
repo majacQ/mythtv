@@ -6,20 +6,10 @@
 
 #include "mythuiwebbrowser.h"
 
-// myth
-#include "mythpainter.h"
-#include "mythimage.h"
-#include "mythmainwindow.h"
-#include "mythfontproperties.h"
-#include "mythlogging.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "mythuihelper.h"
-#include "mythcorecontext.h"
-#include "mythdownloadmanager.h"
-#include "mythdialogbox.h"
-#include "mythprogressdialog.h"
-#include "mythuiscrollbar.h"
+// c++
+#include <algorithm>
+#include <chrono> // for milliseconds
+#include <thread> // for sleep_for
 
 // qt
 #include <QApplication>
@@ -34,8 +24,22 @@
 #include <QNetworkCookieJar>
 #include <QNetworkConfiguration>
 
-#include <chrono> // for milliseconds
-#include <thread> // for sleep_for
+// libmythbase
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+
+//libmythui
+#include "mythpainter.h"
+#include "mythimage.h"
+#include "mythmainwindow.h"
+#include "mythfontproperties.h"
+#include "mythuihelper.h"
+#include "mythdialogbox.h"
+#include "mythprogressdialog.h"
+#include "mythuiscrollbar.h"
 
 struct MimeType
 {
@@ -119,8 +123,7 @@ static QNetworkAccessManager *GetNetworkAccessManager(void)
  * \note allows the browser to control the music player
  */
 BrowserApi::BrowserApi(QObject *parent)
-           : QObject(parent),
-            m_frame(nullptr), m_gotAnswer(false)
+           : QObject(parent)
 {
     gCoreContext->addListener(this);
 }
@@ -234,12 +237,12 @@ QString BrowserApi::GetMetadata(void)
     if (m_gotAnswer)
         return m_answer;
 
-    return QString("unknown");
+    return {"unknown"};
 }
 
 void BrowserApi::customEvent(QEvent *e)
 {
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(e);
         if (me == nullptr)
@@ -352,11 +355,11 @@ QString MythWebPage::userAgentForUrl(const QUrl &url) const
  */
 MythWebView::MythWebView(QWidget *parent, MythUIWebBrowser *parentBrowser)
             : QWebView(parent),
-      m_webpage(new MythWebPage(this))
+      m_webpage(new MythWebPage(this)),
+      m_parentBrowser(parentBrowser),
+      m_api(new BrowserApi(this))
 {
     setPage(m_webpage);
-
-    m_parentBrowser = parentBrowser;
 
     connect(page(), &QWebPage::unsupportedContent,
             this, &MythWebView::handleUnsupportedContent);
@@ -366,7 +369,6 @@ MythWebView::MythWebView(QWidget *parent, MythUIWebBrowser *parentBrowser)
 
     page()->setForwardUnsupportedContent(true);
 
-    m_api = new BrowserApi(this);
     m_api->setWebView(this);
 }
 
@@ -415,7 +417,7 @@ void MythWebView::keyPressEvent(QKeyEvent *event)
 
         for (int i = 0; i < actions.size() && !handled; i++)
         {
-            QString action = actions[i];
+            const QString& action = actions[i];
             handled = true;
 
             if (action == "NEXTLINK")
@@ -554,7 +556,9 @@ void  MythWebView::doDownloadRequested(const QNetworkRequest &request)
             popupStack->AddScreen(input);
         }
         else
+        {
             delete input;
+        }
     }
 }
 
@@ -650,17 +654,13 @@ void MythWebView::customEvent(QEvent *event)
             }
         }
     }
-    else if (event->type() == MythEvent::MythEventMessage)
+    else if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
             return;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList tokens = me->Message().split(" ", QString::SkipEmptyParts);
-#else
         QStringList tokens = me->Message().split(" ", Qt::SkipEmptyParts);
-#endif
         if (tokens.isEmpty())
             return;
 
@@ -676,7 +676,7 @@ void MythWebView::customEvent(QEvent *event)
             {
                 int fileSize  = args[2].toInt();
                 int errorCode = args[4].toInt();
-                QString filename = args[1];
+                const QString& filename = args[1];
 
                 closeBusyPopup();
 
@@ -727,14 +727,14 @@ void MythWebView::showDownloadMenu(void)
 QString MythWebView::getExtensionForMimetype(const QString &mimetype)
 {
     if (mimetype.isEmpty())
-        return QString("");
+        return {""};
 
     auto it = std::find_if(SupportedMimeTypes.cbegin(), SupportedMimeTypes.cend(),
                            [mimetype] (const MimeType& entry) -> bool
                                { return mimetype == entry.m_mimeType; });
     if (it != SupportedMimeTypes.cend())
         return it->m_extension;
-    return QString("");
+    return {""};
 }
 
 bool MythWebView::isMusicFile(const QString &extension, const QString &mimetype)
@@ -770,7 +770,7 @@ bool MythWebView::isVideoFile(const QString &extension, const QString &mimetype)
 QString MythWebView::getReplyMimetype(void)
 {
     if (!m_downloadReply)
-        return QString();
+        return {};
 
     QString mimeType;
     QVariant header = m_downloadReply->header(QNetworkRequest::ContentTypeHeader);
@@ -828,17 +828,10 @@ QWebView *MythWebView::createWindow(QWebPage::WebWindowType /* type */)
  */
 MythUIWebBrowser::MythUIWebBrowser(MythUIType *parent, const QString &name)
                  : MythUIType(parent, name),
-      m_parentScreen(nullptr),
-      m_browser(nullptr),    m_image(nullptr),
-      m_active(false),       m_wasActive(false),
-      m_initialized(false),
-      m_updateInterval(0),   m_zoom(1.0),
       m_bgColor("White"),    m_userCssFile(""),
       m_defaultSaveDir(GetConfDir() + "/MythBrowser/"),
       m_defaultSaveFilename(""),
-      m_inputToggled(false), m_lastMouseAction(""),
-      m_mouseKeyCount(0),
-      m_horizontalScrollbar(nullptr), m_verticalScrollbar(nullptr)
+      m_lastMouseAction("")
 {
     SetCanTakeFocus(true);
     m_scrollAnimation.setDuration(0);
@@ -1160,7 +1153,7 @@ void MythUIWebBrowser::SetActive(bool active)
  */
 void MythUIWebBrowser::ZoomIn(void)
 {
-    SetZoom(m_zoom + 0.1F);
+    SetZoom(m_zoom + 0.1);
 }
 
 /** \fn MythUIWebBrowser::ZoomOut(void)
@@ -1168,25 +1161,19 @@ void MythUIWebBrowser::ZoomIn(void)
  */
 void MythUIWebBrowser::ZoomOut(void)
 {
-    SetZoom(m_zoom - 0.1F);
+    SetZoom(m_zoom - 0.1);
 }
 
-/** \fn MythUIWebBrowser::SetZoom(float)
+/** \fn MythUIWebBrowser::SetZoom(double)
  *  \brief Set the text size to specific size
  *  \param zoom The size to use. Useful values are between 0.3 and 5.0
  */
-void MythUIWebBrowser::SetZoom(float zoom)
+void MythUIWebBrowser::SetZoom(double zoom)
 {
     if (!m_browser)
         return;
 
-    if (zoom < 0.3F)
-        zoom = 0.3F;
-
-    if (zoom > 5.0F)
-        zoom = 5.0F;
-
-    m_zoom = zoom;
+    m_zoom = std::clamp(zoom, 0.3, 5.0);
     m_browser->setZoomFactor(m_zoom);
     ResetScrollBars();
     UpdateBuffer();
@@ -1279,7 +1266,7 @@ QIcon MythUIWebBrowser::GetIcon(void)
     {
         return QWebSettings::iconForUrl(m_browser->url());
     }
-    return QIcon();
+    return {};
 }
 
 /** \fn MythUIWebBrowser::GetUrl(void)
@@ -1292,7 +1279,7 @@ QUrl MythUIWebBrowser::GetUrl(void)
     {
         return m_browser->url();
     }
-    return QUrl();
+    return {};
 }
 
 /** \fn MythUIWebBrowser::GetTitle(void)
@@ -1303,7 +1290,7 @@ QString MythUIWebBrowser::GetTitle(void)
 {
     if (m_browser)
         return m_browser->title();
-    return QString("");
+    return {""};
 }
 
 /** \fn MythUIWebBrowser::evaluateJavaScript(const QString& scriptSource)
@@ -1317,7 +1304,7 @@ QVariant MythUIWebBrowser::evaluateJavaScript(const QString &scriptSource)
         QWebFrame *frame = m_browser->page()->currentFrame();
         return frame->evaluateJavaScript(scriptSource);
     }
-    return QVariant();
+    return {};
 }
 
 void MythUIWebBrowser::Scroll(int dx, int dy)
@@ -1536,7 +1523,7 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "TOGGLEINPUT")
@@ -1569,7 +1556,9 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
                 Scroll(0, -m_actualBrowserArea.height() / 10);
             }
             else
+            {
                 handled = false;
+            }
         }
         else if (action == "DOWN")
         {
@@ -1581,7 +1570,9 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
                 Scroll(0, m_actualBrowserArea.height() / 10);
             }
             else
+            {
                 handled = false;
+            }
         }
         else if (action == "LEFT")
         {
@@ -1592,7 +1583,9 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
                 Scroll(-m_actualBrowserArea.width() / 10, 0);
             }
             else
+            {
                 handled = false;
+            }
         }
         else if (action == "RIGHT")
         {
@@ -1604,7 +1597,9 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
                 Scroll(m_actualBrowserArea.width() / 10, 0);
             }
             else
+            {
                 handled = false;
+            }
         }
         else if (action == "PAGEUP")
         {
@@ -1651,7 +1646,9 @@ bool MythUIWebBrowser::keyPressEvent(QKeyEvent *event)
             Forward();
         }
         else
+        {
             handled = false;
+        }
     }
 
     return handled;
@@ -1744,7 +1741,7 @@ bool MythUIWebBrowser::ParseElement(
     if (element.tagName() == "zoom")
     {
         QString zoom = getFirstText(element);
-        m_zoom = zoom.toFloat();
+        m_zoom = zoom.toDouble();
     }
     else if (element.tagName() == "url")
     {

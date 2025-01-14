@@ -13,26 +13,23 @@
 #include <QString>
 #include <QMap>
 #include <QMutex>                       // for QMutex
-#if QT_VERSION >= QT_VERSION_CHECK(5,14,0)
 #include <QRecursiveMutex>
-#endif
 #include <QReadWriteLock>
 #include <QHash>                        // for QHash
 
 // MythTV headers
-#include "mythtimer.h"
-#include "mthread.h"
+#include "libmythbase/mthread.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythdeque.h"
+#include "libmythbase/mythtimer.h"
+#include "libmythbase/programtypes.h"   // for RecStatus, RecStatus::Type, etc
+
 #include "inputinfo.h"
-#include "mythdeque.h"
-
-#include "recordinginfo.h"
-#include "tv.h"
-#include "signalmonitorlistener.h"
 #include "mythtvexp.h"                  // for MTV_PUBLIC
-#include "programtypes.h"               // for RecStatus, RecStatus::Type, etc
+#include "recordinginfo.h"
+#include "signalmonitorlistener.h"
+#include "tv.h"
 #include "videoouttypes.h"              // for PictureAttribute
-
-#include "mythconfig.h"
 
 // locking order
 // setChannelLock -> stateChangeLock -> triggerEventLoopLock
@@ -253,6 +250,7 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
     void StatusChannelTuned(const SignalMonitorValue &/*val*/) override { } // SignalMonitorListener
     void StatusSignalLock(const SignalMonitorValue &/*val*/) override { } // SignalMonitorListener
     void StatusSignalStrength(const SignalMonitorValue &/*val*/) override { } // SignalMonitorListener
+    void EnableActiveScan(bool enable);
 
   protected:
     void run(void) override; // QRunnable
@@ -270,8 +268,6 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
                            GeneralDBOptions   &gen_opts,
                            DVBDBOptions       &dvb_opts,
                            FireWireDBOptions  &firewire_opts);
-
-    static QString GetStartChannel(uint inputid);
 
     void TeardownRecorder(uint request_flags);
     DTVRecorder  *GetDTVRecorder(void);
@@ -364,6 +360,7 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
     bool               m_runJobOnHostOnly         {false};
     std::chrono::seconds m_eitCrawlIdleStart      {1min};
     std::chrono::seconds m_eitTransportTimeout    {5min};
+    std::chrono::seconds m_eitScanPeriod          {15min};
     int                m_audioSampleRateDB        {0};
     std::chrono::seconds m_overRecordSecNrml      {0s};
     std::chrono::seconds m_overRecordSecCat       {0s};
@@ -374,6 +371,10 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
     uint               m_parentId                 {0};
     bool               m_isPip                    {false};
 
+    // Configuration variables for EIT on conflicting inputs
+    static QMutex      s_eitLock;
+    std::vector<uint>  m_eitInputs;
+
     // Configuration variables from database, based on inputid
     GeneralDBOptions   m_genOpt;
     DVBDBOptions       m_dvbOpt;
@@ -383,13 +384,8 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
 
     // State variables
     mutable QMutex     m_setChannelLock;
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex     m_stateChangeLock          {QMutex::Recursive};
-    mutable QMutex     m_pendingRecLock           {QMutex::Recursive};
-#else
     mutable QRecursiveMutex  m_stateChangeLock;
     mutable QRecursiveMutex  m_pendingRecLock;
-#endif
     TVState            m_internalState            {kState_None};
     TVState            m_desiredNextState         {kState_None};
     bool               m_changeState              {false};
@@ -398,6 +394,7 @@ class MTV_PUBLIC TVRec : public SignalMonitorListener, public QRunnable
     TuningQueue        m_tuningRequests;
     TuningRequest      m_lastTuningRequest        {0};
     QDateTime          m_eitScanStartTime;
+    QDateTime          m_eitScanStopTime;
     mutable QMutex     m_triggerEventLoopLock;
     QWaitCondition     m_triggerEventLoopWait;
     bool               m_triggerEventLoopSignal   {false};

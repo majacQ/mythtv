@@ -29,7 +29,9 @@ AudioSettings::AudioSettings(const AudioSettings &other) :
         *m_custom = *other.m_custom;
     }
     else
+    {
         m_custom = nullptr;
+    }
 }
 
 AudioSettings::AudioSettings(
@@ -43,7 +45,7 @@ AudioSettings::AudioSettings(
     bool                        set_initial_vol,
     bool                        use_passthru,
     int                         upmixer_startup,
-    AudioOutputSettings        *custom) :
+    const AudioOutputSettings  *custom) :
     m_mainDevice(std::move(main_device)),
     m_passthruDevice(std::move(passthru_device)),
     m_format(format),
@@ -63,7 +65,9 @@ AudioSettings::AudioSettings(
         *this->m_custom = *custom;
     }
     else
+    {
         this->m_custom = nullptr;
+    }
 }
 
 AudioSettings::AudioSettings(

@@ -1,13 +1,16 @@
-#include <cinttypes>
-#include <cmath>
-#include <sys/types.h>
-
-#include "mythconfig.h"
-#include "mythlogging.h"
 #include "audiooutpututil.h"
+
+#include <cstdint>
+#include <limits> // workaround QTBUG-90395
+
+#include <QtGlobal>
+#include <QtEndian>
+
+#include "libmythbase/mythlogging.h"
+
 #include "audioconvert.h"
-#include "bswap.h"
 #include "mythaverror.h"
+#include "mythavframe.h"
 
 extern "C" {
 #include "libavcodec/avcodec.h"
@@ -16,47 +19,40 @@ extern "C" {
 
 #define LOC QString("AOUtil: ")
 
-#define ISALIGN(x) (((unsigned long)(x) & 0xf) == 0)
-
-#if ARCH_X86
-static int has_sse2 = -1;
-
+#ifdef Q_PROCESSOR_X86
 // Check cpuid for SSE2 support on x86 / x86_64
-static inline bool sse_check()
+static inline bool sse2_check()
 {
+#ifdef Q_PROCESSOR_X86_64
+    return true;
+#else
+    static int has_sse2 = -1;
     if (has_sse2 != -1)
         return (bool)has_sse2;
     __asm__(
         // -fPIC - we may not clobber ebx/rbx
-#if ARCH_X86_64
-        "push       %%rbx               \n\t"
-#else
         "push       %%ebx               \n\t"
-#endif
         "mov        $1, %%eax           \n\t"
         "cpuid                          \n\t"
         "and        $0x4000000, %%edx   \n\t"
         "shr        $26, %%edx          \n\t"
-#if ARCH_X86_64
-        "pop        %%rbx               \n\t"
-#else
         "pop        %%ebx               \n\t"
-#endif
         :"=d"(has_sse2)
         ::"%eax","%ecx"
     );
     return (bool)has_sse2;
+#endif
 }
-#endif //ARCH_x86
+#endif //Q_PROCESSOR_X86
 
 /**
- * Returns true if platform has an FPU.
- * for the time being, this test is limited to testing if SSE2 is supported
+ * Returns true if the processor supports MythTV's optimized SIMD for AudioOutputUtil/AudioConvert.
+ * Currently, only SSE2 is implemented.
  */
-bool AudioOutputUtil::has_hardware_fpu()
+bool AudioOutputUtil::has_optimized_SIMD()
 {
-#if ARCH_X86
-    return sse_check();
+#ifdef Q_PROCESSOR_X86
+    return sse2_check();
 #else
     return false;
 #endif
@@ -120,8 +116,8 @@ void AudioOutputUtil::AdjustVolume(void *buf, int len, int volume,
     if (g == 1.0F)
         return;
 
-#if ARCH_X86
-    if (sse_check() && samples >= 16)
+#ifdef Q_PROCESSOR_X86
+    if (sse2_check() && samples >= 16)
     {
         int loops = samples >> 4;
         i = loops << 4;
@@ -151,7 +147,7 @@ void AudioOutputUtil::AdjustVolume(void *buf, int len, int volume,
             :"xmm0","xmm1","xmm2","xmm3","xmm4"
         );
     }
-#endif //ARCH_X86
+#endif //Q_PROCESSOR_X86
     for (; i < samples; i++)
         *fptr++ *= g;
 }
@@ -182,20 +178,12 @@ void AudioOutputUtil::MuteChannel(int obits, int channels, int ch,
     int frames = bytes / ((obits >> 3) * channels);
 
     if (obits == 8)
-        tMuteChannel((uchar *)buffer, channels, ch, frames);
+        tMuteChannel((uint8_t *)buffer, channels, ch, frames);
     else if (obits == 16)
         tMuteChannel((short *)buffer, channels, ch, frames);
     else
         tMuteChannel((int *)buffer, channels, ch, frames);
 }
-
-#if HAVE_BIGENDIAN
-#define LE_SHORT(v)      bswap_16(v)
-#define LE_INT(v)        bswap_32(v)
-#else
-#define LE_SHORT(v)      (v)
-#define LE_INT(v)        (v)
-#endif
 
 char *AudioOutputUtil::GeneratePinkFrames(char *frames, int channels,
                                           int channel, int count, int bits)
@@ -218,9 +206,9 @@ char *AudioOutputUtil::GeneratePinkFrames(char *frames, int channels,
                     static_cast<float>(0x03fffffff);
                 int32_t ires = res;
                 if (bits == 16)
-                    *samp16++ = LE_SHORT(ires >> 16);
+                    *samp16++ = qToLittleEndian<qint16>(ires >> 16);
                 else
-                    *samp32++ = LE_INT(ires);
+                    *samp32++ = qToLittleEndian<qint32>(ires);
             }
             else
             {
@@ -279,7 +267,9 @@ int AudioOutputUtil::DecodeAudio(AVCodecContext *ctx,
         return ret;
     }
     else
+    {
         ret = pkt->size;
+    }
 
     if (!got_frame)
     {
@@ -290,12 +280,12 @@ int AudioOutputUtil::DecodeAudio(AVCodecContext *ctx,
 
     auto format = (AVSampleFormat)frame->format;
 
-    data_size = frame->nb_samples * frame->channels * av_get_bytes_per_sample(format);
+    data_size = frame->nb_samples * frame->ch_layout.nb_channels * av_get_bytes_per_sample(format);
 
     if (av_sample_fmt_is_planar(format))
     {
         InterleaveSamples(AudioOutputSettings::AVSampleFormatToFormat(format, ctx->bits_per_raw_sample),
-                          frame->channels, buffer, (const uint8_t **)frame->extended_data,
+                          frame->ch_layout.nb_channels, buffer, (const uint8_t **)frame->extended_data,
                           data_size);
     }
     else

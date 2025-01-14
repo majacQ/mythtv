@@ -13,7 +13,7 @@
 
 class ProgramInfo;
 
-enum ARCHIVEDESTINATION
+enum ARCHIVEDESTINATION : std::uint8_t
 {
     AD_DVD_SL = 0,
     AD_DVD_DL = 1,
@@ -72,7 +72,6 @@ struct ArchiveItem
     QList<ThumbImage*> thumbList;
 };
 
-QString formatSize(int64_t sizeKB, int prec = 2);
 QString getTempDirectory(bool showError = false);
 void checkTempDirectory();
 bool extractDetailsFromFilename(const QString &inFile,

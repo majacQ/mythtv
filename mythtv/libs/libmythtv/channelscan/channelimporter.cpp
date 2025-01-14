@@ -16,17 +16,12 @@
 #include <QElapsedTimer>
 
 // MythTV headers
-#include "channelimporter.h"
-#include "mythdialogbox.h"
-#include "mythdb.h"
-#include "mpegstreamdata.h" // for kEncDecrypted
-#include "channelutil.h"
+#include "libmythbase/mythdb.h"
+#include "libmythui/mythdialogbox.h"
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-  #define QT_ENDL endl
-#else
-  #define QT_ENDL Qt::endl
-#endif
+#include "channelimporter.h"
+#include "channelutil.h"
+#include "mpeg/mpegstreamdata.h" // for kEncDecrypted
 
 #define LOC QString("ChanImport: ")
 
@@ -39,9 +34,75 @@ static QString map_str(QString str)
     return str;
 }
 
+// Use the service ID as default channel number when there is no
+// DVB logical channel number or ATSC channel number found in the scan.
+//
+static void channum_not_empty(ChannelInsertInfo &chan)
+{
+    if (chan.m_chanNum.isEmpty())
+    {
+        chan.m_chanNum = QString("%1").arg(chan.m_serviceId);
+    }
+}
+
+static uint getLcnOffset(int sourceid)
+{
+    uint lcnOffset = 0;
+
+    MSqlQuery query(MSqlQuery::InitCon());
+    query.prepare(
+            "SELECT lcnoffset "
+            "FROM videosource "
+            "WHERE videosource.sourceid = :SOURCEID");
+    query.bindValue(":SOURCEID", sourceid);
+    if (!query.exec() || !query.isActive())
+    {
+        MythDB::DBError("ChannelImporter", query);
+    }
+    else if (query.next())
+    {
+        lcnOffset = query.value(0).toUInt();
+    }
+
+    LOG(VB_CHANSCAN, LOG_INFO, LOC +
+        QString("Logical Channel Number offset:%1")
+            .arg(lcnOffset));
+
+    return lcnOffset;
+}
+
+ChannelImporter::ChannelImporter(bool gui, bool interactive,
+                    bool _delete, bool insert, bool save,
+                    bool fta_only, bool lcn_only, bool complete_only,
+                    bool full_channel_search,
+                    bool remove_duplicates,
+                    ServiceRequirements service_requirements,
+                    bool success) :
+        m_useGui(gui),
+        m_isInteractive(interactive),
+        m_doDelete(_delete),
+        m_doInsert(insert),
+        m_doSave(save),
+        m_ftaOnly(fta_only),
+        m_lcnOnly(lcn_only),
+        m_completeOnly(complete_only),
+        m_fullChannelSearch(full_channel_search),
+        m_removeDuplicates(remove_duplicates),
+        m_success(success),
+        m_serviceRequirements(service_requirements)
+{
+    if (gCoreContext->IsBackend() && m_useGui)
+    {
+        m_useWeb = true;
+        m_pWeb = ChannelScannerWeb::getInstance();
+    }
+}
+
 void ChannelImporter::Process(const ScanDTVTransportList &_transports,
                               int sourceid)
 {
+    m_lcnOffset = getLcnOffset(sourceid);
+
     if (_transports.empty())
     {
         if (m_useGui)
@@ -55,11 +116,19 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
                                               "No new channels to process") :
                                              "No channels to process.."));
 
-            ShowOkPopup(
-                channels ?
-                (m_success ? tr("Found %n channel(s)", "", channels) :
-                             tr("Failed to find any new channels!"))
-                           : tr("Failed to find any channels."));
+            QString msg;
+            if (!channels)
+                msg = tr("Failed to find any channels.");
+            else if (m_success)
+                msg = tr("Found %n channel(s)", "", channels);
+            else
+                msg = tr("Failed to find any new channels!");
+
+            if (m_useWeb)
+                m_pWeb->m_dlgMsg = msg;
+            else
+                ShowOkPopup(msg);
+
         }
         else
         {
@@ -71,6 +140,12 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
         return;
     }
 
+
+    // Temporary check, incomplete code
+    //  Otherwise may crash the backend
+    // if (m_useWeb)
+    //     return;
+
     ScanDTVTransportList transports = _transports;
     QString msg;
     QTextStream ssMsg(&msg);
@@ -79,27 +154,32 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
     {
         bool require_av = (m_serviceRequirements & kRequireAV) == kRequireAV;
         bool require_a  = (m_serviceRequirements & kRequireAudio) != 0;
-        ssMsg << QT_ENDL << QT_ENDL;
-        ssMsg << "Scan parameters:" << QT_ENDL;
-        ssMsg << "Desired Services            : " << (require_av ? "tv" : require_a ? "tv+radio" : "all") << QT_ENDL;
-        ssMsg << "Unencrypted Only            : " << (m_ftaOnly           ? "yes" : "no") << QT_ENDL;
-        ssMsg << "Logical Channel Numbers only: " << (m_lcnOnly           ? "yes" : "no") << QT_ENDL;
-        ssMsg << "Complete scan data required : " << (m_completeOnly      ? "yes" : "no") << QT_ENDL;
-        ssMsg << "Full search for old channels: " << (m_fullChannelSearch ? "yes" : "no") << QT_ENDL;
-        ssMsg << "Remove duplicates           : " << (m_removeDuplicates  ? "yes" : "no") << QT_ENDL;
+        const char *desired { "all" };
+        if (require_av)
+            desired = "tv";
+        else if (require_a)
+            desired = "tv+radio";
+        ssMsg << Qt::endl << Qt::endl;
+        ssMsg << "Scan parameters:" << Qt::endl;
+        ssMsg << "Desired Services            : " << desired << Qt::endl;
+        ssMsg << "Unencrypted Only            : " << (m_ftaOnly           ? "yes" : "no") << Qt::endl;
+        ssMsg << "Logical Channel Numbers only: " << (m_lcnOnly           ? "yes" : "no") << Qt::endl;
+        ssMsg << "Complete scan data required : " << (m_completeOnly      ? "yes" : "no") << Qt::endl;
+        ssMsg << "Full search for old channels: " << (m_fullChannelSearch ? "yes" : "no") << Qt::endl;
+        ssMsg << "Remove duplicates           : " << (m_removeDuplicates  ? "yes" : "no") << Qt::endl;
     }
 
     // Transports and channels before processing
     if (!transports.empty())
     {
-        ssMsg << QT_ENDL;
-        ssMsg << "Transport list before processing (" << transports.size() << "):" << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Transport list before processing (" << transports.size() << "):" << Qt::endl;
         ssMsg << FormatTransports(transports).toLatin1().constData();
 
         ChannelImporterBasicStats info = CollectStats(transports);
-        ssMsg << QT_ENDL;
+        ssMsg << Qt::endl;
         ssMsg << "Channel list before processing (";
-        ssMsg << SimpleCountChannels(transports) << "):" << QT_ENDL;
+        ssMsg << SimpleCountChannels(transports) << "):" << Qt::endl;
         ssMsg << FormatChannels(transports, &info).toLatin1().constData();
     }
     LOG(VB_GENERAL, LOG_INFO, LOC + msg);
@@ -119,13 +199,19 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
         if (!duplicates.empty())
         {
             msg = "";
-            ssMsg << QT_ENDL;
-            ssMsg << "Discarded duplicate transports (" << duplicates.size() << "):" << QT_ENDL;
-            ssMsg << FormatTransports(duplicates).toLatin1().constData() << QT_ENDL;
-            ssMsg << "Discarded duplicate channels (" << SimpleCountChannels(duplicates) << "):" << QT_ENDL;
-            ssMsg << FormatChannels(duplicates).toLatin1().constData() << QT_ENDL;
+            ssMsg << Qt::endl;
+            ssMsg << "Discarded duplicate transports (" << duplicates.size() << "):" << Qt::endl;
+            ssMsg << FormatTransports(duplicates).toLatin1().constData() << Qt::endl;
+            ssMsg << "Discarded duplicate channels (" << SimpleCountChannels(duplicates) << "):" << Qt::endl;
+            ssMsg << FormatChannels(duplicates).toLatin1().constData() << Qt::endl;
             LOG(VB_CHANSCAN, LOG_INFO, LOC + msg);
         }
+    }
+
+    // Process Logical Channel Numbers
+    if (m_doLcn)
+    {
+        ChannelNumbers(transports);
     }
 
     // Remove the channels that do not pass various criteria.
@@ -139,15 +225,14 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
 
     // Pull in DB info in transports
     // Channels not found in scan but only in DB are returned in db_trans
-    sourceid = transports[0].m_channels[0].m_sourceId;
     ScanDTVTransportList db_trans = GetDBTransports(sourceid, transports);
     msg = "";
-    ssMsg << QT_ENDL;
+    ssMsg << Qt::endl;
     if (!db_trans.empty())
     {
-        ssMsg << QT_ENDL;
+        ssMsg << Qt::endl;
         ssMsg << "Transports with channels in DB but not in scan (";
-        ssMsg << db_trans.size() << "):" << QT_ENDL;
+        ssMsg << db_trans.size() << "):" << Qt::endl;
         ssMsg << FormatTransports(db_trans).toLatin1().constData();
     }
 
@@ -157,9 +242,9 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
     // All channels in the scan after comparing with the database
     {
         ChannelImporterBasicStats info = CollectStats(transports);
-        ssMsg << QT_ENDL;
+        ssMsg << Qt::endl;
         ssMsg << "Channel list after compare with database (";
-        ssMsg << SimpleCountChannels(transports) << "):" << QT_ENDL;
+        ssMsg << SimpleCountChannels(transports) << "):" << Qt::endl;
         ssMsg << FormatChannels(transports, &info).toLatin1().constData();
     }
 
@@ -182,13 +267,13 @@ void ChannelImporter::Process(const ScanDTVTransportList &_transports,
         CollectUniquenessStats(transports, info);
 
     // Final channel list
-    ssMsg << QT_ENDL;
-    ssMsg << "Channel list (" << SimpleCountChannels(transports) << "):" << QT_ENDL;
+    ssMsg << Qt::endl;
+    ssMsg << "Channel list (" << SimpleCountChannels(transports) << "):" << Qt::endl;
     ssMsg << FormatChannels(transports).toLatin1().constData();
 
     // Create summary
-    ssMsg << QT_ENDL;
-    ssMsg << GetSummary(info, stats) << QT_ENDL;
+    ssMsg << Qt::endl;
+    ssMsg << GetSummary(info, stats) << Qt::endl;
 
     LOG(VB_GENERAL, LOG_INFO, LOC + msg);
 
@@ -263,6 +348,8 @@ uint ChannelImporter::DeleteChannels(
     // if some is selected ask about each individually
     //: %n is the number of channels
     QString msg = tr("Found %n off-air channel(s).", "", off_air_list.size());
+    if (m_useWeb)
+        m_pWeb->log(msg);
     DeleteAction action = QueryUserDelete(msg);
     if (kDeleteIgnoreAll == action)
         return 0;
@@ -340,8 +427,9 @@ uint ChannelImporter::DeleteUnusedTransports(uint sourceid)
     }
 
     QString msg = tr("Found %n unused transport(s).", "", query.size());
-
     LOG(VB_GENERAL, LOG_INFO, LOC + msg);
+    if (m_useWeb)
+        m_pWeb->log(msg);
 
     if (query.size() == 0)
         return 0;
@@ -460,30 +548,30 @@ void ChannelImporter::InsertChannels(
 
     if (!updated.empty())
     {
-        ssMsg << QT_ENDL << QT_ENDL;
-        ssMsg << "Updated old transports (" << updated.size() << "):" << QT_ENDL;
+        ssMsg << Qt::endl << Qt::endl;
+        ssMsg << "Updated old transports (" << updated.size() << "):" << Qt::endl;
         ssMsg << FormatTransports(updated).toLatin1().constData();
 
-        ssMsg << QT_ENDL;
-        ssMsg << "Updated old channels (" << SimpleCountChannels(updated) << "):" << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Updated old channels (" << SimpleCountChannels(updated) << "):" << Qt::endl;
         ssMsg << FormatChannels(updated).toLatin1().constData();
     }
     if (!skipped_updates.empty())
     {
-        ssMsg << QT_ENDL;
-        ssMsg << "Skipped old channels (" << SimpleCountChannels(skipped_updates) << "):" << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Skipped old channels (" << SimpleCountChannels(skipped_updates) << "):" << Qt::endl;
         ssMsg << FormatChannels(skipped_updates).toLatin1().constData();
     }
     if (!inserted.empty())
     {
-        ssMsg << QT_ENDL;
-        ssMsg << "Inserted new channels (" << SimpleCountChannels(inserted) << "):" << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Inserted new channels (" << SimpleCountChannels(inserted) << "):" << Qt::endl;
         ssMsg << FormatChannels(inserted).toLatin1().constData();
     }
     if (!skipped_inserts.empty())
     {
-        ssMsg << QT_ENDL;
-        ssMsg << "Skipped new channels (" << SimpleCountChannels(skipped_inserts) << "):" << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Skipped new channels (" << SimpleCountChannels(skipped_inserts) << "):" << Qt::endl;
         ssMsg << FormatChannels(skipped_inserts).toLatin1().constData();
     }
 
@@ -492,9 +580,9 @@ void ChannelImporter::InsertChannels(
     {
         ChannelImporterBasicStats      ninfo  = CollectStats(list);
         ChannelImporterUniquenessStats nstats = CollectUniquenessStats(list, ninfo);
-        ssMsg << QT_ENDL;
-        ssMsg << "Remaining channels (" << SimpleCountChannels(list) << "):" << QT_ENDL;
-        ssMsg << FormatChannels(list).toLatin1().constData() << QT_ENDL;
+        ssMsg << Qt::endl;
+        ssMsg << "Remaining channels (" << SimpleCountChannels(list) << "):" << Qt::endl;
+        ssMsg << FormatChannels(list).toLatin1().constData() << Qt::endl;
         ssMsg << GetSummary(ninfo, nstats).toLatin1().constData();
     }
     LOG(VB_GENERAL, LOG_INFO, LOC + msg);
@@ -575,21 +663,7 @@ ScanDTVTransportList ChannelImporter::InsertChannels(
             if (handle)
             {
                 bool conflicting = false;
-
-                if (chan.m_chanNum.isEmpty())
-                {
-                    if ((kATSCNonConflicting == type) ||
-                        (kATSCConflicting    == type))
-                    {
-                        chan.m_chanNum = kATSCChannelFormat
-                            .arg(chan.m_atscMajorChannel)
-                            .arg(chan.m_atscMinorChannel);
-                    }
-                    else
-                    {
-                        chan.m_chanNum = QString("%1").arg(chan.m_serviceId);
-                    }
-                }
+                channum_not_empty(chan);
                 conflicting = ChannelUtil::IsConflicting(
                     chan.m_chanNum, chan.m_sourceId);
 
@@ -769,20 +843,7 @@ ScanDTVTransportList ChannelImporter::UpdateChannels(
                 {
                     ChannelUtil::UpdateChannelNumberFromDB(chan);
                 }
-                if (chan.m_chanNum.isEmpty())
-                {
-                    if ((kATSCNonConflicting == type) ||
-                        (kATSCConflicting    == type))
-                    {
-                        chan.m_chanNum = kATSCChannelFormat
-                            .arg(chan.m_atscMajorChannel)
-                            .arg(chan.m_atscMinorChannel);
-                    }
-                    else
-                    {
-                        chan.m_chanNum = QString("%1").arg(chan.m_serviceId);
-                    }
-                }
+                channum_not_empty(chan);
                 conflicting = ChannelUtil::IsConflicting(
                     chan.m_chanNum, chan.m_sourceId, chan.m_channelId);
 
@@ -811,6 +872,13 @@ ScanDTVTransportList ChannelImporter::UpdateChannels(
                 chan.m_dbMplexId = ChannelUtil::CreateMultiplex(
                     chan.m_sourceId, transport, tsid, chan.m_origNetId);
 
+                ChannelVisibleType visible { kChannelVisible };
+                if (chan.m_visible == kChannelAlwaysVisible ||
+                      chan.m_visible == kChannelNeverVisible)
+                    visible = chan.m_visible;
+                else if (chan.m_hidden)
+                    visible = kChannelNotVisible;
+
                 updated = ChannelUtil::UpdateChannel(
                     chan.m_dbMplexId,
                     chan.m_sourceId,
@@ -822,10 +890,7 @@ ScanDTVTransportList ChannelImporter::UpdateChannels(
                     chan.m_atscMajorChannel,
                     chan.m_atscMinorChannel,
                     chan.m_useOnAirGuide,
-                    ((chan.m_visible == kChannelAlwaysVisible ||
-                      chan.m_visible == kChannelNeverVisible) ?
-                     chan.m_visible :
-                     (chan.m_hidden ? kChannelNotVisible : kChannelVisible)),
+                    visible,
                     chan.m_freqId,
                     QString(),
                     chan.m_format,
@@ -1062,10 +1127,10 @@ void ChannelImporter::FilterServices(ScanDTVTransportList &transports) const
             if (m_completeOnly &&
                 channel.m_atscMajorChannel == 0 &&
                 channel.m_atscMinorChannel == 0 &&
-                !(channel.m_inPat &&
-                  channel.m_inPmt &&
-                  channel.m_inSdt &&
-                 (channel.m_patTsId ==
+                (!channel.m_inPat ||
+                 !channel.m_inPmt ||
+                 !channel.m_inSdt ||
+                 (channel.m_patTsId !=
                   channel.m_sdtTsId)))
             {
                 QString msg = FormatChannel(transport, channel);
@@ -1129,6 +1194,101 @@ void ChannelImporter::FilterRelocatedServices(ScanDTVTransportList &transports)
             filtered.push_back(channel);
         }
         transport.m_channels = filtered;
+    }
+}
+
+// Process DVB Channel Numbers
+void ChannelImporter::ChannelNumbers(ScanDTVTransportList &transports) const
+{
+    QMap<qlonglong, uint> map_sid_scn;     // HD Simulcast channel numbers, service ID is key
+    QMap<qlonglong, uint> map_sid_lcn;     // Logical channel numbers, service ID is key
+    QMap<uint, qlonglong> map_lcn_sid;     // Logical channel numbers, channel number is key
+
+    LOG(VB_CHANSCAN, LOG_INFO, LOC + QString("Process DVB Channel Numbers"));
+    for (auto & transport : transports)
+    {
+        for (auto & channel : transport.m_channels)
+        {
+            LOG(VB_CHANSCAN, LOG_DEBUG, LOC + QString("Channel onid:%1 sid:%2 lcn:%3 scn:%4")
+                .arg(channel.m_origNetId).arg(channel.m_serviceId).arg(channel.m_logicalChannel)
+                .arg(channel.m_simulcastChannel));
+            qlonglong key = ((qlonglong)channel.m_origNetId<<32) | channel.m_serviceId;
+            if (channel.m_logicalChannel > 0)
+            {
+                map_sid_lcn[key] = channel.m_logicalChannel;
+                map_lcn_sid[channel.m_logicalChannel] = key;
+            }
+            if (channel.m_simulcastChannel > 0)
+            {
+                map_sid_scn[key] = channel.m_simulcastChannel;
+            }
+        }
+    }
+
+    // Process the HD Simulcast Channel Numbers
+    //
+    // For each channel with a HD Simulcast Channel Number, do use that
+    // number as the Logical Channel Number; the SD channel that now has
+    // this LCN does get the original LCN of the HD Simulcast channel.
+    // If this is not selected then the Logical Channel Numbers are used
+    // without the override from the HD Simulcast channel numbers.
+    // This usually means that channel numbers 1, 2, 3 etc are used for SD channels
+    // while the corresponding HD channels do have higher channel numbers.
+    // When the HD Simulcast channel numbers are enabled then channel numbers 1, 2, 3 etc are
+    // used for the HD channels and the corresponding SD channels use the high channel numbers.
+    if (m_doScn)
+    {
+        LOG(VB_CHANSCAN, LOG_INFO, LOC + QString("Process Simulcast Channel Numbers"));
+
+        QMap<qlonglong, uint>::iterator it;
+        for (it = map_sid_scn.begin(); it != map_sid_scn.end(); ++it)
+        {
+            // Exchange LCN between the SD channel and the HD simulcast channel
+            qlonglong key_hd = it.key();                // Key of HD channel
+            uint scn_hd = *it;                          // SCN of the HD channel
+            uint lcn_sd = scn_hd;                       // Old LCN of the SD channel
+            uint lcn_hd = map_sid_lcn[key_hd];          // Old LCN of the HD channel
+
+            qlonglong key_sd = map_lcn_sid[lcn_sd];     // Key of the SD channel
+
+            map_sid_lcn[key_sd] = lcn_hd;               // SD channel gets old LCN of HD channel
+            map_sid_lcn[key_hd] = lcn_sd;               // HD channel gets old LCN of SD channel
+            map_lcn_sid[lcn_hd] = key_sd;               // SD channel gets key of SD channel
+            map_lcn_sid[lcn_sd] = key_hd;               // HD channel gets key of SD channel
+        }
+    }
+
+    // Update channels with the resulting Logical Channel Numbers
+    LOG(VB_CHANSCAN, LOG_INFO, LOC + QString("Process Logical Channel Numbers"));
+    for (auto & transport : transports)
+    {
+        for (auto & channel : transport.m_channels)
+        {
+            if (channel.m_chanNum.isEmpty())
+            {
+                qlonglong key = ((qlonglong)channel.m_origNetId<<32) | channel.m_serviceId;
+                QMap<qlonglong, uint>::const_iterator it = map_sid_lcn.constFind(key);
+                if (it != map_sid_lcn.cend())
+                {
+                    channel.m_chanNum = QString::number(*it + m_lcnOffset);
+                    LOG(VB_CHANSCAN, LOG_DEBUG, LOC +
+                        QString("Final channel sid:%1 channel %2")
+                            .arg(channel.m_serviceId).arg(channel.m_chanNum));
+                }
+                else
+                {
+                    LOG(VB_CHANSCAN, LOG_DEBUG, LOC +
+                        QString("Final channel sid:%1 NO channel number")
+                            .arg(channel.m_serviceId));
+                }
+            }
+            else
+            {
+                LOG(VB_CHANSCAN, LOG_DEBUG, LOC +
+                    QString("Final channel sid:%1 has already channel number %2")
+                        .arg(channel.m_serviceId).arg(channel.m_chanNum));
+            }
+        }
     }
 }
 
@@ -1313,8 +1473,9 @@ ChannelImporterBasicStats ChannelImporter::CollectStats(
     {
         for (const auto & chan : transport.m_channels)
         {
-            int enc = (chan.m_isEncrypted) ?
-                ((chan.m_decryptionStatus == kEncDecrypted) ? 2 : 1) : 0;
+            int enc {0};
+            if (chan.m_isEncrypted)
+                enc = (chan.m_decryptionStatus == kEncDecrypted) ? 2 : 1;
             if (chan.m_siStandard == "atsc")      info.m_atscChannels[enc] += 1;
             if (chan.m_siStandard == "dvb")       info.m_dvbChannels[enc]  += 1;
             if (chan.m_siStandard == "mpeg")      info.m_mpegChannels[enc] += 1;
@@ -1474,7 +1635,6 @@ QString ChannelImporter::SimpleFormatChannel(
 
     if (si_standard == "atsc" || si_standard == "scte")
     {
-
         if (si_standard == "atsc")
         {
             ssMsg << (kATSCChannelFormat
@@ -1527,7 +1687,7 @@ QString ChannelImporter::FormatChannels(
     // Sort transports in order of increasing frequency
     struct less_than_key
     {
-        inline bool operator() (const ScanDTVTransport &t1, const ScanDTVTransport &t2)
+        bool operator() (const ScanDTVTransport &t1, const ScanDTVTransport &t2)
         {
             return t1.m_frequency < t2.m_frequency;
         }
@@ -1566,7 +1726,7 @@ QString ChannelImporter::FormatTransports(
     // Sort transports in order of increasing frequency
     struct less_than_key
     {
-        inline bool operator() (const ScanDTVTransport &t1, const ScanDTVTransport &t2)
+        bool operator() (const ScanDTVTransport &t1, const ScanDTVTransport &t2)
         {
             return t1.m_frequency < t2.m_frequency;
         }
@@ -1753,6 +1913,18 @@ ChannelImporter::QueryUserDelete(const QString &msg)
         m_functorRetval = -1;
         do
         {
+            if (m_useWeb) {
+                m_pWeb->m_mutex.lock();
+                m_pWeb->m_dlgMsg = msg;
+                m_pWeb->m_dlgButtons.append(tr("Delete All"));
+                m_pWeb->m_dlgButtons.append(tr("Set all invisible"));
+                m_pWeb->m_dlgButtons.append(tr("Ignore All"));
+                m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+                m_functorRetval = m_pWeb->m_dlgButton;
+                m_pWeb->m_mutex.unlock();
+                continue;
+            }
+
             MythScreenStack *popupStack =
                 GetMythMainWindow()->GetStack("popup stack");
             auto *deleteDialog =
@@ -1829,6 +2001,18 @@ ChannelImporter::QueryUserInsert(const QString &msg)
         m_functorRetval = -1;
         do
         {
+            if (m_useWeb) {
+                m_pWeb->m_mutex.lock();
+                m_pWeb->m_dlgMsg = msg;
+                m_pWeb->m_dlgButtons.append(tr("Insert All"));
+                m_pWeb->m_dlgButtons.append(tr("Insert Manually"));
+                m_pWeb->m_dlgButtons.append(tr("Ignore All"));
+                m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+                m_functorRetval = m_pWeb->m_dlgButton;
+                m_pWeb->m_mutex.unlock();
+                continue;
+            }
+
             MythScreenStack *popupStack =
                 GetMythMainWindow()->GetStack("popup stack");
             auto *insertDialog =
@@ -1903,6 +2087,17 @@ ChannelImporter::QueryUserUpdate(const QString &msg)
         m_functorRetval = -1;
         do
         {
+            if (m_useWeb) {
+                m_pWeb->m_mutex.lock();
+                m_pWeb->m_dlgMsg = msg;
+                m_pWeb->m_dlgButtons.append(tr("Update All"));
+                m_pWeb->m_dlgButtons.append(tr("Ignore All"));
+                m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+                m_functorRetval = m_pWeb->m_dlgButton;
+                m_pWeb->m_mutex.unlock();
+                continue;
+            }
+
             MythScreenStack *popupStack =
                 GetMythMainWindow()->GetStack("popup stack");
             auto *updateDialog =
@@ -1965,64 +2160,94 @@ ChannelImporter::QueryUserUpdate(const QString &msg)
 }
 
 OkCancelType ChannelImporter::ShowManualChannelPopup(
-    MythMainWindow *parent, const QString& title,
+    const QString& title,
     const QString& message, QString &text)
 {
     int dmc = m_functorRetval;      // Default menu choice
     m_functorRetval = -1;
-    MythScreenStack *popupStack = parent->GetStack("popup stack");
-    auto *popup = new MythDialogBox(title, message, popupStack,
-                                    "manualchannelpopup");
 
-    if (popup->Create())
-    {
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "OK"), 0 == dmc);
-        popup->AddButtonD(tr("Edit"), 1 == dmc);
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel"), 2 == dmc);
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel All"), 3 == dmc);
-        QObject::connect(popup, &MythDialogBox::Closed, this,
-                         [this](const QString & /*resultId*/, int result)
-                         {
-                             m_functorRetval = result;
-                             m_eventLoop.quit();
-                         });
-        popupStack->AddScreen(popup);
-        m_eventLoop.exec();
+    MythScreenStack *popupStack = nullptr;
+    if (m_useWeb) {
+        m_pWeb->m_mutex.lock();
+        m_pWeb->m_dlgMsg = message;
+        m_pWeb->m_dlgButtons.append(tr("OK"));
+        m_pWeb->m_dlgButtons.append(tr("Edit"));
+        m_pWeb->m_dlgButtons.append(tr("Cancel"));
+        m_pWeb->m_dlgButtons.append(tr("Cancel All"));
+        m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+        m_functorRetval = m_pWeb->m_dlgButton;
+        m_pWeb->m_mutex.unlock();
     }
     else
     {
-        delete popup;
-        popup = nullptr;
-    }
+        MythMainWindow *parent = GetMythMainWindow();
+        popupStack = parent->GetStack("popup stack");
+        auto *popup = new MythDialogBox(title, message, popupStack,
+                                        "manualchannelpopup");
 
-    // Choice "Edit"
-    if (1 == m_functorRetval)
-    {
-        auto *textEdit =
-            new MythTextInputDialog(popupStack,
-                                    tr("Please enter a unique channel number."),
-                                    FilterNone, false, text);
-        if (textEdit->Create())
+        if (popup->Create())
         {
-            QObject::connect(textEdit, &MythTextInputDialog::haveResult, this,
-                             [this,&text](QString result)
-                             {
-                                 m_functorRetval = 0;
-                                 text = std::move(result);
-                             });
-            QObject::connect(textEdit, &MythTextInputDialog::Exiting, this,
-                             [this]()
-                             {
-                                 m_eventLoop.quit();
-                             });
-
-            popupStack->AddScreen(textEdit);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "OK"), 0 == dmc);
+            popup->AddButtonD(tr("Edit"), 1 == dmc);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel"), 2 == dmc);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel All"), 3 == dmc);
+            QObject::connect(popup, &MythDialogBox::Closed, this,
+                            [this](const QString & /*resultId*/, int result)
+                            {
+                                m_functorRetval = result;
+                                m_eventLoop.quit();
+                            });
+            popupStack->AddScreen(popup);
             m_eventLoop.exec();
         }
         else
-            delete textEdit;
+        {
+            delete popup;
+            popup = nullptr;
+        }
     }
+    // Choice "Edit"
+    if (1 == m_functorRetval)
+    {
 
+        if (m_useWeb) {
+            m_pWeb->m_mutex.lock();
+            m_pWeb->m_dlgMsg = tr("Please enter a unique channel number.");
+            m_pWeb->m_dlgInputReq = true;
+            m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+            m_functorRetval = m_pWeb->m_dlgButton;
+            text = m_pWeb->m_dlgString;
+            m_pWeb->m_mutex.unlock();
+        }
+        else
+        {
+            auto *textEdit =
+                new MythTextInputDialog(popupStack,
+                                        tr("Please enter a unique channel number."),
+                                        FilterNone, false, text);
+            if (textEdit->Create())
+            {
+                QObject::connect(textEdit, &MythTextInputDialog::haveResult, this,
+                                [this,&text](QString result)
+                                {
+                                    m_functorRetval = 0;
+                                    text = std::move(result);
+                                });
+                QObject::connect(textEdit, &MythTextInputDialog::Exiting, this,
+                                [this]()
+                                {
+                                    m_eventLoop.quit();
+                                });
+
+                popupStack->AddScreen(textEdit);
+                m_eventLoop.exec();
+            }
+            else
+            {
+                delete textEdit;
+            }
+        }
+    }
     OkCancelType rval = kOCTCancel;
     switch (m_functorRetval) {
         case 0: rval = kOCTOk;        break;
@@ -2035,63 +2260,94 @@ OkCancelType ChannelImporter::ShowManualChannelPopup(
 }
 
 OkCancelType ChannelImporter::ShowResolveChannelPopup(
-    MythMainWindow *parent, const QString& title,
+    const QString& title,
     const QString& message, QString &text)
 {
     int dmc = m_functorRetval;      // Default menu choice
     m_functorRetval = -1;
-    MythScreenStack *popupStack = parent->GetStack("popup stack");
-    auto *popup = new MythDialogBox(title, message, popupStack,
-                                    "resolvechannelpopup");
 
-    if (popup->Create())
-    {
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "OK"), 0 == dmc);
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "OK All"), 1 == dmc);
-        popup->AddButtonD(tr("Edit"), 2 == dmc);
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel"), 3 == dmc);
-        popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel All"), 4 == dmc);
-        QObject::connect(popup, &MythDialogBox::Closed, this,
-                         [this](const QString & /*resultId*/, int result)
-                         {
-                             m_functorRetval = result;
-                             m_eventLoop.quit();
-                         });
-        popupStack->AddScreen(popup);
-        m_eventLoop.exec();
+    MythScreenStack *popupStack = nullptr;
+    if (m_useWeb) {
+        m_pWeb->m_mutex.lock();
+        m_pWeb->m_dlgMsg = message;
+        m_pWeb->m_dlgButtons.append(tr("OK"));
+        m_pWeb->m_dlgButtons.append(tr("OK All"));
+        m_pWeb->m_dlgButtons.append(tr("Edit"));
+        m_pWeb->m_dlgButtons.append(tr("Cancel"));
+        m_pWeb->m_dlgButtons.append(tr("Cancel All"));
+        m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+        m_functorRetval = m_pWeb->m_dlgButton;
+        m_pWeb->m_mutex.unlock();
     }
     else
     {
-        delete popup;
-        popup = nullptr;
-    }
+        MythMainWindow *parent = GetMythMainWindow();
+        popupStack = parent->GetStack("popup stack");
+        auto *popup = new MythDialogBox(title, message, popupStack,
+                                        "resolvechannelpopup");
 
-    // Choice "Edit"
-    if (2 == m_functorRetval)
-    {
-        auto *textEdit =
-            new MythTextInputDialog(popupStack,
-                                    tr("Please enter a unique channel number."),
-                                    FilterNone, false, text);
-        if (textEdit->Create())
+        if (popup->Create())
         {
-            QObject::connect(textEdit, &MythTextInputDialog::haveResult, this,
-                             [this,&text](QString result)
-                             {
-                                 m_functorRetval = 0;
-                                 text = std::move(result);
-                             });
-            QObject::connect(textEdit, &MythTextInputDialog::Exiting, this,
-                             [this]()
-                             {
-                                 m_eventLoop.quit();
-                             });
-
-            popupStack->AddScreen(textEdit);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "OK"), 0 == dmc);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "OK All"), 1 == dmc);
+            popup->AddButtonD(tr("Edit"), 2 == dmc);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel"), 3 == dmc);
+            popup->AddButtonD(QCoreApplication::translate("(Common)", "Cancel All"), 4 == dmc);
+            QObject::connect(popup, &MythDialogBox::Closed, this,
+                            [this](const QString & /*resultId*/, int result)
+                            {
+                                m_functorRetval = result;
+                                m_eventLoop.quit();
+                            });
+            popupStack->AddScreen(popup);
             m_eventLoop.exec();
         }
         else
-            delete textEdit;
+        {
+            delete popup;
+            popup = nullptr;
+        }
+    }
+    // Choice "Edit"
+    if (2 == m_functorRetval)
+    {
+        if (m_useWeb) {
+            m_pWeb->m_mutex.lock();
+            m_pWeb->m_dlgMsg = tr("Please enter a unique channel number.");
+            m_pWeb->m_dlgInputReq = true;
+            m_pWeb->m_waitCondition.wait(&m_pWeb->m_mutex);
+            m_functorRetval = m_pWeb->m_dlgButton;
+            text = m_pWeb->m_dlgString;
+            m_pWeb->m_mutex.unlock();
+        }
+        else
+        {
+            auto *textEdit =
+                new MythTextInputDialog(popupStack,
+                                        tr("Please enter a unique channel number."),
+                                        FilterNone, false, text);
+            if (textEdit->Create())
+            {
+                QObject::connect(textEdit, &MythTextInputDialog::haveResult, this,
+                                [this,&text](QString result)
+                                {
+                                    m_functorRetval = 0;
+                                    text = std::move(result);
+                                });
+                QObject::connect(textEdit, &MythTextInputDialog::Exiting, this,
+                                [this]()
+                                {
+                                    m_eventLoop.quit();
+                                });
+
+                popupStack->AddScreen(textEdit);
+                m_eventLoop.exec();
+            }
+            else
+            {
+                delete textEdit;
+            }
+        }
     }
 
     OkCancelType rval = kOCTCancel;
@@ -2128,7 +2384,7 @@ OkCancelType ChannelImporter::QueryUserResolve(
             msg2 += "\n";
             msg2 += tr("Default value is %1.").arg(val);
             ret = ShowResolveChannelPopup(
-                GetMythMainWindow(), tr("Channel Importer"),
+                    tr("Channel Importer"),
                 msg2, val);
 
             if (kOCTOk != ret && kOCTOkAll != ret)
@@ -2205,7 +2461,7 @@ OkCancelType ChannelImporter::QueryUserInsert(
             msg2 += " ";
             msg2 += tr("Default value is %1").arg(val);
             ret = ShowManualChannelPopup(
-                GetMythMainWindow(), tr("Channel Importer"),
+                 tr("Channel Importer"),
                 msg2, val);
 
             if (kOCTOk != ret)

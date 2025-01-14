@@ -4,24 +4,24 @@
 #include <algorithm>
 
 // MythTV includes
-#include "eithelper.h"
-#include "eitfixup.h"
-#include "eitcache.h"
-#include "mythdb.h"
-#include "atsctables.h"
-#include "dvbtables.h"
-#include "premieretables.h"
-#include "dishdescriptors.h"
-#include "premieredescriptors.h"
-#include "channelutil.h"
-#include "mythdate.h"
-#include "programdata.h"
-#include "programinfo.h"        // for subtitle types and audio and video properties
-#include "scheduledrecording.h" // for ScheduledRecording
-#include "compat.h"             // for gmtime_r on windows.
+#include "libmythbase/compat.h"  // for gmtime_r on windows.
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/programinfo.h" // for subtitle types and audio and video properties
 
-const uint EITHelper::kChunkSize =   20;
-const uint EITHelper::kMaxSize   = 1000;
+#include "channelutil.h"
+#include "eitcache.h"
+#include "eitfixup.h"
+#include "eithelper.h"
+#include "mpeg/atsctables.h"
+#include "mpeg/dishdescriptors.h"
+#include "mpeg/dvbtables.h"
+#include "mpeg/premieredescriptors.h"
+#include "mpeg/premieretables.h"
+#include "programdata.h"
+#include "scheduledrecording.h"  // for ScheduledRecording
+
+const uint EITHelper::kMaxQueueSize   = 10000;
 
 EITCache *EITHelper::s_eitCache = new EITCache();
 
@@ -39,6 +39,19 @@ static void init_fixup(FixupMap &fix);
 EITHelper::EITHelper(uint cardnum) :
     m_cardnum(cardnum)
 {
+    m_chunkSize = gCoreContext->GetNumSetting("EITEventChunkSize", 20);
+    m_queueSize = std::min(m_chunkSize * 50, kMaxQueueSize);
+    LOG(VB_EIT, LOG_INFO, LOC_ID +
+        QString("EITHelper chunk size %1 and queue size %2 events")
+            .arg(m_chunkSize).arg(m_queueSize));
+
+    // Save EIT cache in database table eit_cache iff true
+    bool persistent = gCoreContext->GetBoolSetting("EITCachePersistent", true);
+    s_eitCache->SetPersistent(persistent);
+    LOG(VB_EIT, LOG_INFO, LOC_ID +
+        QString("EITCache %1")
+            .arg(persistent ? "in memory, backup to database" : "in memory only"));
+
     init_fixup(m_fixup);
 }
 
@@ -58,7 +71,7 @@ uint EITHelper::GetListSize(void) const
 bool EITHelper::EventQueueFull(void) const
 {
     uint listsize = GetListSize();
-    bool full = listsize > kMaxSize;
+    bool full = listsize > m_queueSize;
     return full;
 }
 
@@ -73,13 +86,15 @@ bool EITHelper::EventQueueFull(void) const
 uint EITHelper::ProcessEvents(void)
 {
     QMutexLocker locker(&m_eitListLock);
-    uint insertCount = 0;
 
     if (m_dbEvents.empty())
         return 0;
 
     MSqlQuery query(MSqlQuery::InitCon());
-    for (uint i = 0; (i < kChunkSize) && (!m_dbEvents.empty()); i++)
+
+    uint eventCount = 0;
+    uint insertCount = 0;
+    for (; (eventCount < m_chunkSize) && (!m_dbEvents.empty()); eventCount++)
     {
         DBEventEIT *event = m_dbEvents.dequeue();
         m_eitListLock.unlock();
@@ -98,15 +113,16 @@ uint EITHelper::ProcessEvents(void)
 
     if (!m_incompleteEvents.empty())
     {
-        LOG(VB_EIT, LOG_INFO, LOC_ID +
+        LOG(VB_EIT, LOG_DEBUG, LOC_ID +
             QString("Added %1 events -- complete: %2 incomplete: %3")
                 .arg(insertCount).arg(m_dbEvents.size())
                 .arg(m_incompleteEvents.size()));
     }
     else
     {
-        LOG(VB_EIT, LOG_INFO, LOC_ID +
-            QString("Added %1 events").arg(insertCount));
+        LOG(VB_EIT, LOG_DEBUG, LOC_ID +
+            QString("Added %1/%2 events, queued: %3")
+                .arg(insertCount).arg(eventCount).arg(m_dbEvents.size()));
     }
 
     return insertCount;
@@ -401,7 +417,7 @@ void EITHelper::AddEIT(const DVBEventInformationTable *eit)
             if (dish_event_description)
             {
                 DishEventDescriptionDescriptor dedd(dish_event_description);
-                if (dedd.HasDescription())
+                if (dedd.IsValid() && dedd.HasDescription())
                     description = dedd.Description(descCompression);
             }
         }
@@ -429,7 +445,8 @@ void EITHelper::AddEIT(const DVBEventInformationTable *eit)
             if (mpaa_data)
             {
                 DishEventMPAADescriptor mpaa(mpaa_data);
-                stars = mpaa.stars();
+                if (mpaa.IsValid())
+                    stars = mpaa.stars();
 
                 if (stars != 0.0F) // Only movies for now
                 {
@@ -684,10 +701,15 @@ void EITHelper::AddEIT(const PremiereContentInformationTable *cit)
                 category = QObject::tr("Sports");
             }
         }
-        else
+        else if (content.IsValid())
         {
             category_type = content.GetMythCategory(0);
             category      = content.GetDescription(0);
+        }
+        else
+        {
+            category_type = ProgramInfo::kCategoryNone;
+            category      = "Unknown";
         }
     }
 
@@ -1108,10 +1130,6 @@ static void init_fixup(FixupMap &fix)
     fix[      1089LL << 32 |     1  << 16] = // DVB-S
     fix[ 1041LL << 32 | 1 << 16] = // DVB-S RTL Group HD Austria Transponder
     fix[ 1057LL << 32 | 1 << 16] = // DVB-S RTL Group HD Transponder
-        fix[   773LL << 32 |  8468U << 16] = // DVB-T Berlin/Brandenburg
-        fix[  2819LL << 32 |  8468U << 16] = // DVB-T Niedersachsen + Bremen
-        fix[  8706LL << 32 |  8468U << 16] = // DVB-T NRW
-        fix[ 12801LL << 32 |  8468U << 16] = // DVB-T Bayern
         EITFixUp::kFixRTL;
 
     // Mark HD+ channels as HDTV
@@ -1120,19 +1138,17 @@ static void init_fixup(FixupMap &fix)
     fix[   1057LL << 32 |  1 << 16] = EITFixUp::kFixHDTV;
     fix[   1109LL << 32 |  1 << 16] = EITFixUp::kFixHDTV;
 
-    // PRO7/SAT.1
-    fix[   1017LL << 32 |    1 << 16] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5300] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5301] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5302] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5303] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5310] = EITFixUp::kFixP7S1;
-    fix[   1031LL << 32 |    1 << 16 | 5311] = EITFixUp::kFixP7S1;
-    fix[   1107LL << 32 |    1 << 16] = EITFixUp::kFixP7S1;
-    fix[   1082LL << 32 |    1 << 16] = EITFixUp::kFixP7S1;
-    fix[      5LL << 32 |  133 << 16 |   776] = EITFixUp::kFixP7S1;
-    fix[                  8468 << 16 | 16426] = EITFixUp::kFixP7S1; // ProSieben MAXX - DVB-T Rhein/Main
-    fix[   8707LL << 32 | 8468 << 16]         = EITFixUp::kFixP7S1; // ProSieben Sat.1 Mux - DVB-T Rhein/Main
+    // PRO7/SAT.1 DVB-S
+    fix[   1017LL << 32 |    1 << 16] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1; // DVB-S ProSiebenSat.1 Austria transponder
+    fix[   1031LL << 32 |    1 << 16 | 5300] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1; // SAT.1 HD Austria
+    fix[   1031LL << 32 |    1 << 16 | 5301] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1; // ProSieben HD Austria
+    fix[   1031LL << 32 |    1 << 16 | 5302] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1; // kabel eins HD Austria
+    fix[   1031LL << 32 |    1 << 16 | 5303] = EITFixUp::kFixHDTV | EITFixUp::kFixP7S1; // PULS 4 HD Austria
+    fix[   1031LL << 32 |    1 << 16 | 5310] = EITFixUp::kFixP7S1; // SAT.1 Gold Austria
+    fix[   1031LL << 32 |    1 << 16 | 5311] = EITFixUp::kFixP7S1; // Pro7 MAXX Austria
+    fix[   1107LL << 32 |    1 << 16] = EITFixUp::kFixP7S1; // DVB-S ProSiebenSat.1 Germany transponder
+    fix[   1082LL << 32 |    1 << 16] = EITFixUp::kFixP7S1; // DVB-S ProSiebenSat.1 Switzerland transponder
+    fix[      5LL << 32 |  133 << 16 |   776] = EITFixUp::kFixP7S1; // DVB-S ProSiebenSat.1 Germany transponder
 
     // ATV / ATV2
     fix[   1117LL << 32 |  1 << 16 | 13012 ] = EITFixUp::kFixATV; // ATV
@@ -1228,79 +1244,24 @@ static void init_fixup(FixupMap &fix)
     fix[4097U << 16] |= EITFixUp::kEFixForceISO8859_1;
     fix[4098U << 16] |= EITFixUp::kEFixForceISO8859_1;
 
-    //DVB-T Germany Berlin HSE/MonA TV
-    fix[  772LL << 32 | 8468 << 16 | 16387] = EITFixUp::kEFixForceISO8859_15;
-    //DVB-T Germany Ruhrgebiet Tele 5
-    //fix[ 8707LL << 32 | 8468 << 16 | 16413] = EITFixUp::kEFixForceISO8859_15; // they are sending the ISO 8859-9 signalling now
-    // ANIXE
-    fix[ 8707LL << 32 | 8468U << 16 | 16426 ] = // DVB-T Rhein-Main
-        EITFixUp::kEFixForceISO8859_9;
-
-    // DVB-C Kabel Deutschland encoding fixes Germany
-    fix[   112LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10000LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10001LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10002LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10003LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10006LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10009LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    fix[ 10010LL << 32 | 61441U << 16] = EITFixUp::kEFixForceISO8859_15;
-    // Mark program on the HD transponders as HDTV
-    fix[ 10012LL << 32 | 61441U << 16] = EITFixUp::kFixHDTV;
-    fix[ 10013LL << 32 | 61441U << 16] = EITFixUp::kFixHDTV;
-    // On transport 10004 only DMAX needs no fixing:
-    fix[10004LL<<32 | 61441U << 16 | 50403] = // BBC World Service
-    fix[10004LL<<32 | 61441U << 16 | 53101] = // BBC Prime (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53108] = // Toon Disney (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53109] = // Sky News (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53406] = // BBC Prime
-    fix[10004LL<<32 | 61441U << 16 | 53407] = // Boomerang (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53404] = // Boomerang
-    fix[10004LL<<32 | 61441U << 16 | 53408] = // TCM Classic Movies (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53409] = // Extreme Sports
-    fix[10004LL<<32 | 61441U << 16 | 53410] = // CNBC Europe (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53503] = // Detski Mir
-    fix[10004LL<<32 | 61441U << 16 | 53411] = // Sat.1 Comedy
-    fix[10004LL<<32 | 61441U << 16 | 53412] = // kabel eins classics
-    fix[10004LL<<32 | 61441U << 16 | 53112] = // Extreme Sports (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53513] = // Playhouse Disney (engl)
-    fix[10004LL<<32 | 61441U << 16 | 53618] = // K1010
-    fix[10004LL<<32 | 61441U << 16 | 53619] = // GemsTV
-        EITFixUp::kEFixForceISO8859_15;
-    // On transport 10005 QVC and Giga Digital  needs no fixing:
-    fix[10005LL<<32 | 61441U << 16 | 50104] = // E! Entertainment
-    fix[10005LL<<32 | 61441U << 16 | 50107] = // 13th Street (KD)
-    fix[10005LL<<32 | 61441U << 16 | 50301] = // ESPN Classic
-    fix[10005LL<<32 | 61441U << 16 | 50302] = // VH1 Classic
-    fix[10005LL<<32 | 61441U << 16 | 50303] = // Wein TV
-    fix[10005LL<<32 | 61441U << 16 | 50304] = // AXN
-    fix[10005LL<<32 | 61441U << 16 | 50305] = // Silverline
-    fix[10005LL<<32 | 61441U << 16 | 50306] = // NASN
-    fix[10005LL<<32 | 61441U << 16 | 50307] = // Disney Toon
-    fix[10005LL<<32 | 61441U << 16 | 53105] = // NASN (engl)
-    fix[10005LL<<32 | 61441U << 16 | 53115] = // VH1 Classic (engl)
-    fix[10005LL<<32 | 61441U << 16 | 53405] = // ESPN Classic (engl)
-    fix[10005LL<<32 | 61441U << 16 | 53402] = // AXN (engl)
-    fix[10005LL<<32 | 61441U << 16 | 53613] = // CNN (engl)
-    fix[10005LL<<32 | 61441U << 16 | 53516] = // Voyages Television
-    fix[10005LL<<32 | 61441U << 16 | 53611] = // Der Schmuckkanal
-    fix[10005LL<<32 | 61441U << 16 | 53104] = // Jukebox
-        EITFixUp::kEFixForceISO8859_15;
-    // On transport 10007 only following channels need fixing:
-    fix[10007LL<<32| 61441U << 16 | 53607] = // Eurosport
-    fix[10007LL<<32| 61441U << 16 | 53608] = // Das Vierte
-    fix[10007LL<<32| 61441U << 16 | 53609] = // Viva
-    fix[10007LL<<32| 61441U << 16 | 53628] = // COMEDY CENTRAL
-        EITFixUp::kEFixForceISO8859_15;
-    // RTL Subtitle parsing
-    fix[10007LL<<32| 61441U << 16 | 53601] = // RTL
-    fix[10007LL<<32| 61441U << 16 | 53602] = // Super RTL
-    fix[10007LL<<32| 61441U << 16 | 53604] = // VOX
-    fix[10007LL<<32| 61441U << 16 | 53606] = // n-tv
-        EITFixUp::kFixRTL | EITFixUp::kFixCategory;
-    // On transport 10008 only following channels need fixing:
-    fix[    10008LL<<32 | 61441U << 16 | 53002] = // Tele 5
-        EITFixUp::kEFixForceISO8859_15;
+    // DVB-C Vodafone Germany
+    fix[ 10000LL<<32 | 61441U << 16 | 53626 ] = EITFixUp::kFixP7S1; // SAT.1
+    fix[ 10006LL<<32 | 61441U << 16 | 50019 ] = EITFixUp::kFixP7S1; // sixx HD
+    fix[ 10008LL<<32 | 61441U << 16 | 53621 ] = EITFixUp::kFixP7S1; // ProSieben
+    fix[ 10008LL<<32 | 61441U << 16 | 53622 ] = EITFixUp::kFixP7S1; // kabel eins
+    fix[ 10008LL<<32 | 61441U << 16 | 50700 ] = EITFixUp::kFixP7S1; // sixx
+    fix[ 10011LL<<32 | 61441U << 16 | 50056 ] = EITFixUp::kFixP7S1; // kabel eins CLASSICS HD
+    fix[ 10011LL<<32 | 61441U << 16 | 50058 ] = EITFixUp::kFixP7S1; // SAT.1 emotions HD
+    fix[ 10013LL<<32 | 61441U << 16 | 50015 ] = EITFixUp::kFixP7S1; // ProSieben HD
+    fix[ 10013LL<<32 | 61441U << 16 | 50057 ] = EITFixUp::kFixP7S1; // ProSieben FUN HD
+    fix[ 10013LL<<32 | 61441U << 16 | 50086 ] = EITFixUp::kFixP7S1; // Kabel eins Doku HD
+    fix[ 10014LL<<32 | 61441U << 16 | 50086 ] = EITFixUp::kFixP7S1; // kabel eins HD
+    fix[ 10017LL<<32 | 61441U << 16 | 50122 ] = EITFixUp::kFixP7S1; // kabel eins Doku
+    fix[ 10017LL<<32 | 61441U << 16 | 53009 ] = EITFixUp::kFixP7S1; // ProSieben MAXX
+    fix[ 10017LL<<32 | 61441U << 16 | 53324 ] = EITFixUp::kFixP7S1; // SAT.1 Gold
+    fix[ 10019LL<<32 | 61441U << 16 | 50018 ] = EITFixUp::kFixP7S1; // SAT.1 HD
+    fix[ 10020LL<<32 | 61441U << 16 | 50046 ] = EITFixUp::kFixP7S1; // ProSieben MAXX HD
+    fix[ 10020LL<<32 | 61441U << 16 | 50074 ] = EITFixUp::kFixP7S1; // SAT.1 Gold HD
 
     // DVB-C Unitymedia Germany
     fix[ 9999 << 16 |   161LL << 32 | 12101 ] = // RTL Television
@@ -1398,6 +1359,9 @@ static void init_fixup(FixupMap &fix)
     fix[ 57LL << 32 | 1LL << 16 ] = EITFixUp::kEFixForceISO8859_1;
     fix[ 58LL << 32 | 1LL << 16 ] = EITFixUp::kEFixForceISO8859_1;
     fix[ 59LL << 32 | 1LL << 16 ] = EITFixUp::kEFixForceISO8859_1;
+
+    // Eutelsat Satellite System at 7°E
+    fix[ 126U << 16 ] = EITFixUp::kEFixForceISO8859_9;
 }
 
 /** \fn EITHelper::RescheduleRecordings(void)

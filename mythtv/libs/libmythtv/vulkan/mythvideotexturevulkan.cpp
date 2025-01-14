@@ -1,36 +1,38 @@
 // MythTV
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 #include "vulkan/mythvideotexturevulkan.h"
 
 #define LOC QString("VulkanVidTex: ")
 
-vector<MythVideoTextureVulkan*> MythVideoTextureVulkan::CreateTextures(MythVulkanObject* Vulkan,
-                                                                       VkCommandBuffer CommandBuffer,
-                                                                       VideoFrameType Type,
-                                                                       VideoFrameType Format,
-                                                                       QSize Size)
+std::vector<MythVideoTextureVulkan*>
+MythVideoTextureVulkan::CreateTextures(MythVulkanObject* Vulkan,
+                                       VkCommandBuffer CommandBuffer,
+                                       VideoFrameType Type,
+                                       VideoFrameType Format,
+                                       QSize Size)
 {
-    if (!(Vulkan && Vulkan->IsValidVulkan() && !Size.isEmpty()))
-        return vector<MythVideoTextureVulkan*>{};
+    if (!Vulkan || !Vulkan->IsValidVulkan() || Size.isEmpty())
+        return std::vector<MythVideoTextureVulkan*>{};
 
     if (MythVideoFrame::HardwareFormat(Type))
-        return vector<MythVideoTextureVulkan*>{};
+        return std::vector<MythVideoTextureVulkan*>{};
 
     return CreateSoftwareTextures(Vulkan, CommandBuffer, Type, Format, Size);
 }
 
-MythVideoTextureVulkan::MythVideoTextureVulkan(VideoFrameType Type, VideoFrameType Format)
+MythVideoTextureVulkan::MythVideoTextureVulkan([[maybe_unused]] VideoFrameType Type,
+                                               [[maybe_unused]] VideoFrameType Format)
+#if 0
+  : m_frameType(Type),
+    m_frameFormat(Format),
+    m_planeCount(MythVideoFrame::GetNumPlanes(Format))
+#endif
 {
-    m_frameType = Type;
-    m_frameFormat = Format;
-    m_valid = false;
-    m_plane = 0;
-    m_planeCount = MythVideoFrame::GetNumPlanes(Format);
 }
 
 void MythVideoTextureVulkan::DeleteTextures(MythVulkanObject *Vulkan,
                                             VkCommandBuffer CommandBuffer,
-                                            vector<MythVideoTextureVulkan*>& Textures)
+                                            std::vector<MythVideoTextureVulkan*>& Textures)
 {
     if (!(Vulkan && Vulkan->IsValidVulkan()))
         return;
@@ -61,17 +63,14 @@ void MythVideoTextureVulkan::DeleteTexture(MythVulkanObject* Vulkan,
     delete Texture;
 }
 
-vector<MythVideoTextureVulkan*> MythVideoTextureVulkan::CreateSoftwareTextures(MythVulkanObject* Vulkan,
-                                                                               VkCommandBuffer CommandBuffer,
-                                                                               VideoFrameType Type,
-                                                                               VideoFrameType Format,
-                                                                               QSize Size)
+std::vector<MythVideoTextureVulkan*>
+MythVideoTextureVulkan::CreateSoftwareTextures([[maybe_unused]] MythVulkanObject* Vulkan,
+                                               [[maybe_unused]] VkCommandBuffer CommandBuffer,
+                                               [[maybe_unused]] VideoFrameType Type,
+                                               VideoFrameType Format,
+                                               QSize Size)
 {
-    (void)Vulkan;
-    (void)CommandBuffer;
-    (void)Type;
-
-    vector<MythVideoTextureVulkan*> result;
+    std::vector<MythVideoTextureVulkan*> result;
 
     uint count = MythVideoFrame::GetNumPlanes(Format);
     if (count < 1)

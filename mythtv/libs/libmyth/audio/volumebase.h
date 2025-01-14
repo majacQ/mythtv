@@ -1,9 +1,11 @@
 #ifndef VOLUME_BASE_H
 #define VOLUME_BASE_H
 
-#include "mythexp.h"
+#include <cstdint>
 
-enum MuteState {
+#include "libmyth/mythexp.h"
+
+enum MuteState : std::uint8_t {
     kMuteOff = 0,
     kMuteLeft,
     kMuteRight,

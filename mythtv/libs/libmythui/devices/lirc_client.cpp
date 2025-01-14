@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,11 +37,11 @@
 // clazy:excludeall=raw-environment-function
 
 /* internal defines */
-#define MAX_INCLUDES 10
-#define LIRC_READ 255
-#define LIRC_PACKET_SIZE 255
+static constexpr int8_t MAX_INCLUDES     {  10 };
+static constexpr size_t LIRC_READ        { 255 };
+static constexpr size_t LIRC_PACKET_SIZE { 255 };
 /* three seconds */
-#define LIRC_TIMEOUT 3
+static constexpr int8_t LIRC_TIMEOUT     {   3 };
 
 /* internal data structures */
 struct filestack_t {
@@ -50,7 +51,7 @@ struct filestack_t {
 	struct filestack_t *m_parent;
 };
 
-enum packet_state
+enum packet_state : std::uint8_t
 {
 	P_BEGIN,
 	P_MESSAGE,
@@ -429,10 +430,10 @@ static void lirc_parse_string(const struct lirc_state *state, char *s,const char
 	*t=0;
 }
 
-static void lirc_parse_include(char *s,const char *name,int line)
+static void lirc_parse_include(char *s,
+                               [[maybe_unused]] const char *name,
+                               [[maybe_unused]] int line)
 {
-        (void)name;
-        (void)line;
 	size_t len=strlen(s);
 	if(len<2)
 	{
@@ -982,8 +983,8 @@ static int lirc_readconfig_only_internal(const struct lirc_state *state,
 	while (filestack)
 	{
 		char *string = nullptr;
-		if((ret=lirc_readline(state,&string,filestack->m_file))==-1 ||
-		   string==nullptr)
+		ret=lirc_readline(state,&string,filestack->m_file);
+		if(ret==-1 || string==nullptr)
 		{
 			fclose(filestack->m_file);
 			if(open_files == 1 && full_name != nullptr)
@@ -1748,7 +1749,7 @@ static int lirc_code2char_internal(const struct lirc_state *state,
 	return(0);
 }
 
-#define PACKET_SIZE 100
+static constexpr size_t PACKET_SIZE { 100 };
 
 #if 0
 char *lirc_nextir(struct lirc_state *state)
@@ -1771,8 +1772,8 @@ char *lirc_nextir(struct lirc_state *state)
 
 int lirc_nextcode(struct lirc_state *state, char **code)
 {
-	static int s_packetSize=PACKET_SIZE;
-	static int s_endLen=0;
+	static size_t s_packetSize=PACKET_SIZE;
+	static size_t s_endLen=0;
 	char *end = nullptr;
 
 	*code=nullptr;
@@ -1874,7 +1875,7 @@ const char *lirc_setmode(const struct lirc_state *state, struct lirc_config *con
 		if(snprintf(cmd.data(), LIRC_PACKET_SIZE, "SETMODE%s%s\n",
 			    mode ? " ":"",
 			    mode ? mode:"")
-		   >= LIRC_PACKET_SIZE)
+		   >= static_cast<int>(LIRC_PACKET_SIZE))
 		{
 			return nullptr;
 		}

@@ -10,7 +10,7 @@
 #include "premieretables.h"
 #include "eithelper.h"
 
-#define MCA_EIT_TSID 136
+static constexpr uint8_t MCA_EIT_TSID { 136 };
 
 #define LOC QString("DVBStream[%1]: ").arg(m_cardId)
 
@@ -180,15 +180,15 @@ void DVBStreamData::Reset(uint desired_netid, uint desired_tsid,
     {
         m_cacheLock.lock();
 
-        for (const auto & nit : qAsConst(m_cachedNit))
+        for (const auto & nit : std::as_const(m_cachedNit))
             DeleteCachedTable(nit);
         m_cachedNit.clear();
 
-        for (const auto & cached : qAsConst(m_cachedSdts))
+        for (const auto & cached : std::as_const(m_cachedSdts))
             DeleteCachedTable(cached);
         m_cachedSdts.clear();
 
-        for (const auto & cached : qAsConst(m_cachedBats))
+        for (const auto & cached : std::as_const(m_cachedBats))
             DeleteCachedTable(cached);
         m_cachedBats.clear();
 
@@ -500,7 +500,8 @@ bool DVBStreamData::GetEITPIDChanges(const uint_vec_t &cur_pids,
             add_pids.push_back(PID::PREMIERE_EIT_SPORT_PID);
         }
 
-        if (find(cur_pids.begin(), cur_pids.end(),
+        if (m_desiredNetId == OriginalNetworkID::SES2 &&
+            find(cur_pids.begin(), cur_pids.end(),
                  (uint) PID::FREESAT_EIT_PID) == cur_pids.end())
         {
             add_pids.push_back(PID::FREESAT_EIT_PID);
@@ -569,7 +570,8 @@ bool DVBStreamData::GetEITPIDChanges(const uint_vec_t &cur_pids,
             del_pids.push_back(PID::PREMIERE_EIT_SPORT_PID);
         }
 
-        if (find(cur_pids.begin(), cur_pids.end(),
+        if (m_desiredNetId == OriginalNetworkID::SES2 &&
+            find(cur_pids.begin(), cur_pids.end(),
                  (uint) PID::FREESAT_EIT_PID) != cur_pids.end())
         {
             del_pids.push_back(PID::FREESAT_EIT_PID);
@@ -619,7 +621,7 @@ bool DVBStreamData::HasCachedAnyNIT(bool current) const
         LOG(VB_GENERAL, LOG_WARNING, LOC +
             "Currently we ignore \'current\' param");
 
-    return (bool)(m_cachedNit.size());
+    return !m_cachedNit.empty();
 }
 
 bool DVBStreamData::HasCachedAllNIT(bool current) const
@@ -749,7 +751,7 @@ bool DVBStreamData::HasCachedSDT(bool current) const
     if (m_cachedNit.empty())
         return false;
 
-    for (auto *nit : qAsConst(m_cachedNit))
+    for (auto *nit : std::as_const(m_cachedNit))
     {
         for (uint i = 0; i < nit->TransportStreamCount(); i++)
         {
@@ -774,7 +776,7 @@ bool DVBStreamData::HasCachedAllSDTs(bool current) const
     if (m_cachedNit.empty())
         return false;
 
-    for (auto *nit : qAsConst(m_cachedNit))
+    for (auto *nit : std::as_const(m_cachedNit))
     {
         if ((int)nit->TransportStreamCount() > m_cachedSdts.size())
             return false;
@@ -850,7 +852,7 @@ bat_vec_t DVBStreamData::GetCachedBATs(bool current) const
 
     bat_vec_t bats;
 
-    for (auto *bat : qAsConst(m_cachedBats))
+    for (auto *bat : std::as_const(m_cachedBats))
     {
         IncrementRefCnt(bat);
         bats.push_back(bat);
@@ -917,7 +919,7 @@ sdt_vec_t DVBStreamData::GetCachedSDTs(bool current) const
 
     sdt_vec_t sdts;
 
-    for (auto *sdt : qAsConst(m_cachedSdts))
+    for (auto *sdt : std::as_const(m_cachedSdts))
     {
         IncrementRefCnt(sdt);
         sdts.push_back(sdt);

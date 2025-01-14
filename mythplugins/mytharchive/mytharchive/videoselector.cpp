@@ -8,16 +8,17 @@
 #include <QTimer>
 
 // mythtv
-#include <mythcontext.h>
-#include <mythdb.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuiimage.h>
-#include <mythuibuttonlist.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <metadata/videoutils.h>
-#include <remotefile.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/remotefile.h>
+#include <libmythbase/stringutil.h>
+#include <libmythmetadata/videoutils.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuiimage.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
 #include "archiveutil.h"
@@ -25,9 +26,9 @@
 
 VideoSelector::VideoSelector(MythScreenStack *parent, QList<ArchiveItem *> *archiveList)
               :MythScreenType(parent, "VideoSelector"),
+               m_parentalLevelChecker(new ParentalLevelChangeChecker()),
                m_archiveList(archiveList)
 {
-    m_parentalLevelChecker = new ParentalLevelChangeChecker();
     connect(m_parentalLevelChecker, &ParentalLevelChangeChecker::SigResultReady,
             this, &VideoSelector::parentalLevelChanged);
 }
@@ -100,7 +101,7 @@ bool VideoSelector::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -124,7 +125,9 @@ bool VideoSelector::keyPressEvent(QKeyEvent *event)
             setParentalLevel(ParentalLevel::plHigh);
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MythScreenType::keyPressEvent(event))
@@ -233,7 +236,7 @@ void VideoSelector::titleChanged(MythUIButtonListItem *item)
             }
         }
 
-        m_filesizeText->SetText(formatSize(v->size / 1024));
+        m_filesizeText->SetText(StringUtil::formatKBytes(v->size / 1024));
     }
 }
 
@@ -242,11 +245,11 @@ void VideoSelector::OKPressed()
     // loop though selected videos and add them to the list
     // remove any items that have been removed from the list
     QList<ArchiveItem *> tempAList;
-    for (auto *a : qAsConst(*m_archiveList))
+    for (auto *a : std::as_const(*m_archiveList))
     {
         bool found = false;
 
-        for (const auto *v : qAsConst(m_selectedList))
+        for (const auto *v : std::as_const(m_selectedList))
         {
             if (a->type != "Video" || a->filename == v->filename)
             {
@@ -259,14 +262,14 @@ void VideoSelector::OKPressed()
             tempAList.append(a);
     }
 
-    for (auto *x : qAsConst(tempAList))
+    for (auto *x : std::as_const(tempAList))
         m_archiveList->removeAll(x);
 
     // remove any items that are already in the list
     QList<VideoInfo *> tempSList;
-    for (auto *v : qAsConst(m_selectedList))
+    for (auto *v : std::as_const(m_selectedList))
     {
-        for (const auto *a : qAsConst(*m_archiveList))
+        for (const auto *a : std::as_const(*m_archiveList))
         {
             if (a->filename == v->filename)
             {
@@ -276,11 +279,11 @@ void VideoSelector::OKPressed()
         }
     }
 
-    for (auto *x : qAsConst(tempSList))
+    for (auto *x : std::as_const(tempSList))
         m_selectedList.removeAll(x);
 
     // add all that are left
-    for (const auto *v : qAsConst(m_selectedList))
+    for (const auto *v : std::as_const(m_selectedList))
     {
         auto *a = new ArchiveItem;
         a->type = "Video";
@@ -414,7 +417,9 @@ std::vector<VideoInfo *> *VideoSelector::getVideoListFromDB(void)
                                      query.value(8).toString());
             }
             else
+            {
                 info->title = query.value(1).toString();
+            }
 
             info->plot = query.value(2).toString();
             info->size = 0; //query.value(3).toInt();
@@ -505,9 +510,8 @@ void VideoSelector::getVideoList(void)
     setCategory(nullptr);
 }
 
-void VideoSelector::setCategory(MythUIButtonListItem *item)
+void VideoSelector::setCategory([[maybe_unused]] MythUIButtonListItem *item)
 {
-    (void)item;
     updateVideoList();
 }
 
@@ -518,9 +522,9 @@ void VideoSelector::updateSelectedList()
 
     m_selectedList.clear();
 
-    for (const auto *a : qAsConst(*m_archiveList))
+    for (const auto *a : std::as_const(*m_archiveList))
     {
-        for (auto *v : qAsConst(*m_videoList))
+        for (auto *v : std::as_const(*m_videoList))
         {
             if (v->filename == a->filename)
             {
@@ -546,6 +550,8 @@ void VideoSelector::parentalLevelChanged(bool passwordValid, ParentalLevel::Leve
         m_plText->SetText(QString::number(newLevel));
     }
     else
+    {
         ShowOkPopup(tr("You need to enter a valid password for this parental level"));
+    }
 }
 

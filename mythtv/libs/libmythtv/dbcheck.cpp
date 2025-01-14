@@ -1,27 +1,26 @@
-#include "mythconfig.h"
-
 #include <cstdio>
 #include <iostream>
 
 #include <QString>
 #include <QSqlError>
-#include "dbcheck.h"
-#include "mythdbcheck.h"
 
-#include "mythversion.h"
-#include "dbutil.h"
-#include "mythcorecontext.h"
-#include "schemawizard.h"
-#include "mythdb.h"
-#include "mythdbcheck.h"
-#include "mythlogging.h"
-#include "videodbcheck.h" // for 1267
-#include "compat.h"
-#include "recordingrule.h"
-#include "recordingprofile.h"
-#include "recordinginfo.h"
+#include "libmythui/schemawizard.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/dbutil.h"
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdbcheck.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+
 #include "cardutil.h"
+#include "dbcheck.h"
 #include "mythvideoprofile.h"
+#include "recordinginfo.h"
+#include "recordingprofile.h"
+#include "recordingrule.h"
+#include "videodbcheck.h" // for 1267
 
 // TODO convert all dates to UTC
 
@@ -30,14 +29,16 @@
 const QString currentDatabaseVersion = MYTH_DATABASE_VERSION;
 
 static bool doUpgradeTVDatabaseSchema(void);
+static bool tryUpgradeTVDatabaseSchema(bool upgradeAllowed, bool upgradeIfNoUI, bool informSystemd);
 
 #if CONFIG_SYSTEMD_NOTIFY
 #include <systemd/sd-daemon.h>
-#define db_sd_notify(x) \
-    if (informSystemd) \
-        (void)sd_notify(0, "STATUS=Database update " x);
+static inline void db_sd_notify(const char *str)
+{
+    sd_notifyf(0, "STATUS=Database update: %s", str);
+}
 #else
-#define db_sd_notify(x)
+static inline void db_sd_notify(const char */*str*/) {};
 #endif
 
 /** \defgroup db_schema MythTV Database Schema
@@ -360,16 +361,11 @@ to check for duplicates in the BUSQ
  */
 bool UpgradeTVDatabaseSchema(const bool upgradeAllowed,
                              const bool upgradeIfNoUI,
-                             const bool informSystemd)
+                             [[maybe_unused]] const bool informSystemd)
 {
 #ifdef IGNORE_SCHEMA_VER_MISMATCH
     return true;
 #endif
-#if CONFIG_SYSTEMD_NOTIFY == 0
-    Q_UNUSED(informSystemd);
-#endif
-    SchemaUpgradeWizard *schema_wizard = nullptr;
-
     // Suppress DB messages and turn of the settings cache,
     // These are likely to confuse the users and the code, respectively.
     GetMythDB()->SetSuppressDBMessages(true);
@@ -380,7 +376,8 @@ bool UpgradeTVDatabaseSchema(const bool upgradeAllowed,
     bool locked = DBUtil::TryLockSchema(query, 1);
     for (uint i = 0; i < 2*60 && !locked; i++)
     {
-        db_sd_notify("waiting for lock");
+        if (informSystemd)
+            db_sd_notify("waiting for lock");
         LOG(VB_GENERAL, LOG_INFO, "Waiting for database schema upgrade lock");
         locked = DBUtil::TryLockSchema(query, 1);
         if (locked)
@@ -389,28 +386,49 @@ bool UpgradeTVDatabaseSchema(const bool upgradeAllowed,
     if (!locked)
     {
         LOG(VB_GENERAL, LOG_INFO, "Failed to get schema upgrade lock");
-        goto upgrade_error_exit;
+        if (informSystemd)
+            db_sd_notify("failed to get schema upgrade lock");
+        GetMythDB()->SetSuppressDBMessages(false);
+        gCoreContext->ActivateSettingsCache(true);
+        return false;
     }
 
+    bool success = tryUpgradeTVDatabaseSchema(upgradeAllowed, upgradeIfNoUI, informSystemd);
+
+    // On any exit we want to re-enable the DB messages so errors
+    // are reported and we want to make sure the setting cache is
+    // enabled for good performance and we must unlock the schema
+    // lock.
+    if (informSystemd)
+        db_sd_notify(success ? "success" : "failed");
+    GetMythDB()->SetSuppressDBMessages(false);
+    gCoreContext->ActivateSettingsCache(true);
+    DBUtil::UnlockSchema(query);
+    return success;
+}
+
+static bool tryUpgradeTVDatabaseSchema(bool upgradeAllowed, bool upgradeIfNoUI, bool informSystemd)
+{
     // Determine if an upgrade is needed
-    schema_wizard = SchemaUpgradeWizard::Get(
+    SchemaUpgradeWizard* schema_wizard = SchemaUpgradeWizard::Get(
         "DBSchemaVer", "MythTV", currentDatabaseVersion);
     if (schema_wizard->Compare() == 0) // DB schema is what we need it to be..
-        goto upgrade_ok_exit;
+        return true;
 
     if (!upgradeAllowed)
         LOG(VB_GENERAL, LOG_WARNING, "Not allowed to upgrade the database.");
 
-    db_sd_notify("waiting for user input");
+    if (informSystemd)
+        db_sd_notify("waiting for user input");
     // Pop up messages, questions, warnings, etc.
     switch (schema_wizard->PromptForUpgrade(
                 "TV", upgradeAllowed, upgradeIfNoUI, MINIMUM_DBMS_VERSION))
     {
         case MYTH_SCHEMA_USE_EXISTING:
-            goto upgrade_ok_exit;
+            return true;
         case MYTH_SCHEMA_ERROR:
         case MYTH_SCHEMA_EXIT:
-            goto upgrade_error_exit;
+            return false;
         case MYTH_SCHEMA_UPGRADE:
             break;
     }
@@ -419,35 +437,17 @@ bool UpgradeTVDatabaseSchema(const bool upgradeAllowed,
         .arg(currentDatabaseVersion));
 
     // Upgrade the schema
-    db_sd_notify("upgrading database");
+    if (informSystemd)
+        db_sd_notify("upgrading database");
     if (!doUpgradeTVDatabaseSchema())
     {
         LOG(VB_GENERAL, LOG_ERR, "Database schema upgrade failed.");
-        goto upgrade_error_exit;
+        return false;
     }
 
     LOG(VB_GENERAL, LOG_INFO, "Database schema upgrade complete.");
 
-    // On any exit we want to re-enable the DB messages so errors
-    // are reported and we want to make sure the setting cache is
-    // enabled for good performance and we must unlock the schema
-    // lock. We use gotos with labels so it's impossible to miss
-    // these steps.
-  upgrade_ok_exit:
-    db_sd_notify("success");
-    GetMythDB()->SetSuppressDBMessages(false);
-    gCoreContext->ActivateSettingsCache(true);
-    if (locked)
-        DBUtil::UnlockSchema(query);
     return true;
-
-  upgrade_error_exit:
-    db_sd_notify("failed");
-    GetMythDB()->SetSuppressDBMessages(false);
-    gCoreContext->ActivateSettingsCache(true);
-    if (locked)
-        DBUtil::UnlockSchema(query);
-    return false;
 }
 
 /** \fn doUpgradeTVDatabaseSchema(void)
@@ -465,22 +465,6 @@ bool UpgradeTVDatabaseSchema(const bool upgradeAllowed,
  */
 static bool doUpgradeTVDatabaseSchema(void)
 {
-    QString order;
-
-    auto ss2ba = [](const auto & ss){ return QByteArray::fromStdString(ss); };
-    auto qs2ba = [](const auto & item){ return item.constData(); };
-    auto add_start_end = [order](const auto & field){
-        return QString("UPDATE %1 "
-                       "SET starttime = CONVERT_TZ(starttime, 'SYSTEM', 'Etc/UTC'), "
-                       "    endtime   = CONVERT_TZ(endtime, 'SYSTEM', 'Etc/UTC') "
-                       "ORDER BY %2")
-            .arg(QString::fromStdString(field)).arg(order).toLocal8Bit(); };
-    auto add_start = [order](const auto & field){
-        return QString("UPDATE %1 "
-                       "SET starttime = CONVERT_TZ(starttime, 'SYSTEM', 'Etc/UTC') "
-                       "ORDER BY %2")
-            .arg(QString::fromStdString(field)).arg(order).toLocal8Bit(); };
-
     QString dbver = gCoreContext->GetSetting("DBSchemaVer");
     if (dbver == currentDatabaseVersion)
     {
@@ -492,7 +476,7 @@ static bool doUpgradeTVDatabaseSchema(void)
         MSqlQuery query(MSqlQuery::InitCon());
         if (!query.exec(QString("ALTER DATABASE %1 DEFAULT "
                                 "CHARACTER SET utf8 COLLATE utf8_general_ci;")
-                        .arg(gCoreContext->GetDatabaseParams().m_dbName)))
+                        .arg(GetMythDB()->GetDatabaseName())))
         {
             MythDB::DBError("UpgradeTVDatabaseSchema -- alter charset", query);
         }
@@ -511,2793 +495,14 @@ static bool doUpgradeTVDatabaseSchema(void)
                                  "Unable to upgrade database.");
         return false;
     }
-    if (dbver.toInt() <  1244)
+    if (dbver.toInt() <  1348)
     {
         LOG(VB_GENERAL, LOG_ERR, "Your database version is too old to upgrade "
                                  "with this version of MythTV. You will need "
-                                 "to use mythtv-setup from MythTV 0.22, 0.23, "
-                                 "or 0.24 to upgrade your database before "
+                                 "to use mythtv-setup from MythTV 29 to 34 "
+                                 "to upgrade your database before "
                                  "upgrading to this version of MythTV.");
         return false;
-    }
-
-    if (dbver == "1244")
-    {
-       DBUpdates updates {
-"ALTER TABLE cardinput DROP COLUMN freetoaironly;",
-"ALTER TABLE cardinput DROP COLUMN radioservices;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1245", dbver))
-            return false;
-    }
-
-    if (dbver == "1245")
-    {
-       DBUpdates updates {
-"DELETE FROM capturecard WHERE cardtype = 'DBOX2';",
-"DELETE FROM profilegroups WHERE cardtype = 'DBOX2';",
-"ALTER TABLE capturecard DROP COLUMN dbox2_port;",
-"ALTER TABLE capturecard DROP COLUMN dbox2_httpport;",
-"ALTER TABLE capturecard DROP COLUMN dbox2_host;"
-};
-       if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                updates, "1246", dbver))
-            return false;
-    }
-
-    if (dbver == "1246")
-    {
-       DBUpdates updates {
-"ALTER TABLE recorded ADD COLUMN bookmarkupdate timestamp default 0 NOT NULL",
-"UPDATE recorded SET bookmarkupdate = lastmodified+1 WHERE bookmark = 1",
-"UPDATE recorded SET bookmarkupdate = lastmodified WHERE bookmark = 0"
-};
-       if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                updates, "1247", dbver))
-            return false;
-    }
-
-    if (dbver == "1247")
-    {
-        DBUpdates updates {
-"INSERT INTO profilegroups SET name = \"Import Recorder\", cardtype = 'IMPORT', is_default = 1;",
-"INSERT INTO recordingprofiles SET name = \"Default\", profilegroup = 14;",
-"INSERT INTO recordingprofiles SET name = \"Live TV\", profilegroup = 14;",
-"INSERT INTO recordingprofiles SET name = \"High Quality\", profilegroup = 14;",
-"INSERT INTO recordingprofiles SET name = \"Low Quality\", profilegroup = 14;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1248", dbver))
-            return false;
-    }
-
-    if (dbver == "1248")
-    {
-       DBUpdates updates {
-"DELETE FROM keybindings WHERE action = 'CUSTOMEDIT' "
-   "AND context = 'TV Frontend' AND keylist = 'E';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1249", dbver))
-            return false;
-    }
-
-    if (dbver == "1249")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1250");
-
-        MSqlQuery select(MSqlQuery::InitCon());
-        select.prepare("SELECT hostname, data FROM settings "
-                       " WHERE value = 'StickyKeys'");
-
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve StickyKeys values.", select);
-        }
-        else
-        {
-            MSqlQuery update(MSqlQuery::InitCon());
-            while (select.next())
-            {
-                QString hostname = select.value(0).toString();
-                QString sticky_keys = select.value(1).toString();
-
-                if ("1" == sticky_keys)
-                {
-                    // Only remap the keys if they're currently set to defaults
-                    update.prepare("UPDATE keybindings "
-                                   "   SET keylist  = :KEYS "
-                                   " WHERE context  = 'TV Playback' AND "
-                                   "       action   = :ACTION AND "
-                                   "       hostname = :HOSTNAME AND "
-                                   "       keylist  = :DEFAULT_KEYS");
-
-                    QString keylist = "";
-                    QString action = "SEEKFFWD";
-                    QString default_keys = "Right";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-
-                    keylist = "";
-                    action = "SEEKRWND";
-                    default_keys = "Left";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-
-                    keylist = ">,.,Right";
-                    action = "FFWDSTICKY";
-                    default_keys = ">,.";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-
-                    keylist = ",,<,Left";
-                    action = "RWNDSTICKY";
-                    default_keys = ",,<";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-                }
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1250", dbver))
-            return false;
-    }
-
-    if (dbver == "1250")
-    {
-        DBUpdates updates {
-"UPDATE recorded SET bookmark = 1 WHERE bookmark != 0;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1251", dbver))
-            return false;
-    }
-
-    if (dbver == "1251")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1252");
-
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("SHOW INDEX FROM recgrouppassword");
-
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to retrieve current indices on "
-                            "recgrouppassword.", query);
-        }
-        else
-        {
-            while (query.next())
-            {
-                QString index_name = query.value(2).toString();
-
-                if ("recgroup" == index_name)
-                {
-                    MSqlQuery update(MSqlQuery::InitCon());
-                    update.prepare("ALTER TABLE recgrouppassword "
-                                   " DROP INDEX recgroup");
-
-                    if (!update.exec())
-                    {
-                         MythDB::DBError("Unable to drop duplicate index on "
-                                         "recgrouppassword. Ignoring.",
-                                         update);
-                    }
-                    break;
-                }
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1252", dbver))
-            return false;
-    }
-
-    if (dbver == "1252")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1253");
-
-        MSqlQuery select(MSqlQuery::InitCon());
-        select.prepare("SELECT hostname, data FROM settings "
-                       " WHERE value = 'StickyKeys'");
-
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve StickyKeys values.", select);
-        }
-        else
-        {
-            MSqlQuery update(MSqlQuery::InitCon());
-            while (select.next())
-            {
-                QString hostname = select.value(0).toString();
-                QString sticky_keys = select.value(1).toString();
-
-                if ("1" == sticky_keys)
-                {
-                    // Only remap the keys if they're currently set to defaults
-                    update.prepare("UPDATE keybindings "
-                                   "   SET keylist  = :KEYS "
-                                   " WHERE context  = 'TV Playback' AND "
-                                   "       action   = :ACTION AND "
-                                   "       hostname = :HOSTNAME AND "
-                                   "       keylist  = :DEFAULT_KEYS");
-
-                    QString keylist = ">,.";
-                    QString action = "FFWDSTICKY";
-                    QString default_keys = ">,.,Right";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-
-                    keylist = ",,<";
-                    action = "RWNDSTICKY";
-                    default_keys = ",,<,Left";
-
-                    update.bindValue(":KEYS", keylist);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":HOSTNAME", hostname);
-                    update.bindValue(":DEFAULT_KEYS", default_keys);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update keybindings",
-                                         update);
-                }
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1253", dbver))
-            return false;
-    }
-
-    if (dbver == "1253")
-    {
-        if (gCoreContext->GetNumSetting("have-nit-fix") == 1)
-        {
-            // User has previously applied patch from ticket #7486.
-            LOG(VB_GENERAL, LOG_CRIT,
-                "Upgrading to MythTV schema version 1254");
-            if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1254", dbver))
-                return false;
-        }
-        else
-        {
-            DBUpdates updates {
-                "ALTER TABLE videosource ADD dvb_nit_id INT(6) DEFAULT -1;"
-            };
-            if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                     updates, "1254", dbver))
-                return false;
-        }
-    }
-
-    if (dbver == "1254")
-    {
-       DBUpdates updates {
-"ALTER TABLE cardinput DROP COLUMN shareable;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1255", dbver))
-            return false;
-    }
-
-    if (dbver == "1255")
-    {
-        DBUpdates updates {
-"INSERT INTO keybindings (SELECT 'Main Menu', 'EXIT', 'System Exit', "
-    "(CASE data WHEN '1' THEN 'Ctrl+Esc' WHEN '2' THEN 'Meta+Esc' "
-    "WHEN '3' THEN 'Alt+Esc' WHEN '4' THEN 'Esc' ELSE '' END), hostname "
-    "FROM settings WHERE value = 'AllowQuitShutdown' GROUP BY hostname) "
-    "ON DUPLICATE KEY UPDATE keylist = VALUES(keylist);"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1256", dbver))
-            return false;
-    }
-
-    if (dbver == "1256")
-    {
-        DBUpdates updates {
-"ALTER TABLE record DROP COLUMN tsdefault;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1257", dbver))
-            return false;
-    }
-
-    if (dbver == "1257")
-    {
-        DBUpdates updates {
-"CREATE TABLE internetcontent "
-"( name VARCHAR(255) NOT NULL,"
-"  thumbnail VARCHAR(255),"
-"  type SMALLINT(3) NOT NULL,"
-"  author VARCHAR(128) NOT NULL,"
-"  description TEXT NOT NULL,"
-"  commandline TEXT NOT NULL,"
-"  version DOUBLE NOT NULL,"
-"  updated DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  search BOOL NOT NULL,"
-"  tree BOOL NOT NULL,"
-"  podcast BOOL NOT NULL,"
-"  download BOOL NOT NULL,"
-"  host  VARCHAR(128)) ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE internetcontentarticles "
-"( feedtitle VARCHAR(255) NOT NULL,"
-"  path TEXT NOT NULL,"
-"  paththumb TEXT NOT NULL,"
-"  title VARCHAR(255) NOT NULL,"
-"  subtitle VARCHAR(255) NOT NULL,"
-"  season SMALLINT(5) NOT NULL DEFAULT '0',"
-"  episode SMALLINT(5) NOT NULL DEFAULT '0',"
-"  description TEXT NOT NULL,"
-"  url TEXT NOT NULL,"
-"  type SMALLINT(3) NOT NULL,"
-"  thumbnail TEXT NOT NULL,"
-"  mediaURL TEXT NOT NULL,"
-"  author VARCHAR(255) NOT NULL,"
-"  date DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  time INT NOT NULL,"
-"  rating VARCHAR(255) NOT NULL,"
-"  filesize BIGINT NOT NULL,"
-"  player VARCHAR(255) NOT NULL,"
-"  playerargs TEXT NOT NULL,"
-"  download VARCHAR(255) NOT NULL,"
-"  downloadargs TEXT NOT NULL,"
-"  width SMALLINT NOT NULL,"
-"  height SMALLINT NOT NULL,"
-"  language VARCHAR(128) NOT NULL,"
-"  podcast BOOL NOT NULL,"
-"  downloadable BOOL NOT NULL,"
-"  customhtml BOOL NOT NULL,"
-"  countries VARCHAR(255) NOT NULL) ENGINE=MyISAM DEFAULT CHARSET=utf8;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1258", dbver))
-            return false;
-    }
-
-    if (dbver == "1258")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1259");
-
-        MSqlQuery select(MSqlQuery::InitCon());
-        select.prepare("SELECT hostname, data FROM settings "
-                       " WHERE value = 'IndividualMuteControl'");
-
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve IndividualMuteControl values.",
-                            select);
-            return false;
-        }
-
-        MSqlQuery update(MSqlQuery::InitCon());
-        while (select.next())
-        {
-            QString hostname = select.value(0).toString();
-            QString individual_mute = select.value(1).toString();
-
-            if ("1" == individual_mute)
-            {
-                update.prepare("DELETE FROM keybindings "
-                               " WHERE action = 'CYCLEAUDIOCHAN' AND "
-                               "       hostname = :HOSTNAME AND "
-                               "       context IN ('TV Frontend', "
-                               "                   'TV Playback')");
-
-                update.bindValue(":HOSTNAME", hostname);
-
-                if (!update.exec())
-                {
-                    MythDB::DBError("Unable to update keybindings",
-                                    update);
-                    return false;
-                }
-
-                update.prepare("UPDATE keybindings "
-                               "   SET action = 'CYCLEAUDIOCHAN', "
-                               "       description = 'Cycle audio channels'"
-                               " WHERE action = 'MUTE' AND "
-                               "       hostname = :HOSTNAME AND "
-                               "       context IN ('TV Frontend', "
-                               "                   'TV Playback')");
-
-                update.bindValue(":HOSTNAME", hostname);
-
-                if (!update.exec())
-                {
-                    MythDB::DBError("Unable to update keybindings",
-                                    update);
-                    return false;
-                }
-
-                update.prepare("REPLACE INTO keybindings "
-                               " VALUES (:CONTEXT, 'MUTE', 'Mute', "
-                               "         '', :HOSTNAME)");
-
-                update.bindValue(":CONTEXT", "TV Playback");
-                update.bindValue(":HOSTNAME", hostname);
-                if (!update.exec())
-                {
-                    MythDB::DBError("Unable to update keybindings",
-                                    update);
-                    return false;
-                }
-                update.bindValue(":CONTEXT", "TV Frontend");
-                update.bindValue(":HOSTNAME", hostname);
-                if (!update.exec())
-                {
-                    MythDB::DBError("Unable to update keybindings",
-                                    update);
-                    return false;
-                }
-
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1259", dbver))
-            return false;
-    }
-
-    if (dbver == "1259")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1260");
-
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("DELETE FROM keybindings WHERE "
-                      "action IN ('PAGEUP','PAGEDOWN') AND "
-                      "context = 'TV FRONTEND'");
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to update keybindings", query);
-            return false;
-        }
-
-        query.prepare("SELECT data FROM settings "
-                       " WHERE value = 'EPGEnableJumpToChannel'");
-
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to retrieve EPGEnableJumpToChannel values.",
-                            query);
-            return false;
-        }
-
-        MSqlQuery bindings(MSqlQuery::InitCon());
-        while (query.next())
-        {
-            QString EPGEnableJumpToChannel = query.value(0).toString();
-
-            if ("1" == EPGEnableJumpToChannel)
-            {
-                bindings.prepare("SELECT action, context, hostname, keylist "
-                                 " FROM keybindings "
-                                 " WHERE action IN ('DAYLEFT', "
-                                 " 'DAYRIGHT', 'TOGGLEEPGORDER') AND "
-                                 " context IN ('TV Frontend', "
-                                 " 'TV Playback')");
-
-                if (!bindings.exec())
-                {
-                    MythDB::DBError("Unable to update keybindings",
-                                    bindings);
-                    return false;
-                }
-                while (bindings.next())
-                {
-                    QString action = bindings.value(0).toString();
-                    QString context = bindings.value(1).toString();
-                    QString hostname = bindings.value(2).toString();
-                    QStringList oldKeylist = bindings.value(3).toString().split(',');
-                    QStringList newKeyList;
-
-                    QStringList::iterator it;
-                    for (it = oldKeylist.begin(); it != oldKeylist.end();++it)
-                    {
-                        bool ok = false;
-                        int num = (*it).toInt(&ok);
-                        if (!ok && num >= 0 && num <= 9)
-                            newKeyList << (*it);
-                    }
-                    QString keyList = newKeyList.join(",");
-
-                    MSqlQuery update(MSqlQuery::InitCon());
-                    update.prepare("UPDATE keybindings "
-                                   "   SET keylist = :KEYLIST "
-                                   " WHERE action = :ACTION "
-                                   " AND   context = :CONTEXT "
-                                   " AND   hostname = :HOSTNAME");
-
-                    update.bindValue(":KEYLIST", keyList);
-                    update.bindValue(":ACTION", action);
-                    update.bindValue(":CONTEXT", context);
-                    update.bindValue(":HOSTNAME", hostname);
-
-                    if (!update.exec())
-                    {
-                        MythDB::DBError("Unable to update keybindings",
-                                        update);
-                        return false;
-                    }
-                }
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1260", dbver))
-            return false;
-    }
-
-    if (dbver == "1260")
-    {
-        if (gCoreContext->GetBoolSetting("MythFillFixProgramIDsHasRunOnce", false))
-        {
-            LOG(VB_GENERAL, LOG_CRIT,
-                "Upgrading to MythTV schema version 1261");
-            if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1261", dbver))
-                return false;
-        }
-        else
-        {
-
-            DBUpdates updates {
-"UPDATE recorded SET programid=CONCAT(SUBSTRING(programid, 1, 2), '00', "
-"       SUBSTRING(programid, 3)) WHERE length(programid) = 12;",
-"UPDATE oldrecorded SET programid=CONCAT(SUBSTRING(programid, 1, 2), '00', "
-"       SUBSTRING(programid, 3)) WHERE length(programid) = 12;",
-"UPDATE program SET programid=CONCAT(SUBSTRING(programid, 1, 2), '00', "
-"       SUBSTRING(programid, 3)) WHERE length(programid) = 12;"
-};
-            if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                     updates, "1261", dbver))
-                return false;
-        }
-    }
-
-    if (dbver == "1261")
-    {
-        DBUpdates updates {
-"UPDATE program SET description = '' WHERE description IS NULL;",
-"UPDATE record SET description = '' WHERE description IS NULL;",
-"UPDATE recorded SET description = '' WHERE description IS NULL;",
-"UPDATE recordedprogram SET description = '' WHERE description IS NULL;",
-"UPDATE oldrecorded SET description = '' WHERE description IS NULL;",
-"UPDATE mythlog SET details = '' WHERE details IS NULL;",
-"UPDATE settings SET data = '' WHERE data IS NULL;",
-"UPDATE powerpriority SET selectclause = '' WHERE selectclause IS NULL;",
-"UPDATE customexample SET fromclause = '' WHERE fromclause IS NULL;",
-"UPDATE customexample SET whereclause = '' WHERE whereclause IS NULL;",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"ALTER TABLE program MODIFY COLUMN description VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE record MODIFY COLUMN description VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE recorded MODIFY COLUMN description VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE recordedprogram MODIFY COLUMN description VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE oldrecorded MODIFY COLUMN description VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE mythlog MODIFY COLUMN details VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE settings MODIFY COLUMN data VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE powerpriority MODIFY COLUMN selectclause VARCHAR(16000) "
-"    NOT NULL default '';",
-"ALTER TABLE customexample MODIFY COLUMN fromclause VARCHAR(10000) "
-"    NOT NULL default '';",
-"ALTER TABLE customexample MODIFY COLUMN whereclause VARCHAR(10000) "
-"    NOT NULL default '';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1262", dbver))
-            return false;
-    }
-
-    if (dbver == "1262")
-    {
-        DBUpdates updates {
-"INSERT INTO recgrouppassword (recgroup, password) SELECT 'All Programs',data FROM settings WHERE value='AllRecGroupPassword' LIMIT 1;",
-"DELETE FROM settings WHERE value='AllRecGroupPassword';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1263", dbver))
-            return false;
-    }
-
-    if (dbver == "1263")
-    {
-        DBUpdates updates {
-"UPDATE settings SET hostname = NULL WHERE value='ISO639Language0' AND data != 'aar' AND hostname IS NOT NULL LIMIT 1;",
-"UPDATE settings SET hostname = NULL WHERE value='ISO639Language1' AND data != 'aar' AND hostname IS NOT NULL LIMIT 1;",
-"DELETE FROM settings WHERE value='ISO639Language0' AND hostname IS NOT NULL;",
-"DELETE FROM settings WHERE value='ISO639Language1' AND hostname IS NOT NULL;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1264", dbver))
-            return false;
-    }
-
-    if (dbver == "1264")
-    {
-        DBUpdates updates {
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"DELETE FROM displayprofiles WHERE profilegroupid IN "
-"  (SELECT profilegroupid FROM displayprofilegroups "
-"    WHERE name IN ('CPU++', 'CPU+', 'CPU--'))",
-"DELETE FROM displayprofilegroups WHERE name IN ('CPU++', 'CPU+', 'CPU--')",
-"DELETE FROM settings WHERE value = 'DefaultVideoPlaybackProfile' "
-"   AND data IN ('CPU++', 'CPU+', 'CPU--')",
-"UPDATE displayprofiles SET data = 'ffmpeg' WHERE data = 'libmpeg2'",
-"UPDATE displayprofiles SET data = 'ffmpeg' WHERE data = 'xvmc'",
-"UPDATE displayprofiles SET data = 'xv-blit' WHERE data = 'xvmc-blit'",
-"UPDATE displayprofiles SET data = 'softblend' WHERE data = 'ia44blend'"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1265", dbver))
-            return false;
-    }
-
-    if (dbver == "1265")
-    {
-        DBUpdates updates {
-"ALTER TABLE dtv_multiplex MODIFY COLUMN updatetimestamp "
-"  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;",
-"ALTER TABLE dvdbookmark MODIFY COLUMN `timestamp` "
-"  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;",
-"ALTER TABLE jobqueue MODIFY COLUMN statustime "
-"  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;",
-"ALTER TABLE recorded MODIFY COLUMN lastmodified "
-"  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1266", dbver))
-            return false;
-    }
-
-    if (dbver == "1266")
-    {
-        if (!doUpgradeVideoDatabaseSchema())
-            return false;
-
-        DBUpdates updates {
-"DELETE FROM settings WHERE value = 'mythvideo.DBSchemaVer'"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1267", dbver))
-            return false;
-    }
-
-    if (dbver == "1267")
-    {
-        DBUpdates updates {
-"ALTER TABLE channel MODIFY xmltvid VARCHAR(255) NOT NULL DEFAULT '';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1268", dbver))
-            return false;
-    }
-
-    if (dbver == "1268")
-    {
-
-        DBUpdates updates {
-"DELETE FROM keybindings WHERE action='PREVSOURCE' AND keylist='Ctrl+Y';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1269", dbver))
-            return false;
-    }
-
-    if (dbver == "1269")
-    {
-        DBUpdates updates {
-"DELETE FROM profilegroups WHERE id >= 15;",
-"DELETE FROM recordingprofiles WHERE profilegroup >= 15;",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"INSERT INTO profilegroups SET id = '15', name = 'ASI Recorder (DVEO)',"
-" cardtype = 'ASI', is_default = 1;",
-"INSERT INTO recordingprofiles SET name = \"Default\", profilegroup = 15;",
-"INSERT INTO recordingprofiles SET name = \"Live TV\", profilegroup = 15;",
-"INSERT INTO recordingprofiles SET name = \"High Quality\", profilegroup = 15;",
-"INSERT INTO recordingprofiles SET name = \"Low Quality\", profilegroup = 15;",
-"INSERT INTO profilegroups SET id = '16', name = 'OCUR Recorder (CableLabs)',"
-" cardtype = 'OCUR', is_default = 1;",
-"INSERT INTO recordingprofiles SET name = \"Default\", profilegroup = 16;",
-"INSERT INTO recordingprofiles SET name = \"Live TV\", profilegroup = 16;",
-"INSERT INTO recordingprofiles SET name = \"High Quality\", profilegroup = 16;",
-"INSERT INTO recordingprofiles SET name = \"Low Quality\", profilegroup = 16;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1270", dbver))
-            return false;
-    }
-
-    if (dbver == "1270")
-    {
-        DBUpdates updates {
-"ALTER TABLE oldrecorded ADD future TINYINT(1) NOT NULL DEFAULT 0;",
-"UPDATE oldrecorded SET future=0;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1271", dbver))
-            return false;
-    }
-
-    if (dbver == "1271")
-    {
-        DBUpdates updates {
-"ALTER TABLE recordmatch MODIFY recordid INT UNSIGNED NOT NULL;",
-"ALTER TABLE recordmatch MODIFY chanid INT UNSIGNED NOT NULL;",
-"ALTER TABLE recordmatch MODIFY starttime DATETIME NOT NULL;",
-"ALTER TABLE recordmatch MODIFY manualid INT UNSIGNED NOT NULL;",
-"ALTER TABLE recordmatch ADD INDEX (starttime, chanid);",
-"ALTER TABLE oldrecorded MODIFY generic TINYINT(1) NOT NULL;",
-"ALTER TABLE oldrecorded ADD INDEX (future);",
-"ALTER TABLE oldrecorded ADD INDEX (starttime, chanid);"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1272", dbver))
-            return false;
-    }
-
-    if (dbver == "1272")
-    {
-        DBUpdates updates {
-"DROP INDEX starttime ON recordmatch;",
-"DROP INDEX starttime ON oldrecorded;",
-"ALTER TABLE recordmatch ADD INDEX (chanid, starttime, manualid);",
-"ALTER TABLE oldrecorded ADD INDEX (chanid, starttime);"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1273", dbver))
-            return false;
-    }
-
-    if (dbver == "1273")
-    {
-        DBUpdates updates {
-"ALTER TABLE internetcontent MODIFY COLUMN updated "
-"  DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00';",
-"ALTER TABLE internetcontentarticles MODIFY COLUMN `date` "
-"  DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00';"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1274", dbver))
-            return false;
-    }
-
-    if (dbver == "1274")
-    {
-        DBUpdates updates {
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"UPDATE cardinput SET tunechan=NULL"
-"  WHERE inputname='DVBInput' OR inputname='MPEG2TS';"
-"UPDATE dtv_multiplex SET symbolrate = NULL"
-"  WHERE modulation LIKE 't%' OR modulation LIKE '%t';",
-"UPDATE dtv_multiplex"
-"  SET bandwidth=SUBSTR(modulation,2,1)"
-"  WHERE SUBSTR(modulation,3,3)='qam' OR"
-"        SUBSTR(modulation,3,4)='qpsk';",
-"UPDATE dtv_multiplex"
-"  SET bandwidth=SUBSTR(modulation,5,1)"
-"  WHERE SUBSTR(modulation,1,4)='auto' AND"
-"        LENGTH(modulation)=6;",
-"UPDATE dtv_multiplex SET modulation='auto'"
-"  WHERE modulation LIKE 'auto%';",
-"UPDATE dtv_multiplex SET modulation='qam_16'"
-"  WHERE modulation LIKE '%qam16%';",
-"UPDATE dtv_multiplex SET modulation='qam_32'"
-"  WHERE modulation LIKE '%qam32%';",
-"UPDATE dtv_multiplex SET modulation='qam_64'"
-"  WHERE modulation LIKE '%qam64%';",
-"UPDATE dtv_multiplex SET modulation='qam_128'"
-"  WHERE modulation LIKE '%qam128%';",
-"UPDATE dtv_multiplex SET modulation='qam_256'"
-"  WHERE modulation LIKE '%qam256%';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1275", dbver))
-            return false;
-    }
-
-    if (dbver == "1275")
-    {
-        DBUpdates updates {
-"DROP TABLE IF EXISTS `logging`;",
-"CREATE TABLE `logging` ( "
-"  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, "
-"  `host` varchar(64) NOT NULL, "
-"  `application` varchar(64) NOT NULL, "
-"  `pid` int(11) NOT NULL, "
-"  `thread` varchar(64) NOT NULL, "
-"  `msgtime` datetime NOT NULL, "
-"  `level` int(11) NOT NULL, "
-"  `message` varchar(2048) NOT NULL, "
-"  PRIMARY KEY (`id`), "
-"  KEY `host` (`host`,`application`,`pid`,`msgtime`), "
-"  KEY `msgtime` (`msgtime`), "
-"  KEY `level` (`level`) "
-") ENGINE=MyISAM DEFAULT CHARSET=utf8; "
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1276", dbver))
-            return false;
-    }
-
-    if (dbver == "1276")
-    {
-        DBUpdates updates {
-"ALTER TABLE record ADD COLUMN filter INT UNSIGNED NOT NULL DEFAULT 0;",
-"CREATE TABLE IF NOT EXISTS recordfilter ("
-"    filterid INT UNSIGNED NOT NULL PRIMARY KEY,"
-"    description VARCHAR(64) DEFAULT NULL,"
-"    clause VARCHAR(256) DEFAULT NULL,"
-"    newruledefault TINYINT(1) DEFAULT 0) ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (0, 'New episode', 'program.previouslyshown = 0', 0);",
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (1, 'Identifiable episode', 'program.generic = 0', 0);",
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (2, 'First showing', 'program.first > 0', 0);",
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (3, 'Primetime', 'HOUR(program.starttime) >= 19 AND HOUR(program.starttime) < 23', 0);",
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (4, 'Commercial free', 'channel.commmethod = -2', 0);",
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (5, 'High definition', 'program.hdtv > 0', 0);"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1277", dbver))
-            return false;
-    }
-
-    if (dbver == "1277")
-    {
-        DBUpdates updates {
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"ALTER TABLE record ADD autometadata TINYINT(1) NOT NULL DEFAULT "
-"    0 AFTER autouserjob4;",
-"ALTER TABLE record ADD inetref VARCHAR(40) NOT NULL AFTER programid;",
-"ALTER TABLE record ADD season SMALLINT(5) NOT NULL AFTER description;",
-"ALTER TABLE record ADD episode SMALLINT(5) NOT NULL AFTER season;",
-"ALTER TABLE recorded ADD inetref VARCHAR(40) NOT NULL AFTER programid;",
-"ALTER TABLE recorded ADD season SMALLINT(5) NOT NULL AFTER description;",
-"ALTER TABLE recorded ADD episode SMALLINT(5) NOT NULL AFTER season;",
-"ALTER TABLE oldrecorded ADD inetref VARCHAR(40) NOT NULL AFTER programid;",
-"ALTER TABLE oldrecorded ADD season SMALLINT(5) NOT NULL AFTER description;",
-"ALTER TABLE oldrecorded ADD episode SMALLINT(5) NOT NULL AFTER season;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1278", dbver))
-            return false;
-    }
-
-    if (dbver == "1278")
-    {
-        DBUpdates updates {
-"CREATE TABLE recordedartwork ( "
-"    inetref VARCHAR(255) NOT NULL, "
-"    season SMALLINT(5) NOT NULL, "
-"    host TEXT NOT NULL, "
-"    coverart TEXT NOT NULL, "
-"    fanart TEXT NOT NULL, "
-"    banner TEXT NOT NULL) ENGINE=MyISAM DEFAULT CHARSET=utf8;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1279", dbver))
-            return false;
-    }
-
-    if (dbver == "1279")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1280");
-
-        MSqlQuery select(MSqlQuery::InitCon());
-        // New DBs/hosts will not have a NoPromptOnExit, so they'll get defaults
-        select.prepare("SELECT hostname, data FROM settings "
-                       " WHERE value = 'NoPromptOnExit'");
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve confirm exit values.", select);
-        }
-        else
-        {
-            MSqlQuery update(MSqlQuery::InitCon());
-            while (select.next())
-            {
-                QString hostname = select.value(0).toString();
-                // Yes, enabled NoPromptOnExit meant to prompt on exit
-                QString prompt_on_exit = select.value(1).toString();
-                // Default EXITPROMPT is wrong for all upgrades
-                update.prepare("DELETE FROM keybindings "
-                               " WHERE action = 'EXITPROMPT' "
-                               "   AND context = 'Main Menu' "
-                               "   AND hostname = :HOSTNAME ;");
-                update.bindValue(":HOSTNAME", hostname);
-                if (!update.exec())
-                     MythDB::DBError("Unable to delete EXITPROMPT binding",
-                                     update);
-
-                if ("0" == prompt_on_exit)
-                {
-                    // EXIT is already mapped appropriately, so just create a
-                    // no-keylist mapping for EXITPROMPT to prevent conflict
-                    update.prepare("INSERT INTO keybindings (context, action, "
-                                   "        description, keylist, hostname) "
-                                   "VALUES ('Main Menu', 'EXITPROMPT', '', "
-                                   "        '', :HOSTNAME );");
-                    update.bindValue(":HOSTNAME", hostname);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to create EXITPROMPT binding",
-                                         update);
-                }
-                else
-                {
-                    // EXIT must be changed to EXITPROMPT
-                    update.prepare("UPDATE keybindings "
-                                   "   SET action = 'EXITPROMPT' "
-                                   " WHERE action = 'EXIT' "
-                                   "   AND context = 'Main Menu' "
-                                   "   AND hostname = :HOSTNAME ;");
-                    update.bindValue(":HOSTNAME", hostname);
-                    if (!update.exec())
-                         MythDB::DBError("Unable to update EXITPROMPT binding",
-                                         update);
-                }
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1280", dbver))
-            return false;
-    }
-
-    if (dbver == "1280")
-    {
-        DBUpdates updates {
-"ALTER TABLE program ADD INDEX (subtitle);",
-"ALTER TABLE program ADD INDEX (description(255));",
-"ALTER TABLE oldrecorded ADD INDEX (subtitle);",
-"ALTER TABLE oldrecorded ADD INDEX (description(255));"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1281", dbver))
-            return false;
-    }
-
-    if (dbver == "1281")
-    {
-        DBUpdates updates {
-"ALTER TABLE cardinput ADD changer_device VARCHAR(128) "
-"AFTER externalcommand;",
-"ALTER TABLE cardinput ADD changer_model VARCHAR(128) "
-"AFTER changer_device;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1282", dbver))
-            return false;
-    }
-
-    if (dbver == "1282")
-    {
-        DBUpdates updates {
-"UPDATE settings"
-"   SET data = SUBSTR(data, INSTR(data, 'share/mythtv/metadata')+13)"
-" WHERE value "
-"    IN ('TelevisionGrabber', "
-"        'MovieGrabber', "
-"        'mythgame.MetadataGrabber');"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1283", dbver))
-            return false;
-    }
-
-    if (dbver == "1283")
-    {
-        DBUpdates updates {
-"UPDATE record SET filter = filter | 1 WHERE record.dupin & 0x20",
-"UPDATE record SET filter = filter | 2 WHERE record.dupin & 0x40",
-"UPDATE record SET filter = filter | 5 WHERE record.dupin & 0x80",
-"UPDATE record SET dupin = dupin & ~0xe0",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"INSERT INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (6, 'This Episode', '(program.programid <> '''' AND program.programid = RECTABLE.programid) OR (program.programid = '''' AND program.subtitle = RECTABLE.subtitle AND program.description = RECTABLE.description)', 0);"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1284", dbver))
-            return false;
-    }
-
-    if (dbver == "1284")
-    {
-        DBUpdates updates {
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (6, 'This Episode', '(RECTABLE.programid <> '''' AND program.programid = RECTABLE.programid) OR (RECTABLE.programid = '''' AND program.subtitle = RECTABLE.subtitle AND program.description = RECTABLE.description)', 0);"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1285", dbver))
-            return false;
-    }
-
-    if (dbver == "1285")
-    {
-        DBUpdates updates {
-"DELETE FROM profilegroups WHERE id >= 17;",
-"DELETE FROM recordingprofiles WHERE profilegroup >= 17;",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"INSERT INTO profilegroups SET id = '17', name = 'Ceton Recorder',"
-" cardtype = 'CETON', is_default = 1;",
-"INSERT INTO recordingprofiles SET name = \"Default\", profilegroup = 17;",
-"INSERT INTO recordingprofiles SET name = \"Live TV\", profilegroup = 17;",
-"INSERT INTO recordingprofiles SET name = \"High Quality\", profilegroup = 17;",
-"INSERT INTO recordingprofiles SET name = \"Low Quality\", profilegroup = 17;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1286", dbver))
-            return false;
-    }
-
-    if (dbver == "1286")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1287");
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("SELECT cardid, videodevice "
-                      "FROM capturecard "
-                      "WHERE cardtype='CETON'");
-        if (!query.exec())
-        {
-            LOG(VB_GENERAL, LOG_ERR,
-                "Unable to query capturecard table for upgrade to 1287.");
-            return false;
-        }
-
-        MSqlQuery update(MSqlQuery::InitCon());
-        update.prepare("UPDATE capturecard SET videodevice=:VIDDEV "
-                       "WHERE cardid=:CARDID");
-        while (query.next())
-        {
-            uint cardid = query.value(0).toUInt();
-            QString videodevice = query.value(1).toString();
-            QStringList parts = videodevice.split("-");
-            if (parts.size() != 2)
-            {
-                LOG(VB_GENERAL, LOG_ERR,
-                    "Unable to parse videodevice in upgrade to 1287.");
-                return false;
-            }
-            if (parts[1].contains("."))
-                continue; // already in new format, skip it..
-
-            int input = std::max(parts[1].toInt() - 1, 0);
-            videodevice = parts[0] + QString("-0.%1").arg(input);
-            update.bindValue(":CARDID", cardid);
-            update.bindValue(":VIDDEV", videodevice);
-            if (!update.exec())
-            {
-                LOG(VB_GENERAL, LOG_ERR,
-                    "Failed to update videodevice in upgrade to 1287.");
-                return false;
-            }
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1287", dbver))
-            return false;
-    }
-
-    if (dbver == "1287")
-    {
-        DBUpdates updates {
-"CREATE TABLE IF NOT EXISTS livestream ( "
-"    id INT UNSIGNED AUTO_INCREMENT NOT NULL PRIMARY KEY, "
-"    width INT UNSIGNED NOT NULL, "
-"    height INT UNSIGNED NOT NULL, "
-"    bitrate INT UNSIGNED NOT NULL, "
-"    audiobitrate INT UNSIGNED NOT NULL, "
-"    samplerate INT UNSIGNED NOT NULL, "
-"    audioonlybitrate INT UNSIGNED NOT NULL, "
-"    segmentsize INT UNSIGNED NOT NULL DEFAULT 10, "
-"    maxsegments INT UNSIGNED NOT NULL DEFAULT 0, "
-"    startsegment INT UNSIGNED NOT NULL DEFAULT 0, "
-"    currentsegment INT UNSIGNED NOT NULL DEFAULT 0, "
-"    segmentcount INT UNSIGNED NOT NULL DEFAULT 0, "
-"    percentcomplete INT UNSIGNED NOT NULL DEFAULT 0, "
-"    created DATETIME NOT NULL, "
-"    lastmodified DATETIME NOT NULL, "
-"    relativeurl VARCHAR(512) NOT NULL, "
-"    fullurl VARCHAR(1024) NOT NULL, "
-"    status INT UNSIGNED NOT NULL DEFAULT 0, "
-"    statusmessage VARCHAR(256) NOT NULL, "
-"    sourcefile VARCHAR(512) NOT NULL, "
-"    sourcehost VARCHAR(64) NOT NULL, "
-"    sourcewidth INT UNSIGNED NOT NULL DEFAULT 0, "
-"    sourceheight INT UNSIGNED NOT NULL DEFAULT 0, "
-"    outdir VARCHAR(256) NOT NULL, "
-"    outbase VARCHAR(128) NOT NULL "
-") ENGINE=MyISAM DEFAULT CHARSET=utf8; "
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1288", dbver))
-            return false;
-    }
-
-    if (dbver == "1288")
-    {
-        DBUpdates updates {
-"ALTER TABLE recordedprogram CHANGE COLUMN videoprop videoprop "
-"    SET('HDTV', 'WIDESCREEN', 'AVC', '720', '1080', 'DAMAGED') NOT NULL; "
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1289", dbver))
-            return false;
-    }
-
-    if (dbver == "1289")
-    {
-        DBUpdates updates {
-"DROP TABLE IF EXISTS netvisionrssitems;",
-"DROP TABLE IF EXISTS netvisionsearchgrabbers;",
-"DROP TABLE IF EXISTS netvisionsites;",
-"DROP TABLE IF EXISTS netvisiontreegrabbers;",
-"DROP TABLE IF EXISTS netvisiontreeitems;"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1290", dbver))
-            return false;
-    }
-
-    if (dbver == "1290")
-    {
-        DBUpdates updates {
-"ALTER TABLE logging "
-" ALTER COLUMN host SET DEFAULT '', "
-" ALTER COLUMN application SET DEFAULT '', "
-" ALTER COLUMN pid SET DEFAULT '0', "
-" ALTER COLUMN thread SET DEFAULT '', "
-" ALTER COLUMN level SET DEFAULT '0';",
-"ALTER TABLE logging "
-" ADD COLUMN tid INT(11) NOT NULL DEFAULT '0' AFTER pid, "
-" ADD COLUMN filename VARCHAR(255) NOT NULL DEFAULT '' AFTER thread, "
-" ADD COLUMN line INT(11) NOT NULL DEFAULT '0' AFTER filename, "
-" ADD COLUMN `function` VARCHAR(255) NOT NULL DEFAULT '' AFTER line;"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1291", dbver))
-            return false;
-    }
-
-    if (dbver == "1291")
-    {
-        DBUpdates updates {
-"UPDATE recorded r, recordedprogram rp SET r.duplicate=0 "
-"   WHERE r.chanid=rp.chanid AND r.progstart=rp.starttime AND "
-"      FIND_IN_SET('DAMAGED', rp.videoprop);"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1292", dbver))
-            return false;
-    }
-
-    if (dbver == "1292")
-    {
-        DBUpdates updates {
-"ALTER TABLE cardinput "
-"  ADD COLUMN schedorder INT(10) UNSIGNED NOT NULL DEFAULT '0', "
-"  ADD COLUMN livetvorder INT(10) UNSIGNED NOT NULL DEFAULT '0';",
-"UPDATE cardinput SET schedorder = cardinputid;",
-"UPDATE cardinput SET livetvorder = cardid;"
-};
-
-        if (gCoreContext->GetBoolSetting("LastFreeCard", false))
-        {
-            updates[2] =
-                "UPDATE cardinput SET livetvorder = "
-                "  (SELECT MAX(cardid) FROM capturecard) - cardid + 1;";
-        }
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1293", dbver))
-            return false;
-    }
-
-    if (dbver == "1293")
-    {
-        DBUpdates updates {
-"TRUNCATE TABLE recordmatch",
-"ALTER TABLE recordmatch DROP INDEX recordid",
-"ALTER TABLE recordmatch ADD UNIQUE INDEX (recordid, chanid, starttime)",
-"UPDATE recordfilter SET description='Prime time' WHERE filterid=3",
-"UPDATE recordfilter SET description='This episode' WHERE filterid=6",
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"    VALUES (7, 'This series', '(RECTABLE.seriesid <> '''' AND program.seriesid = RECTABLE.seriesid)', 0);"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1294", dbver))
-            return false;
-    }
-
-    if (dbver == "1294")
-    {
-        DBUpdates updates {
-"CREATE TABLE videocollection ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  title varchar(256) NOT NULL,"
-"  contenttype set('MOVIE', 'TELEVISION', 'ADULT', 'MUSICVIDEO', 'HOMEVIDEO') NOT NULL default '',"
-"  plot text,"
-"  network varchar(128) DEFAULT NULL,"
-"  inetref varchar(128) NOT NULL,"
-"  certification varchar(128) DEFAULT NULL,"
-"  genre int(10) unsigned DEFAULT '0',"
-"  releasedate date DEFAULT NULL,"
-"  language varchar(10) DEFAULT NULL,"
-"  status varchar(64) DEFAULT NULL,"
-"  rating float DEFAULT 0,"
-"  ratingcount int(10) DEFAULT 0,"
-"  runtime smallint(5) unsigned DEFAULT '0',"
-"  banner text,"
-"  fanart text,"
-"  coverart text,"
-"  PRIMARY KEY (intid),"
-"  KEY title (title)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videopathinfo ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  path text,"
-"  contenttype set('MOVIE', 'TELEVISION', 'ADULT', 'MUSICVIDEO', 'HOMEVIDEO') NOT NULL default '',"
-"  collectionref int(10) default '0',"
-"  recurse tinyint(1) default '0',"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"ALTER TABLE videometadata ADD collectionref int(10) NOT NULL DEFAULT '0' AFTER inetref;",
-"ALTER TABLE videometadata ADD playcount int(10) NOT NULL DEFAULT '0' AFTER length;",
-"ALTER TABLE videometadata ADD contenttype set('MOVIE', 'TELEVISION', 'ADULT', 'MUSICVIDEO', 'HOMEVIDEO') NOT NULL default ''",
-"UPDATE videometadata SET contenttype = 'MOVIE';",
-"UPDATE videometadata SET contenttype = 'TELEVISION' WHERE season > 0 OR episode > 0;"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1295", dbver))
-            return false;
-    }
-
-    if (dbver == "1295")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1296");
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("SELECT data, hostname "
-                      "FROM settings "
-                      "WHERE value='BackendServerIP'");
-        if (!query.exec())
-        {
-            LOG(VB_GENERAL, LOG_ERR,
-                "Unable to repair IP addresses for IPv4/IPv6 split.");
-            return false;
-        }
-
-        MSqlQuery update(MSqlQuery::InitCon());
-        MSqlQuery insert(MSqlQuery::InitCon());
-        update.prepare("UPDATE settings "
-                          "SET data=:IP4ADDY "
-                       "WHERE value='BackendServerIP' "
-                      "AND hostname=:HOSTNAME");
-        insert.prepare("INSERT INTO settings "
-                       "SET value='BackendServerIP6',"
-                            "data=:IP6ADDY,"
-                        "hostname=:HOSTNAME");
-        while (query.next())
-        {
-            QHostAddress oldaddr(query.value(0).toString());
-            QString hostname = query.value(1).toString();
-
-            update.bindValue(":HOSTNAME", hostname);
-            insert.bindValue(":HOSTNAME", hostname);
-
-            if (oldaddr.protocol() == QAbstractSocket::IPv6Protocol)
-            {
-                update.bindValue(":IP4ADDY", "127.0.0.1");
-                insert.bindValue(":IP6ADDY", query.value(0).toString());
-            }
-            else if (oldaddr.protocol() == QAbstractSocket::IPv4Protocol)
-            {
-                update.bindValue(":IP4ADDY", query.value(0).toString());
-                insert.bindValue(":IP6ADDY", "::1");
-            }
-            else
-            {
-                update.bindValue(":IP4ADDY", "127.0.0.1");
-                insert.bindValue(":IP6ADDY", "::1");
-                LOG(VB_GENERAL, LOG_CRIT,
-                    QString("Invalid address string '%1' found on %2. "
-                            "Reverting to localhost defaults.")
-                        .arg(query.value(0).toString(), hostname));
-            }
-
-            if (!update.exec() || !insert.exec())
-            {
-                LOG(VB_GENERAL, LOG_ERR, QString("Failed to separate IPv4 "
-                          "and IPv6 addresses for %1").arg(hostname));
-                return false;
-            }
-
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1296", dbver))
-            return false;
-    }
-
-    if (dbver == "1296")
-    {
-        DBUpdates updates {
-"ALTER TABLE videocollection CHANGE inetref collectionref "
-"VARCHAR(128) CHARACTER SET utf8 COLLATE utf8_general_ci "
-"NOT NULL",
-"ALTER TABLE videocollection CHANGE genre genre VARCHAR(128) NULL DEFAULT ''"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1297", dbver))
-            return false;
-    }
-
-    if (dbver == "1297")
-    {
-        DBUpdates updates {
-"ALTER TABLE videometadata CHANGE collectionref collectionref INT(10) "
-"NOT NULL DEFAULT -1",
-"UPDATE videometadata SET collectionref = '-1'"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1298", dbver))
-            return false;
-    }
-
-    if (dbver == "1298")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1299");
-
-        // DeletedMaxAge setting only exists if the user ever triggered the
-        // DeletedExpireOptions TriggeredConfigurationGroup (enabled
-        // AutoExpireInsteadOfDelete) and changed DeletedMaxAge from its
-        // default of zero, so "reset" it to ensure it's in the database before
-        // the update
-        QString deletedMaxAge = gCoreContext->GetSetting("DeletedMaxAge", "0");
-        gCoreContext->SaveSettingOnHost("DeletedMaxAge", deletedMaxAge, nullptr);
-
-        QString queryStr;
-        if (gCoreContext->GetBoolSetting("AutoExpireInsteadOfDelete", false))
-        {
-            queryStr = "UPDATE settings SET data='-1' WHERE "
-                       "value='DeletedMaxAge' AND data='0'";
-        }
-        else
-        {
-            queryStr = "UPDATE settings SET data='0' WHERE "
-                       "value='DeletedMaxAge'";
-        }
-
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare(queryStr);
-        if (!query.exec())
-        {
-            MythDB::DBError("Could not perform update for '1299'", query);
-            return false;
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1299", dbver))
-            return false;
-    }
-
-    if (dbver == "1299")
-    {
-        DBUpdates updates {
-"ALTER TABLE recordmatch ADD COLUMN findid INT NOT NULL DEFAULT 0",
-"ALTER TABLE recordmatch ADD INDEX (recordid, findid)"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1300", dbver))
-            return false;
-    }
-
-    if (dbver == "1300")
-    {
-        DBUpdates updates {
-"ALTER TABLE channel ADD COLUMN iptvid SMALLINT(6) UNSIGNED;",
-"CREATE TABLE iptv_channel ("
-"  iptvid SMALLINT(6) UNSIGNED NOT NULL auto_increment,"
-"  chanid INT(10) UNSIGNED NOT NULL,"
-"  url TEXT NOT NULL,"
-"  type set('data', "
-"           'rfc2733-1','rfc2733-2', "
-"           'rfc5109-1','rfc5109-2', "
-"           'smpte2022-1','smpte2022-2'),"
-"  bitrate INT(10) UNSIGNED NOT NULL,"
-"  PRIMARY KEY (iptvid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1301", dbver))
-            return false;
-    }
-
-    if (dbver == "1301")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1302");
-        // Create the Default recording rule template
-        RecordingRule record;
-        record.MakeTemplate("Default");
-        record.m_type = kTemplateRecord;
-        // Take some defaults from now obsoleted settings.
-        record.m_startOffset =
-            gCoreContext->GetNumSetting("DefaultStartOffset", 0);
-        record.m_endOffset =
-            gCoreContext->GetNumSetting("DefaultEndOffset", 0);
-        record.m_dupMethod =
-            static_cast<RecordingDupMethodType>(
-                gCoreContext->GetNumSetting(
-                    "prefDupMethod", kDupCheckSubDesc));
-        record.m_filter = RecordingRule::GetDefaultFilter();
-        record.m_autoExpire =
-            gCoreContext->GetBoolSetting("AutoExpireDefault", false);
-        record.m_autoCommFlag =
-            gCoreContext->GetBoolSetting("AutoCommercialFlag", true);
-        record.m_autoTranscode =
-            gCoreContext->GetBoolSetting("AutoTranscode", false);
-        record.m_transcoder =
-            gCoreContext->GetNumSetting(
-                "DefaultTranscoder", static_cast<int>(RecordingProfile::kTranscoderAutodetect));
-        record.m_autoUserJob1 =
-            gCoreContext->GetBoolSetting("AutoRunUserJob1", false);
-        record.m_autoUserJob2 =
-            gCoreContext->GetBoolSetting("AutoRunUserJob2", false);
-        record.m_autoUserJob3 =
-            gCoreContext->GetBoolSetting("AutoRunUserJob3", false);
-        record.m_autoUserJob4 =
-            gCoreContext->GetBoolSetting("AutoRunUserJob4", false);
-        record.m_autoMetadataLookup =
-            gCoreContext->GetBoolSetting("AutoMetadataLookup", true);
-        record.Save(false);
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1302", dbver))
-            return false;
-    }
-
-    if (dbver == "1302")
-    {
-        QDateTime loc = QDateTime::currentDateTime();
-        QDateTime utc = loc.toUTC();
-        loc = QDateTime(loc.date(), loc.time(), Qt::UTC);
-        int utc_offset = loc.secsTo(utc) / 60;
-
-        QList<QByteArray> updates_ba;
-
-        // Convert DATE and TIME in record into DATETIME
-        const std::array<const std::string,2> pre_sql {
-            "CREATE TEMPORARY TABLE recordupdate ("
-            "recid INT, starttime DATETIME, endtime DATETIME)",
-            "INSERT INTO recordupdate (recid, starttime, endtime) "
-            "SELECT recordid, "
-            "       CONCAT(startdate, ' ', starttime), "
-            "       CONCAT(enddate, ' ', endtime) FROM record",
-        };
-        std::transform(pre_sql.cbegin(), pre_sql.cend(),
-                       std::back_inserter(updates_ba), ss2ba);
-
-        // Convert various DATETIME fields from local time to UTC
-        if (0 != utc_offset)
-        {
-            const std::array<const std::string,4> with_endtime {
-                "program", "recorded", "oldrecorded", "recordupdate",
-            };
-            const std::array<const std::string,4> without_endtime {
-                "programgenres", "programrating", "credits",
-                "jobqueue",
-            };
-            order = (utc_offset > 0) ? "-starttime" : "starttime";
-            std::transform(with_endtime.cbegin(), with_endtime.cend(),
-                           std::back_inserter(updates_ba), add_start_end);
-            std::transform(without_endtime.cbegin(), without_endtime.cend(),
-                           std::back_inserter(updates_ba), add_start);
-
-            updates_ba.push_back(
-                         QString("UPDATE oldprogram "
-                                 "SET airdate = "
-                                 "    CONVERT_TZ(airdate, 'SYSTEM', 'Etc/UTC') "
-                                 "ORDER BY %3")
-                         .arg((utc_offset > 0) ? "-airdate" :
-                              "airdate").toLocal8Bit());
-
-            updates_ba.push_back(
-                         QString("UPDATE recorded "
-                                 "set progstart = "
-                                 "    CONVERT_TZ(progstart, 'SYSTEM', 'Etc/UTC'), "
-                                 "    progend   = "
-                                 "    CONVERT_TZ(progend, 'SYSTEM', 'Etc/UTC') ")
-                         .toLocal8Bit());
-        }
-
-        // Convert DATETIME back to separate DATE and TIME in record table
-        const std::array<const std::string,2> post_sql {
-            "UPDATE record, recordupdate "
-            "SET record.startdate = DATE(recordupdate.starttime), "
-            "    record.starttime = TIME(recordupdate.starttime), "
-            "    record.enddate = DATE(recordupdate.endtime), "
-            "    record.endtime = TIME(recordupdate.endtime), "
-            "    record.last_record = "
-            "        CONVERT_TZ(last_record, 'SYSTEM', 'Etc/UTC'), "
-            "    record.last_delete = "
-            "        CONVERT_TZ(last_delete, 'SYSTEM', 'Etc/UTC') "
-            "WHERE recordid = recid",
-            "DROP TABLE recordupdate",
-        };
-
-        std::transform(post_sql.cbegin(), post_sql.cend(),
-                       std::back_inserter(updates_ba), ss2ba);
-
-        // Convert update ByteArrays to NULL terminated char**
-        DBUpdates updates;
-        std::transform(updates_ba.cbegin(), updates_ba.cend(),
-                       std::back_inserter(updates), qs2ba);
-
-        // do the actual update
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1303", dbver))
-            return false;
-    }
-
-    if (dbver == "1303")
-    {
-        QDateTime loc = QDateTime::currentDateTime();
-        QDateTime utc = loc.toUTC();
-        loc = QDateTime(loc.date(), loc.time(), Qt::UTC);
-        int utc_offset = loc.secsTo(utc) / 60;
-
-        QList<QByteArray> updates_ba;
-
-        // Convert various DATETIME fields from local time to UTC
-        if (0 != utc_offset)
-        {
-            const std::array<const std::string,1> with_endtime = {
-                "recordedprogram",
-            };
-            const std::array<const std::string,4> without_endtime = {
-                "recordedseek", "recordedmarkup", "recordedrating",
-                "recordedcredits",
-            };
-            order = (utc_offset > 0) ? "-starttime" : "starttime";
-            std::transform(with_endtime.cbegin(), with_endtime.cend(),
-                           std::back_inserter(updates_ba), add_start_end);
-            std::transform(without_endtime.cbegin(), without_endtime.cend(),
-                           std::back_inserter(updates_ba), add_start);
-        }
-
-        // Convert update ByteArrays to NULL terminated char**
-        DBUpdates updates;
-        std::transform(updates_ba.cbegin(), updates_ba.cend(),
-                       std::back_inserter(updates), qs2ba);
-
-        // do the actual update
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1304", dbver))
-            return false;
-    }
-
-    if (dbver == "1304")
-    {
-        QList<QByteArray> updates_ba;
-
-        updates_ba.push_back(
-"UPDATE recordfilter SET clause="
-"'HOUR(CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM'')) >= 19 AND "
-"HOUR(CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM'')) < 22' "
-"WHERE filterid=3");
-
-        updates_ba.push_back(QString(
-"UPDATE record SET findday = "
-"    DAYOFWEEK(CONVERT_TZ(ADDTIME('2012-06-02 00:00:00', findtime), "
-"                         'SYSTEM', 'Etc/UTC') + INTERVAL findday DAY) "
-"WHERE findday > 0").toLocal8Bit());
-
-        updates_ba.push_back(QString(
-"UPDATE record SET findtime = "
-"    TIME(CONVERT_TZ(ADDTIME('2012-06-02 00:00:00', findtime), "
-"                    'SYSTEM', 'Etc/UTC')) ")
-                             .toLocal8Bit());
-
-        // Convert update ByteArrays to NULL terminated char**
-        DBUpdates updates;
-        std::transform(updates_ba.cbegin(), updates_ba.cend(),
-                       std::back_inserter(updates), qs2ba);
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1305", dbver))
-            return false;
-    }
-
-    if (dbver == "1305")
-    {
-        // Reverse the findday/findtime changes from above since those
-        // values need to be kept in local time.
-
-        QList<QByteArray> updates_ba;
-
-        updates_ba.push_back(QString(
-"UPDATE record SET findday = "
-"    DAYOFWEEK(CONVERT_TZ(ADDTIME('2012-06-02 00:00:00', findtime), "
-"                         'Etc/UTC', 'SYSTEM') + INTERVAL findday DAY) "
-"WHERE findday > 0").toLocal8Bit());
-
-        updates_ba.push_back(QString(
-"UPDATE record SET findtime = "
-"    TIME(CONVERT_TZ(ADDTIME('2012-06-02 00:00:00', findtime), "
-"                    'Etc/UTC', 'SYSTEM')) ").toLocal8Bit());
-
-        // Convert update ByteArrays to NULL terminated char**
-        DBUpdates updates;
-        std::transform(updates_ba.cbegin(), updates_ba.cend(),
-                       std::back_inserter(updates), qs2ba);
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1306", dbver))
-            return false;
-    }
-
-    if (dbver == "1306")
-    {
-        // staging temporary tables to use with rewritten file scanner
-        // due to be replaced by finalized RecordedFile changes
-
-        DBUpdates updates {
-"CREATE TABLE scannerfile ("
-"  `fileid`         BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,"
-"  `filesize`       BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,"
-"  `filehash`       VARCHAR(64) NOT NULL DEFAULT '',"
-"  `added`          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-"  PRIMARY KEY (`fileid`),"
-"  UNIQUE KEY filehash (`filehash`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE scannerpath ("
-"  `fileid`         BIGINT(20) UNSIGNED NOT NULL,"
-"  `hostname`       VARCHAR(64) NOT NULL DEFAULT 'localhost',"
-"  `storagegroup`   VARCHAR(32) NOT NULL DEFAULT 'Default',"
-"  `filename`       VARCHAR(255) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (`fileid`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videopart ("
-"  `fileid`         BIGINT(20) UNSIGNED NOT NULL,"
-"  `videoid`        INT(10) UNSIGNED NOT NULL,"
-"  `order`          SMALLINT UNSIGNED NOT NULL DEFAULT 1,"
-"  PRIMARY KEY `part` (`videoid`, `order`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;"
-};
-
-// removed "UNIQUE KEY path (`storagegroup`, `hostname`, `filename`)" from
-// scannerpath as a quick fix for key length constraints
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1307", dbver))
-            return false;
-    }
-
-    if (dbver == "1307")
-    {
-        DBUpdates updates {
-"ALTER TABLE channel MODIFY COLUMN icon varchar(255) NOT NULL DEFAULT '';",
-"UPDATE channel SET icon='' WHERE icon='none';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1308", dbver))
-            return false;
-    }
-
-    if (dbver == "1308")
-    {
-        DBUpdates updates {
-// Add this time filter
-// NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"  VALUES (8, 'This time', 'ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ("
-"  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), ''Etc/UTC'', ''SYSTEM''), "
-"  CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM''))) MOD 1440 <= 10', 0)",
-// Add this day and time filter
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"  VALUES (9, 'This day and time', 'ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ("
-"  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), ''Etc/UTC'', ''SYSTEM''), "
-"  CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM''))) MOD 10080 <= 10', 0)",
-// Convert old, normal Timeslot rules to Channel with time filter
-"UPDATE record SET type = 3, filter = filter|256 "
-"  WHERE type = 2 AND search = 0",
-// Convert old, normal Weekslot rules to Channel with day and time filter
-"UPDATE record SET type = 3, filter = filter|512 "
-"  WHERE type = 5 AND search = 0",
-// Convert old, normal find daily to new, power search, find daily
-"UPDATE record SET type = 2, search = 1, chanid = 0, station = '', "
-"  subtitle = '', description = CONCAT('program.title = ''', "
-"  REPLACE(title, '''', ''''''), ''''), "
-"  title = CONCAT(title, ' (Power Search)') WHERE type = 9 AND search = 0",
-// Convert old, normal find weekly to new, power search, find weekly
-"UPDATE record SET type = 5, search = 1, chanid = 0, station = '', "
-"  subtitle = '', description = CONCAT('program.title = ''', "
-"  REPLACE(title, '''', ''''''), ''''), "
-"  title = CONCAT(title, ' (Power Search)') WHERE type = 10 AND search = 0",
-// Convert old, find daily to new, find daily
-"UPDATE record SET type = 2 WHERE type = 9",
-// Convert old, find weekly to new, find weekly
-"UPDATE record SET type = 5 WHERE type = 10"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1309", dbver))
-            return false;
-    }
-
-    if (dbver == "1309")
-    {
-        DBUpdates updates {
-// Add this channel filter
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"  VALUES (10, 'This channel', 'channel.callsign = RECTABLE.station', 0)",
-// Convert old, Channel rules to All with channel filter
-"UPDATE record SET type = 4, filter = filter|1024 WHERE type = 3"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1310", dbver))
-            return false;
-    }
-
-    if (dbver == "1310")
-    {
-        DBUpdates updates {
-// Move old table temporarily
-"RENAME TABLE `housekeeping` TO `oldhousekeeping`;",
-// Create new table in its place
-"CREATE TABLE `housekeeping` ("
-"  `tag`        VARCHAR(64) NOT NULL,"
-"  `hostname`   VARCHAR(64),"
-"  `lastrun`    DATETIME,"
-"  UNIQUE KEY `task` (`tag`, `hostname`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-// Migrate old data over
-"INSERT INTO `housekeeping` (`tag`, `hostname`, `lastrun`)"
-"   SELECT SUBSTRING_INDEX(`tag`, '-', 1) AS `tag`,"
-"          IF(LOCATE('-', `tag`) > 0,"
-"             SUBSTRING(`tag` FROM LENGTH(SUBSTRING_INDEX(`tag`, '-', 1)) +2),"
-"             NULL) AS `hostname`,"
-"          `lastrun`"
-"     FROM `oldhousekeeping`;",
-// Delete old data
-"DROP TABLE `oldhousekeeping`;"
-};
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1311", dbver))
-            return false;
-    }
-
-    if (dbver == "1311")
-    {
-        DBUpdates updates {
-// Create a global enable/disable instead of one per-host
-// Any hosts previously running it mean all hosts do now
-"INSERT INTO `settings` (`value`, `hostname`, `data`)"
-"   SELECT 'HardwareProfileEnabled',"
-"          NULL,"
-"          IF((SELECT COUNT(1)"
-"                FROM `settings`"
-"               WHERE `value` = 'HardwareProfileLastUpdated' > 0),"
-"             1, 0);",
-// Create 'lastrun' times using existing data in settings
-"INSERT INTO `housekeeping` (`tag`, `hostname`, `lastrun`)"
-"   SELECT 'HardwareProfiler',"
-"          `hostname`,"
-"          `data`"
-"     FROM `settings`"
-"    WHERE `value` = 'HardwareProfileLastUpdated';",
-// Clear out old settings
-"DELETE FROM `settings` WHERE `value` = 'HardwareProfileLastUpdated';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1312", dbver))
-            return false;
-    }
-
-    if (dbver == "1312")
-    {
-        DBUpdates updates {
-// DVD bookmark updates
-"DELETE FROM `dvdbookmark` WHERE `framenum` = 0;",
-"ALTER TABLE dvdbookmark ADD COLUMN dvdstate varchar(1024) NOT NULL DEFAULT '';"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1313", dbver))
-            return false;
-    }
-
-    if (dbver == "1313")
-    {
-        // Make sure channel timeouts are long enough.  No actual
-        // schema change.
-        DBUpdates updates {
-            // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-            "UPDATE capturecard SET channel_timeout = 3000 WHERE "
-            "cardtype = \"DVB\" AND channel_timeout < 3000;",
-            "UPDATE capturecard SET channel_timeout = 30000 WHERE "
-            "cardtype = \"FREEBOX\" AND channel_timeout < 30000;",
-            "UPDATE capturecard SET channel_timeout = 9000 WHERE "
-            "cardtype = \"FIREWIRE\" AND channel_timeout < 9000;",
-            "UPDATE capturecard SET channel_timeout = 3000 WHERE "
-            "cardtype = \"HDHOMERUN\" AND channel_timeout < 3000;",
-            "UPDATE capturecard SET channel_timeout = 15000 WHERE "
-            "cardtype = \"HDPVR\" AND channel_timeout < 15000;",
-            "UPDATE capturecard SET channel_timeout = 12000 WHERE "
-            "cardtype = \"MPEG\" AND channel_timeout < 12000;"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1314", dbver))
-            return false;
-    }
-
-    if (dbver == "1314")
-    {
-        // Migrate users from tmdb.py to tmdb3.py
-        // The web interface tmdb.py uses will be shut down 2013-09-15
-        DBUpdates updates {
-            "UPDATE settings SET data=REPLACE(data, 'tmdb.py', 'tmdb3.py') "
-             "WHERE value='MovieGrabber'"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1315", dbver))
-            return false;
-    }
-
-    if (dbver == "1315")
-    {
-        DBUpdates updates {
-"ALTER TABLE program ADD INDEX title_subtitle_start (title, subtitle, starttime);",
-"ALTER TABLE program DROP INDEX title;"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1316", dbver))
-            return false;
-    }
-
-    if (dbver == "1316")
-    {
-        DBUpdates updates {
-// adjust programid type in various tables to match the program table
-"ALTER TABLE oldrecorded CHANGE COLUMN programid programid varchar(64);",
-"ALTER TABLE oldrecorded CHANGE COLUMN seriesid seriesid varchar(64);",
-"ALTER TABLE record CHANGE COLUMN programid programid varchar(64);",
-"ALTER TABLE record CHANGE COLUMN seriesid seriesid varchar(64);",
-"ALTER TABLE recorded CHANGE COLUMN programid programid varchar(64);",
-"ALTER TABLE recorded CHANGE COLUMN seriesid seriesid varchar(64);",
-"ALTER TABLE recordedprogram CHANGE COLUMN programid programid varchar(64);",
-"ALTER TABLE recordedprogram CHANGE COLUMN seriesid seriesid varchar(64);"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1317", dbver))
-            return false;
-    }
-
-    if (dbver == "1317")
-    {
-        DBUpdates updates {
-            "CREATE TABLE IF NOT EXISTS gallery_directories ("
-            "  dir_id       INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,"
-            "  filename     VARCHAR(255) NOT NULL,"
-            "  name         VARCHAR(255) NOT NULL,"
-            "  path         VARCHAR(255) NOT NULL,"
-            "  parent_id    INT(11) NOT NULL,"
-            "  dir_count    INT(11) NOT NULL DEFAULT '0',"
-            "  file_count   INT(11) NOT NULL DEFAULT '0',"
-            "  hidden       TINYINT(1) NOT NULL DEFAULT '0'"
-            ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            "CREATE TABLE IF NOT EXISTS gallery_files ("
-            "  file_id      INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,"
-            "  filename     VARCHAR(255) NOT NULL,"
-            "  name         VARCHAR(255) NOT NULL,"
-            "  path         VARCHAR(255) NOT NULL,"
-            "  dir_id       INT(11) NOT NULL DEFAULT '0',"
-            "  type         INT(11) NOT NULL DEFAULT '0',"
-            "  modtime      INT(11) NOT NULL DEFAULT '0',"
-            "  size         INT(11) NOT NULL DEFAULT '0',"
-            "  extension    VARCHAR(255) NOT NULL,"
-            "  angle        INT(11) NOT NULL DEFAULT '0',"
-            "  date         INT(11) NOT NULL DEFAULT '0',"
-            "  zoom         INT(11) NOT NULL DEFAULT '0',"
-            "  hidden       TINYINT(1) NOT NULL DEFAULT '0',"
-            "  orientation  INT(11) NOT NULL DEFAULT '0'"
-            ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            "INSERT INTO settings VALUES ('ImageStorageGroupName', 'Images', NULL);",
-            "INSERT INTO settings VALUES ('ImageSortOrder', 0, NULL);",
-            "INSERT INTO settings VALUES ('ImageShowHiddenFiles', 0, NULL);",
-            "INSERT INTO settings VALUES ('ImageSlideShowTime', 3500, NULL);",
-            "INSERT INTO settings VALUES ('ImageTransitionType', 1, NULL);",
-            "INSERT INTO settings VALUES ('ImageTransitionTime', 1000, NULL);"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1318", dbver))
-            return false;
-    }
-
-    if (dbver == "1318")
-    {
-        DBUpdates updates {
-            "ALTER TABLE program "
-            " ADD COLUMN season INT(4) NOT NULL DEFAULT '0', "
-            " ADD COLUMN episode INT(4) NOT NULL DEFAULT '0';",
-            "ALTER TABLE recordedprogram "
-            " ADD COLUMN season INT(4) NOT NULL DEFAULT '0', "
-            " ADD COLUMN episode INT(4) NOT NULL DEFAULT '0';"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1319", dbver))
-            return false;
-    }
-
-    if (dbver == "1319")
-    {
-        // Total number of episodes in the series (season)
-        DBUpdates updates {
-            "ALTER TABLE program "
-            " ADD COLUMN totalepisodes INT(4) NOT NULL DEFAULT '0';",
-            "ALTER TABLE recordedprogram "
-            " ADD COLUMN totalepisodes INT(4) NOT NULL DEFAULT '0';"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1320", dbver))
-            return false;
-    }
-
-    if (dbver == "1320")
-    {
-        DBUpdates updates {
-            "CREATE TABLE IF NOT EXISTS recgroups ("
-                "recgroupid  SMALLINT(4) NOT NULL AUTO_INCREMENT, "
-                "recgroup    VARCHAR(64) NOT NULL DEFAULT '', "
-                "displayname VARCHAR(64) NOT NULL DEFAULT '', "
-                "password    VARCHAR(40) NOT NULL DEFAULT '', "
-                "special     TINYINT(1) NOT NULL DEFAULT '0',"
-                "PRIMARY KEY (recgroupid), "
-                "UNIQUE KEY recgroup ( recgroup )"
-                ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            // Create the built-in, 'special', groups
-            "INSERT INTO recgroups ( recgroupid, recgroup, special ) VALUES ( 1, 'Default', '1' );",
-            "INSERT INTO recgroups ( recgroupid, recgroup, special ) VALUES ( 2, 'LiveTV', '1' );",
-            "INSERT INTO recgroups ( recgroupid, recgroup, special ) VALUES ( 3, 'Deleted', '1' );",
-            // Copy in the passwords for the built-in groups
-            "DELETE FROM recgrouppassword WHERE password = '';",
-            "UPDATE recgroups r, recgrouppassword p SET r.password = p.password WHERE r.recgroup = p.recgroup;",
-            // Copy over all existing recording groups, this information may be split over three tables!
-            "INSERT IGNORE INTO recgroups ( recgroup, displayname, password ) SELECT DISTINCT recgroup, recgroup, password FROM recgrouppassword;",
-            "INSERT IGNORE INTO recgroups ( recgroup, displayname ) SELECT DISTINCT recgroup, recgroup FROM record;",
-            "INSERT IGNORE INTO recgroups ( recgroup, displayname ) SELECT DISTINCT recgroup, recgroup FROM recorded;",
-            // Create recgroupid columns in record and recorded tables
-            "ALTER TABLE record ADD COLUMN recgroupid SMALLINT(4) NOT NULL DEFAULT '1', ADD INDEX ( recgroupid );",
-            "ALTER TABLE recorded ADD COLUMN recgroupid SMALLINT(4) NOT NULL DEFAULT '1', ADD INDEX ( recgroupid );",
-            // Populate those columns with the corresponding recgroupid from the new recgroups table
-            "UPDATE recorded, recgroups SET recorded.recgroupid = recgroups.recgroupid WHERE recorded.recgroup = recgroups.recgroup;",
-            "UPDATE record, recgroups SET record.recgroupid = recgroups.recgroupid WHERE record.recgroup = recgroups.recgroup;"
-        };
-
-
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1321", dbver))
-            return false;
-    }
-
-    if (dbver == "1321")
-    {
-        DBUpdates updates {
-            "ALTER TABLE `housekeeping` ADD COLUMN `lastsuccess` DATETIME;",
-            "UPDATE `housekeeping` SET `lastsuccess`=`lastrun`;"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1322", dbver))
-            return false;
-    }
-
-    if (dbver == "1322")
-    {
-        DBUpdates updates {
-        // add inetref to (recorded)program before season/episode
-            // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-            "ALTER TABLE program "
-            " ADD COLUMN inetref varchar(40) DEFAULT '' AFTER videoprop;",
-            "ALTER TABLE recordedprogram "
-            " ADD COLUMN inetref varchar(40) DEFAULT '' AFTER videoprop;",
-            "DELETE FROM settings WHERE value='DefaultStartOffset';",
-            "DELETE FROM settings WHERE value='DefaultEndOffset';",
-            "DELETE FROM settings WHERE value='AutoExpireDefault';",
-            "DELETE FROM settings WHERE value='AutoCommercialFlag';",
-            "DELETE FROM settings WHERE value='AutoTranscode';",
-            "DELETE FROM settings WHERE value='DefaultTranscoder';",
-            "DELETE FROM settings WHERE value='AutoRunUserJob1';",
-            "DELETE FROM settings WHERE value='AutoRunUserJob2';",
-            "DELETE FROM settings WHERE value='AutoRunUserJob3';",
-            "DELETE FROM settings WHERE value='AutoRunUserJob4';",
-            "DELETE FROM settings WHERE value='AutoMetadataLookup';",
-            "DELETE FROM housekeeping WHERE tag='DailyCleanup';",
-            "DELETE FROM housekeeping WHERE tag='ThemeChooserInfoCacheUpdate';"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1323", dbver))
-            return false;
-    }
-
-    if (dbver == "1323")
-    {
-        DBUpdates updates {
-        // add columns for Unicable related configuration data, see #9726
-            "ALTER TABLE diseqc_tree "
-            " ADD COLUMN scr_userband INTEGER UNSIGNED NOT NULL DEFAULT 0 AFTER address, "
-            " ADD COLUMN scr_frequency INTEGER UNSIGNED NOT NULL DEFAULT 1400 AFTER scr_userband, "
-            " ADD COLUMN scr_pin INTEGER  NOT NULL DEFAULT '-1' AFTER scr_frequency;"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1324", dbver))
-            return false;
-    }
-
-    if (dbver == "1324")
-    {
-        DBUpdates updates {
-            "ALTER TABLE recorded "
-            " DROP PRIMARY KEY, "
-            " ADD recordedid INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, "
-            " ADD UNIQUE KEY (chanid, starttime) ;"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1325", dbver))
-            return false;
-    }
-
-    if (dbver == "1325")
-    {
-        DBUpdates updates {
-            "ALTER TABLE recorded ADD inputname VARCHAR(32);"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1326", dbver))
-            return false;
-    }
-
-    if (dbver == "1326")
-    {
-        DBUpdates updates {
-// Add this time filter
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"  VALUES (8, 'This time', 'ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ("
-"  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), ''Etc/UTC'', ''SYSTEM''), "
-"  CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM''))) MOD 1440 "
-"  NOT BETWEEN 11 AND 1429', 0)",
-// Add this day and time filter
-"REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-"  VALUES (9, 'This day and time', 'ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ("
-"  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), ''Etc/UTC'', ''SYSTEM''), "
-"  CONVERT_TZ(program.starttime, ''Etc/UTC'', ''SYSTEM''))) MOD 10080 "
-"  NOT BETWEEN 11 AND 10069', 0)"
-};
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1327", dbver))
-            return false;
-    }
-
-    if (dbver == "1327")
-    {
-        DBUpdates updates {
-            "DELETE r1 FROM record r1, record r2 "
-            "  WHERE r1.chanid = r2.chanid AND "
-            "        r1.starttime = r2.starttime AND "
-            "        r1.startdate = r2.startdate AND "
-            "        r1.title = r2.title AND "
-            "        r1.type = r2.type AND "
-            "        r1.recordid > r2.recordid",
-            "ALTER TABLE record DROP INDEX chanid",
-            "ALTER TABLE record ADD UNIQUE INDEX "
-            " (chanid, starttime, startdate, title, type)"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1328", dbver))
-            return false;
-    }
-
-    if (dbver == "1328")
-    {
-        DBUpdates updates {
-            "ALTER TABLE recordedfile "
-            "DROP KEY `chanid`, "
-            "DROP COLUMN `chanid`, "
-            "DROP COLUMN `starttime`;",
-            "ALTER TABLE recordedfile "
-            "ADD COLUMN recordedid int(10) unsigned NOT NULL, "
-            "ADD UNIQUE KEY `recordedid` (recordedid);",
-            "ALTER TABLE recordedfile "
-            "CHANGE audio_type audio_codec varchar(255) NOT NULL DEFAULT '';"
-            "ALTER TABLE recordedfile "
-            "CHANGE video_type video_codec varchar(255) NOT NULL DEFAULT '';"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1329", dbver))
-            return false;
-    }
-
-    if (dbver == "1329")
-    {
-        DBUpdates updates {
-            "ALTER TABLE recordedfile "
-            "DROP COLUMN audio_bits_per_sample ;", // Instead create two columns for avg and max bitrates
-            "ALTER TABLE recordedfile "
-            "ADD COLUMN container VARCHAR(255) NOT NULL DEFAULT '', "
-            "ADD COLUMN total_bitrate MEDIUMINT UNSIGNED NOT NULL DEFAULT 0, " // Kbps
-            "ADD COLUMN video_avg_bitrate MEDIUMINT UNSIGNED NOT NULL DEFAULT 0, " // Kbps
-            "ADD COLUMN video_max_bitrate MEDIUMINT UNSIGNED NOT NULL DEFAULT 0, " // Kbps
-            "ADD COLUMN audio_avg_bitrate MEDIUMINT UNSIGNED NOT NULL DEFAULT 0, " // Kbps
-            "ADD COLUMN audio_max_bitrate MEDIUMINT UNSIGNED NOT NULL DEFAULT 0 ;" // Kbps
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1330", dbver))
-            return false;
-    }
-
-    if (dbver == "1330")
-    {
-        MSqlQuery query(MSqlQuery::InitCon());
-        query.prepare("SELECT recordedid FROM recorded");
-        query.exec();
-        while (query.next())
-        {
-            int recordingID = query.value(0).toInt();
-            auto *recInfo = new RecordingInfo(recordingID);
-            RecordingFile *recFile = recInfo->GetRecordingFile();
-            recFile->m_fileName = recInfo->GetBasename();
-            recFile->m_fileSize = recInfo->GetFilesize();
-            recFile->m_storageGroup = recInfo->GetStorageGroup();
-            recFile->m_storageDeviceID = recInfo->GetHostname();
-            switch (recInfo->QueryAverageAspectRatio())
-            {
-                case MARK_ASPECT_1_1 :
-                    recFile->m_videoAspectRatio = 1.0;
-                    break;
-                case MARK_ASPECT_4_3:
-                    recFile->m_videoAspectRatio = 1.33333333333;
-                    break;
-                case MARK_ASPECT_16_9:
-                    recFile->m_videoAspectRatio = 1.77777777777;
-                    break;
-                case MARK_ASPECT_2_21_1:
-                    recFile->m_videoAspectRatio = 2.21;
-                    break;
-                default:
-                    break;
-            }
-            QSize resolution(recInfo->QueryAverageWidth(),
-                            recInfo->QueryAverageHeight());
-            recFile->m_videoResolution = resolution;
-            recFile->m_videoFrameRate = (double)recInfo->QueryAverageFrameRate() / 1000.0;
-            recFile->Save();
-            delete recInfo;
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1331", dbver))
-            return false;
-    }
-
-    if (dbver == "1331")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1332");
-        MSqlQuery select(MSqlQuery::InitCon());
-        MSqlQuery update(MSqlQuery::InitCon());
-
-        // Find all second or higher inputs using the same card.
-        select.prepare("SELECT DISTINCT i1.cardid, i1.cardinputid "
-                       "FROM cardinput i1, cardinput i2 "
-                       "WHERE i1.cardid = i2.cardid AND "
-                       "       i1.cardinputid > i2.cardinputid "
-                       "ORDER BY i1.cardid, i1.cardinputid");
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve cardinputids.", select);
-            return false;
-        }
-
-        while (select.next())
-        {
-            int cardid = select.value(0).toInt();
-            int inputid = select.value(1).toInt();
-
-            // Create a new card for this input.
-            update.prepare("INSERT INTO capturecard "
-                           "     ( videodevice, audiodevice, vbidevice, "
-                           "       cardtype, defaultinput, audioratelimit, "
-                           "       hostname, dvb_swfilter, dvb_sat_type, "
-                           "       dvb_wait_for_seqstart, skipbtaudio, "
-                           "       dvb_on_demand, dvb_diseqc_type, "
-                           "       firewire_speed, firewire_model, "
-                           "       firewire_connection, signal_timeout, "
-                           "       channel_timeout, dvb_tuning_delay, "
-                           "       contrast, brightness, colour, hue, "
-                           "       diseqcid, dvb_eitscan ) "
-                           "SELECT videodevice, audiodevice, vbidevice, "
-                           "       cardtype, defaultinput, audioratelimit, "
-                           "       hostname, dvb_swfilter, dvb_sat_type, "
-                           "       dvb_wait_for_seqstart, skipbtaudio, "
-                           "       dvb_on_demand, dvb_diseqc_type, "
-                           "       firewire_speed, firewire_model, "
-                           "       firewire_connection, signal_timeout, "
-                           "       channel_timeout, dvb_tuning_delay, "
-                           "       contrast, brightness, colour, hue, "
-                           "       diseqcid, dvb_eitscan "
-                           "FROM capturecard c "
-                           "WHERE c.cardid = :CARDID");
-            update.bindValue(":CARDID", cardid);
-            if (!update.exec())
-            {
-                MythDB::DBError("Unable to insert new card.", update);
-                return false;
-            }
-            int newcardid = update.lastInsertId().toInt();
-
-            // Now attach the input to the new card.
-            update.prepare("UPDATE cardinput "
-                           "SET cardid = :NEWCARDID "
-                           "WHERE cardinputid = :INPUTID");
-            update.bindValue(":NEWCARDID", newcardid);
-            update.bindValue(":INPUTID", inputid);
-            if (!update.exec())
-            {
-                MythDB::DBError("Unable to update input.", update);
-                return false;
-            }
-        }
-
-        DBUpdates updates {
-            // Delete old, automatically created inputgroups.
-            "DELETE FROM inputgroup WHERE inputgroupname LIKE 'DVB_%'",
-            "DELETE FROM inputgroup WHERE inputgroupname LIKE 'CETON_%'",
-            "DELETE FROM inputgroup WHERE inputgroupname LIKE 'HDHOMERUN_%'",
-            // Increase the size of inputgroup.inputgroupname.
-            // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-            "ALTER TABLE inputgroup "
-            "    MODIFY COLUMN inputgroupname VARCHAR(48)",
-            // Rename remaining inputgroups to have 'user:' prefix.
-            "UPDATE inputgroup "
-            "    SET inputgroupname = CONCAT('user:', inputgroupname)",
-            // Change inputgroup.inputid to equal cardid.
-            "UPDATE inputgroup ig "
-            "    JOIN cardinput i ON ig.cardinputid = i.cardinputid "
-            "    SET ig.cardinputid = i.cardid",
-            // Change record.prefinput to equal cardid.
-            "UPDATE record r "
-            "    JOIN cardinput i ON r.prefinput = i.cardinputid "
-            "    SET r.prefinput = i.cardid",
-            // Change diseqc_config.cardinputid to equal cardid.
-            "UPDATE diseqc_config dc "
-            "    JOIN cardinput i ON dc.cardinputid = i.cardinputid "
-            "    SET dc.cardinputid = i.cardid",
-            // Change cardinput.cardinputid to equal cardid.  Do in
-            // multiple steps to avoid duplicate ids.
-            "SELECT MAX(cardid) INTO @maxcardid FROM capturecard",
-            "SELECT MAX(cardinputid) INTO @maxcardinputid FROM cardinput",
-            "UPDATE cardinput i "
-            "    SET i.cardinputid = i.cardid + @maxcardid + @maxcardinputid",
-            "UPDATE cardinput i "
-            "    SET i.cardinputid = i.cardid"
-        };
-
-        if (!performUpdateSeries("MythTV", updates))
-            return false;
-
-        // Create an automatically generated inputgroup for each card.
-        select.prepare("SELECT cardid, hostname, videodevice "
-                       "FROM capturecard c "
-                       "ORDER BY c.cardid");
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve cardtids.", select);
-            return false;
-        }
-
-        while (select.next())
-        {
-            uint cardid = select.value(0).toUInt();
-            QString host = select.value(1).toString();
-            QString device = select.value(2).toString();
-            QString name = host + "|" + device;
-            uint groupid = CardUtil::CreateInputGroup(name);
-            if (!groupid)
-                return false;
-            if (!CardUtil::LinkInputGroup(cardid, groupid))
-                return false;
-        }
-
-        // Remove orphan and administrative inputgroup entries.
-        if (!CardUtil::UnlinkInputGroup(0, 0))
-            return false;
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1332", dbver))
-            return false;
-    }
-
-    if (dbver == "1332")
-    {
-        DBUpdates updates {
-            // Move contents of cardinput to capturecard.
-            "ALTER TABLE capturecard "
-            "    ADD COLUMN inputname VARCHAR(32) NOT NULL DEFAULT '', "
-            "    ADD COLUMN sourceid INT(10) UNSIGNED NOT NULL DEFAULT 0, "
-            "    ADD COLUMN externalcommand VARCHAR(128), "
-            "    ADD COLUMN changer_device VARCHAR(128), "
-            "    ADD COLUMN changer_model VARCHAR(128), "
-            "    ADD COLUMN tunechan VARCHAR(10), "
-            "    ADD COLUMN startchan VARCHAR(10), "
-            "    ADD COLUMN displayname VARCHAR(64) NOT NULL DEFAULT '', "
-            "    ADD COLUMN dishnet_eit TINYINT(1) NOT NULL DEFAULT 0, "
-            "    ADD COLUMN recpriority INT(11) NOT NULL DEFAULT 0, "
-            "    ADD COLUMN quicktune TINYINT(4) NOT NULL DEFAULT 0, "
-            "    ADD COLUMN schedorder INT(10) UNSIGNED NOT NULL DEFAULT 0, "
-            "    ADD COLUMN livetvorder INT(10) UNSIGNED NOT NULL DEFAULT 0",
-            "UPDATE capturecard c "
-            "    JOIN cardinput i ON c.cardid = i.cardinputid "
-            "    SET c.inputname = i.inputname, "
-            "        c.sourceid = i.sourceid, "
-            "        c.externalcommand = i.externalcommand, "
-            "        c.changer_device = i.changer_device, "
-            "        c.changer_model = i.changer_model, "
-            "        c.tunechan = i.tunechan, "
-            "        c.startchan = i.startchan, "
-            "        c.displayname = i.displayname, "
-            "        c.dishnet_eit = i.dishnet_eit, "
-            "        c.recpriority = i.recpriority, "
-            "        c.quicktune = i.quicktune, "
-            "        c.schedorder = i.schedorder, "
-            "        c.livetvorder = i.livetvorder",
-            "TRUNCATE cardinput"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1333", dbver))
-            return false;
-    }
-
-    if (dbver == "1333")
-    {
-        DBUpdates updates {
-            // Fix default value of capturecard.inputname.
-            "ALTER TABLE capturecard "
-            "    MODIFY COLUMN inputname VARCHAR(32) NOT NULL DEFAULT 'None'",
-            "UPDATE capturecard c "
-            "    SET inputname = 'None' WHERE inputname = '' "
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1334", dbver))
-            return false;
-    }
-
-    if (dbver == "1334")
-    {
-        DBUpdates updates {
-            // Change the default sched/livetvorder from 0 to 1.
-            "ALTER TABLE capturecard "
-            "    MODIFY COLUMN schedorder INT(10) UNSIGNED "
-            "        NOT NULL DEFAULT 1, "
-            "    MODIFY COLUMN livetvorder INT(10) UNSIGNED "
-            "        NOT NULL DEFAULT 1"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1335", dbver))
-            return false;
-    }
-
-    if (dbver == "1335")
-    {
-        DBUpdates updates {
-            // Fix custom record and custom priority references to
-            // cardinput and cardinputid.
-            "UPDATE record SET description = "
-            "    replace(description, 'cardinputid', 'cardid') "
-            "    WHERE search = 1",
-            "UPDATE record SET description = "
-            "    replace(description, 'cardinput', 'capturecard') "
-            "    WHERE search = 1",
-            "UPDATE powerpriority SET selectclause = "
-            "    replace(selectclause, 'cardinputid', 'cardid')",
-            "UPDATE powerpriority SET selectclause = "
-            "    replace(selectclause, 'cardinput', 'capturecard')"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1336", dbver))
-            return false;
-    }
-
-    if (dbver == "1336")
-    {
-        DBUpdates updates {
-            // Add a parentid columne to capturecard.
-            "ALTER TABLE capturecard "
-            "    ADD parentid INT UNSIGNED NOT NULL DEFAULT 0 AFTER cardid",
-            "UPDATE capturecard c, "
-            "       (SELECT min(cardid) cardid, hostname, videodevice, "
-            "               inputname, cardtype "
-            "        FROM capturecard "
-            "        WHERE cardtype NOT IN "
-            "              ('FREEBOX', 'IMPORT', 'DEMO', 'EXTERNAL') "
-            "        GROUP BY hostname, videodevice, inputname) mins "
-            "SET c.parentid = mins.cardid "
-            "WHERE c.hostname = mins.hostname and "
-            "      c.videodevice = mins.videodevice and "
-            "      c.inputname = mins.inputname and "
-            "      c.cardid <> mins.cardid"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1337", dbver))
-            return false;
-    }
-
-    if (dbver == "1337")
-    {
-        DBUpdates updates {
-            // All next_record, last_record and last_delete to be NULL.
-            "ALTER TABLE record MODIFY next_record DATETIME NULL",
-            // NOLINTNEXTLINE(bugprone-suspicious-missing-comma)
-            "UPDATE record SET next_record = NULL "
-            "    WHERE next_record = '0000-00-00 00:00:00'",
-            "ALTER TABLE record MODIFY last_record DATETIME NULL",
-            "UPDATE record SET last_record = NULL "
-            "    WHERE last_record = '0000-00-00 00:00:00'",
-            "ALTER TABLE record MODIFY last_delete DATETIME NULL",
-            "UPDATE record SET last_delete = NULL "
-            "    WHERE last_delete = '0000-00-00 00:00:00'"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1338", dbver))
-            return false;
-    }
-
-    if (dbver == "1338")
-    {
-        DBUpdates updates {
-            "CREATE TABLE users ("
-            " userid int(5) unsigned NOT NULL AUTO_INCREMENT,"
-            " username varchar(128) NOT NULL DEFAULT '',"
-            " password_digest varchar(32) NOT NULL DEFAULT '',"
-            " lastlogin datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-            " PRIMARY KEY (userid),"
-            " KEY username (username)"
-            " ) ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            "CREATE TABLE user_permissions ("
-            " userid int(5) unsigned NOT NULL,"
-            " permission varchar(128) NOT NULL DEFAULT '',"
-            " PRIMARY KEY (userid)"
-            " ) ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            "CREATE TABLE user_sessions ("
-            " sessiontoken varchar(40) NOT NULL DEFAULT ''," // SHA1
-            " userid int(5) unsigned NOT NULL,"
-            " client varchar(128) NOT NULL, "
-            " created datetime NOT NULL,"
-            " lastactive datetime NOT NULL,"
-            " expires datetime NOT NULL,"
-            " PRIMARY KEY (sessionToken),"
-            " UNIQUE KEY userid_client (userid,client)"
-            " ) ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-            "INSERT INTO users SET username='admin'," // Temporary default account
-            " password_digest='bcd911b2ecb15ffbd6d8e6e744d60cf6';"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1339", dbver))
-            return false;
-    }
-
-    if (dbver == "1339")
-    {
-        MSqlQuery query(MSqlQuery::InitCon());
-
-        // insert a new profile group for the VBox
-        query.prepare("INSERT INTO profilegroups SET name = 'VBox Recorder', "
-                       "cardtype = 'VBOX', is_default = 1;");
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to insert vbox profilegroup.", query);
-            return false;
-        }
-
-        // get the id of the new profile group
-        int groupid = query.lastInsertId().toInt();
-
-        // insert the recording profiles
-        query.prepare("INSERT INTO recordingprofiles SET name = \"Default\", profilegroup = :GROUPID;");
-        query.bindValue(":GROUPID", groupid);
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to insert 'Default' recordingprofile.", query);
-            return false;
-        }
-
-        query.prepare("INSERT INTO recordingprofiles SET name = \"Live TV\", profilegroup = :GROUPID;");
-        query.bindValue(":GROUPID", groupid);
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to insert 'Live TV' recordingprofile.", query);
-            return false;
-        }
-
-        query.prepare("INSERT INTO recordingprofiles SET name = \"High Quality\", profilegroup = :GROUPID;");
-        query.bindValue(":GROUPID", groupid);
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to insert 'High Quality' recordingprofile.", query);
-            return false;
-        }
-
-        query.prepare("INSERT INTO recordingprofiles SET name = \"Low Quality\", profilegroup = :GROUPID;");
-        query.bindValue(":GROUPID", groupid);
-        if (!query.exec())
-        {
-            MythDB::DBError("Unable to insert 'Low Quality' recordingprofile.", query);
-            return false;
-        }
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1340", dbver))
-            return false;
-    }
-
-    if (dbver == "1340")
-    {
-        DBUpdates updates {
-            // Add filter to ignore episodes (e.g. in a person search)
-            "REPLACE INTO recordfilter (filterid, description, clause, newruledefault) "
-            "  VALUES (11, 'No episodes', 'program.category_type <> ''series''', 0)"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1341", dbver))
-            return false;
-    }
-
-    if (dbver == "1341")
-    {
-        DBUpdates updates {
-            "UPDATE profilegroups SET cardtype='FREEBOX' WHERE cardtype='Freebox'"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1342", dbver))
-            return false;
-    }
-
-    if (dbver == "1342")
-    {
-        LOG(VB_GENERAL, LOG_CRIT, "Upgrading to MythTV schema version 1343");
-        MSqlQuery select(MSqlQuery::InitCon());
-        MSqlQuery update(MSqlQuery::InitCon());
-
-        DBUpdates updates {
-            // Delete automatically created inputgroups.
-            "DELETE FROM inputgroup WHERE inputgroupname REGEXP '^[a-z_-]*\\\\|'",
-            // Increase the size of inputgroup.inputgroupname.
-            "ALTER TABLE inputgroup "
-            "    MODIFY COLUMN inputgroupname VARCHAR(128)"
-        };
-
-        if (!performUpdateSeries("MythTV", updates))
-            return false;
-
-        // Recreate automatically generated inputgroup for each card.
-        select.prepare("SELECT cardid, parentid, cardtype, hostname, "
-                       "       videodevice "
-                       "FROM capturecard c "
-                       "ORDER BY c.cardid");
-        if (!select.exec())
-        {
-            MythDB::DBError("Unable to retrieve cardtids.", select);
-            return false;
-        }
-
-        while (select.next())
-        {
-            uint cardid = select.value(0).toUInt();
-            uint parentid = select.value(1).toUInt();
-            QString type = select.value(2).toString();
-            QString host = select.value(3).toString();
-            QString device = select.value(4).toString();
-            QString name = host + "|" + device;
-            if (type == "FREEBOX" || type == "IMPORT" ||
-                type == "DEMO"    || type == "EXTERNAL")
-                name += QString("|%1").arg(parentid ? parentid : cardid);
-            uint groupid = CardUtil::CreateInputGroup(name);
-            if (!groupid)
-                return false;
-            if (!CardUtil::LinkInputGroup(cardid, groupid))
-                return false;
-        }
-
-        // Remove orphan and administrative inputgroup entries.
-        if (!CardUtil::UnlinkInputGroup(0, 0))
-            return false;
-
-        if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1343", dbver))
-            return false;
-    }
-
-    if (dbver == "1343")
-    {
-        DBUpdates updates {
-            "DROP TABLE IF EXISTS bdbookmark;",
-            "CREATE TABLE bdbookmark ("
-            "  serialid varchar(40) NOT NULL DEFAULT '',"
-            "  `name` varchar(128) DEFAULT NULL,"
-            "  bdstate varchar(4096) NOT NULL DEFAULT '',"
-            "  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-            "  PRIMARY KEY (serialid)"
-            ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-
-            // #12612 strip \0 characters from channel/channelscan_channel callsign and name
-            "UPDATE channel SET callsign=REPLACE(callsign,'\\0',''),"
-            "name=REPLACE(name,'\\0','');",
-
-            // "BackendWSPort" was removed in caaaeef8166722888012f4ecaf3e9b0f09df512a
-            "DELETE FROM settings WHERE value='BackendWSPort';"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1344", dbver))
-            return false;
-    }
-
-    if (dbver == "1344")
-    {
-        DBUpdates updates {
-            "ALTER TABLE capturecard ADD COLUMN "
-            "    reclimit INT UNSIGNED DEFAULT 1 NOT NULL",
-            "UPDATE capturecard cc, "
-            "       ( SELECT IF(parentid>0, parentid, cardid) cardid, "
-            "                count(*) cnt "
-            "         FROM capturecard "
-            "         GROUP BY if(parentid>0, parentid, cardid) "
-            "       ) p "
-            "SET cc.reclimit = p.cnt "
-            "WHERE cc.cardid = p.cardid OR cc.parentid = p.cardid"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1345", dbver))
-            return false;
-    }
-
-    if (dbver == "1345")
-    {
-        DBUpdates updates {
-            "ALTER TABLE capturecard ADD COLUMN "
-            "    schedgroup TINYINT(1) DEFAULT 0 NOT NULL"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1346", dbver))
-            return false;
-    }
-
-    /*
-     * TODO the following settings are no more, clean them up with the next schema change
-     * to avoid confusion by stale settings in the database
-     *
-     * WatchTVGuide
-     */
-
-    if (dbver == "1346")
-    {
-        QString master;
-        // Create new MasterServerName setting
-        if (gCoreContext->IsMasterHost())
-        {
-            master =
-            "insert into settings (value,data,hostname) "
-            "values('MasterServerName','"
-                + gCoreContext->GetHostName() + "', null);";
-        }
-        else
-        {
-            master =
-            "insert into settings (value,data,hostname) "
-            "select 'MasterServerName', b.hostname, null "
-            "from settings a, settings b "
-            "where a.value = 'MasterServerIP' "
-            "and b.value in ('BackendServerIP','BackendServerIP6')"
-            "and a.data = b.data;";
-        }
-
-        DBUpdates updates {
-            // Create new MasterServerName setting
-            master.toLocal8Bit().constData(),
-            // Create new BackendServerAddr setting for each backend server
-            // Assume using IPV4 value.
-            "insert into settings (value,data,hostname) "
-                "select 'BackendServerAddr', data,hostname from settings "
-                "where value = 'BackendServerIP';",
-            // Update BackendServerAddr setting for cases where IPV6 is used
-            "update settings a, settings b "
-                "set b.data = a.data "
-                "where a.value = 'BackendServerIP6' "
-                "and b.hostname = a.hostname "
-                "and b.value = 'BackendServerAddr' "
-                "and b.data = '127.0.0.1' "
-                "and a.data != '::1' "
-                "and a.data is not null "
-                "and a.data != ''; ",
-            // Update BackendServerAddr setting for master backend to
-            // conform to MasterServerIP setting
-            "update settings a, settings b, settings c "
-                "set c.data = a.data "
-                "where a.value = 'MasterServerIP' "  // 1 row
-                "and b.value = 'MasterServerName' "  // 1 row
-                "and c.value = 'BackendServerAddr' " // 1 row per BE
-                "and c.hostname = b.data;",          // restrict to master
-            // Delete obsolete settings
-            "delete from settings "
-                "where value in ('WatchTVGuide');"
-        };
-
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1347", dbver))
-            return false;
-    }
-
-    if (dbver == "1347")
-    {
-        DBUpdates updates {
-            "ALTER TABLE record MODIFY COLUMN startdate DATE DEFAULT NULL",
-            "ALTER TABLE record MODIFY COLUMN enddate DATE DEFAULT NULL",
-            "ALTER TABLE record MODIFY COLUMN starttime TIME DEFAULT NULL",
-            "ALTER TABLE record MODIFY COLUMN endtime TIME DEFAULT NULL"
-        };
-        if (!performActualUpdate("MythTV", "DBSchemaVer",
-                                 updates, "1348", dbver))
-            return false;
     }
 
     if (dbver == "1348")
@@ -3438,7 +643,7 @@ static bool doUpgradeTVDatabaseSchema(void)
                 profiles.push_back(temp);
             }
 
-            for (const MythVideoProfileItem& profile : qAsConst(profiles))
+            for (const MythVideoProfileItem& profile : std::as_const(profiles))
             {
                 QString newdecoder;
                 QString newrender;
@@ -3601,6 +806,7 @@ static bool doUpgradeTVDatabaseSchema(void)
         query.prepare("SELECT profileid, value, data FROM displayprofiles "
                       "ORDER BY profileid");
 
+        // coverity[unreachable] False positive.
         for (;;)
         {
             if (!query.exec())
@@ -3628,7 +834,7 @@ static bool doUpgradeTVDatabaseSchema(void)
                 profiles.push_back(temp);
             }
 
-            for (const MythVideoProfileItem& profile : qAsConst(profiles))
+            for (const MythVideoProfileItem& profile : std::as_const(profiles))
             {
                 // the old deinterlacers will have been converted already
                 QString oldrender  = profile.Get("pref_videorenderer");
@@ -3684,7 +890,7 @@ static bool doUpgradeTVDatabaseSchema(void)
             "and table_name = 'recordedartwork' "
             "and seq_in_index = 1 "
             "and column_name = 'inetref'")
-            .arg(gCoreContext->GetDatabaseParams().m_dbName));
+            .arg(GetMythDB()->GetDatabaseName()));
 
         if (!select.exec())
         {
@@ -3845,6 +1051,183 @@ static bool doUpgradeTVDatabaseSchema(void)
             return false;
     }
 
+    if (dbver == "1370")
+    {
+        // Migrate users from ttvdb.py to ttvdb4.py
+        DBUpdates updates {
+            "UPDATE settings SET data=REPLACE(data, 'ttvdb.py', 'ttvdb4.py') "
+             "WHERE value='TelevisionGrabber'"
+        };
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1371", dbver))
+            return false;
+    }
+
+    if (dbver == "1371")
+    {
+        // Recording extender tables are now created later.
+
+        if (!DBUtil::CheckTableColumnExists(QString("record"), QString("autoextend")))
+        {
+            // If that worked, modify existing tables.
+            DBUpdates updates = getRecordingExtenderDbInfo(0);
+            if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                     updates, "1372", dbver))
+                return false;
+        }
+        else
+        {
+            if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1372", dbver))
+                return false;
+        }
+    }
+
+    if (dbver == "1372")
+    {
+        if (!DBUtil::CheckTableColumnExists(QString("recorded"), QString("lastplay")))
+        {
+            DBUpdates updates {
+                "ALTER TABLE recorded ADD COLUMN lastplay "
+                "    TINYINT UNSIGNED DEFAULT 0 AFTER bookmark;",
+            };
+            if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                     updates, "1373", dbver))
+                return false;
+        }
+        else
+        {
+            if (!UpdateDBVersionNumber("MythTV", "DBSchemaVer", "1373", dbver))
+                return false;
+        }
+    }
+
+    if (dbver == "1373")
+    {
+        DBUpdates updates {
+            // adjust inetref prefixes to new grabber script
+            "UPDATE record SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE recorded SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE oldrecorded SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE videometadata SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE program SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE recordedprogram SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');",
+            "UPDATE recordedartwork SET inetref=REPLACE(inetref, 'ttvdb.py', 'ttvdb4.py');"
+        };
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1374", dbver))
+            return false;
+    }
+
+    if (dbver == "1374")
+    {
+        // Recording extender tables are now created later.
+        DBUpdates updates {};
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1375", dbver))
+            return false;
+    }
+
+    if (dbver == "1375")
+    {
+        // Delete any existing recording extender tables.
+        DBUpdates updates = getRecordingExtenderDbInfo(-1);
+        if (!performUpdateSeries("MythTV", updates))
+            return false;
+
+        // Now (re)create them.
+        updates = getRecordingExtenderDbInfo(1);
+        if (!performUpdateSeries("MythTV", updates))
+            return false;
+
+        // Add new tv listing name ->api name mappings for college
+        // basketball.
+        updates = getRecordingExtenderDbInfo(2);
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1376", dbver))
+            return false;
+    }
+
+    if (dbver == "1376")
+    {
+        DBUpdates updates {
+            "DROP TABLE IF EXISTS `logging`;",
+            "UPDATE settings SET data='0' WHERE value='LogEnabled'; ",   // Keeps MythWeb happy
+        };
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1377", dbver))
+            return false;
+    }
+
+    if (dbver == "1377")
+    {
+        // Change reverted, but the version number can't be reused.
+        DBUpdates updates {};
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1378", dbver))
+            return false;
+    }
+
+    if (dbver == "1378")
+    {
+        DBUpdates updates {
+            "CREATE INDEX dir_id ON gallery_files (dir_id);"
+        };
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1379", dbver))
+            return false;
+    }
+
+    if (dbver == "1379")
+    {
+        DBUpdates updates {
+            "ALTER TABLE channelscan_channel ADD COLUMN logical_channel INT UNSIGNED NOT NULL DEFAULT 0 AFTER service_type;"
+            "ALTER TABLE channelscan_channel ADD COLUMN simulcast_channel INT UNSIGNED NOT NULL DEFAULT 0 AFTER logical_channel;"
+        };
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1380", dbver))
+            return false;
+    }
+
+    if (dbver == "1380")
+    {
+        DBUpdates updates {
+            "ALTER TABLE filemarkup ADD INDEX (type);"
+        } ;
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1381", dbver))
+            return false;
+    }
+
+    if (dbver == "1381")
+    {
+        DBUpdates updates {
+            "ALTER TABLE iptv_channel ADD INDEX (chanid);"
+            "ALTER TABLE channelgroup ADD INDEX (chanid);"
+        } ;
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1382", dbver))
+            return false;
+    }
+
+    if (dbver == "1382")
+    {
+        DBUpdates updates {
+            "ALTER TABLE iptv_channel MODIFY iptvid INT UNSIGNED;"
+        } ;
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1383", dbver))
+            return false;
+    }
+
+    if (dbver == "1383")
+    {
+        DBUpdates updates {
+            "ALTER TABLE iptv_channel MODIFY iptvid INT UNSIGNED AUTO_INCREMENT;"
+        } ;
+        if (!performActualUpdate("MythTV", "DBSchemaVer",
+                                 updates, "1384", dbver))
+            return false;
+    }
 
     return true;
 }
@@ -3853,16 +1236,17 @@ static bool doUpgradeTVDatabaseSchema(void)
  * command to get the the initial database layout from an empty database:
  *
  * mysqldump \
- *     --skip-comments --skip-opt --compact --skip-quote-names \
- *     --create-options --ignore-table=mythconverg.schemalock mythconverg | \
- *   sed '/^\(SET\|INS\).*;$/d;/^\/\*!40101.*$/d;s/^.*[^;]$/"&"/;s/^).*;$/"&",/'
+ *     --compact --skip-opt --create-options --no-tablespaces \
+ *     --ignore-table=mythconverg.schemalock mythconverg | \
+ *   sed -e '/^\(SET\|INS\).*;$/d;/^\/\*!40101.*$/d;/^\/\*M!999999.*$/d;' | \
+ *   sed -e 's/utf8mb./utf8/' | \
+ *   sed -e 's/^.*[^;]$/"&"/;s/^).*;$/"&",/'
  *
  * command to get the initial data:
  *
  * mysqldump \
- *     --skip-comments --skip-opt --compact --skip-quote-names -t \
- *     --ignore-table=mythconverg.logging mythconverg |
- *   sed -e 's/^.*$/"&",/' -e 's#\\#\\\\#g'
+ *     --compact --skip-opt --no-tablespaces -t mythconverg | \
+ *   sed -e '/^\/\*M!999999.*$/d;s/^.*$/"&",/' -e 's#\\#\\\\#g'
  *
  * don't forget to delete host specific data
  *
@@ -3888,1311 +1272,2413 @@ bool InitializeMythSchema(void)
     LOG(VB_GENERAL, LOG_NOTICE,
         "Inserting MythTV initial database information.");
 
+// Don't try to moderinze string literals in this section.  This lets
+// us cut-n-paste the output of mysqldump into the code without
+// generating any warning messages.
+// NOLINTBEGIN(modernize-raw-string-literal)
+
     DBUpdates updates {
-"CREATE TABLE capturecard ("
-"  cardid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  videodevice varchar(128) DEFAULT NULL,"
-"  audiodevice varchar(128) DEFAULT NULL,"
-"  vbidevice varchar(128) DEFAULT NULL,"
-"  cardtype varchar(32) DEFAULT 'V4L',"
-"  defaultinput varchar(32) DEFAULT 'Television',"
-"  audioratelimit int(11) DEFAULT NULL,"
-"  hostname varchar(64) DEFAULT NULL,"
-"  dvb_swfilter int(11) DEFAULT '0',"
-"  dvb_sat_type int(11) NOT NULL DEFAULT '0',"
-"  dvb_wait_for_seqstart int(11) NOT NULL DEFAULT '1',"
-"  skipbtaudio tinyint(1) DEFAULT '0',"
-"  dvb_on_demand tinyint(4) NOT NULL DEFAULT '0',"
-"  dvb_diseqc_type smallint(6) DEFAULT NULL,"
-"  firewire_speed int(10) unsigned NOT NULL DEFAULT '0',"
-"  firewire_model varchar(32) DEFAULT NULL,"
-"  firewire_connection int(10) unsigned NOT NULL DEFAULT '0',"
-"  signal_timeout int(11) NOT NULL DEFAULT '1000',"
-"  channel_timeout int(11) NOT NULL DEFAULT '3000',"
-"  dvb_tuning_delay int(10) unsigned NOT NULL DEFAULT '0',"
-"  contrast int(11) NOT NULL DEFAULT '0',"
-"  brightness int(11) NOT NULL DEFAULT '0',"
-"  colour int(11) NOT NULL DEFAULT '0',"
-"  hue int(11) NOT NULL DEFAULT '0',"
-"  diseqcid int(10) unsigned DEFAULT NULL,"
-"  dvb_eitscan tinyint(1) NOT NULL DEFAULT '1',"
-"  PRIMARY KEY (cardid)"
+"CREATE TABLE `bdbookmark` ("
+"  `serialid` varchar(40) NOT NULL DEFAULT '',"
+"  `name` varchar(128) DEFAULT NULL,"
+"  `bdstate` varchar(4096) NOT NULL DEFAULT '',"
+"  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+"  PRIMARY KEY (`serialid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE cardinput ("
-"  cardinputid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  cardid int(10) unsigned NOT NULL DEFAULT '0',"
-"  sourceid int(10) unsigned NOT NULL DEFAULT '0',"
-"  inputname varchar(32) NOT NULL DEFAULT '',"
-"  externalcommand varchar(128) DEFAULT NULL,"
-"  changer_device varchar(128) DEFAULT NULL,"
-"  changer_model varchar(128) DEFAULT NULL,"
-"  tunechan varchar(10) DEFAULT NULL,"
-"  startchan varchar(10) DEFAULT NULL,"
-"  displayname varchar(64) NOT NULL DEFAULT '',"
-"  dishnet_eit tinyint(1) NOT NULL DEFAULT '0',"
-"  recpriority int(11) NOT NULL DEFAULT '0',"
-"  quicktune tinyint(4) NOT NULL DEFAULT '0',"
-"  schedorder int(10) unsigned NOT NULL DEFAULT '0',"
-"  livetvorder int(10) unsigned NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (cardinputid)"
+"CREATE TABLE `capturecard` ("
+"  `cardid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `parentid` int unsigned NOT NULL DEFAULT '0',"
+"  `videodevice` varchar(128) DEFAULT NULL,"
+"  `audiodevice` varchar(128) DEFAULT NULL,"
+"  `vbidevice` varchar(128) DEFAULT NULL,"
+"  `cardtype` varchar(32) DEFAULT 'V4L',"
+"  `defaultinput` varchar(32) DEFAULT 'Television',"
+"  `audioratelimit` int DEFAULT NULL,"
+"  `hostname` varchar(64) DEFAULT NULL,"
+"  `dvb_swfilter` int DEFAULT '0',"
+"  `dvb_sat_type` int NOT NULL DEFAULT '0',"
+"  `dvb_wait_for_seqstart` int NOT NULL DEFAULT '1',"
+"  `skipbtaudio` tinyint(1) DEFAULT '0',"
+"  `dvb_on_demand` tinyint NOT NULL DEFAULT '0',"
+"  `dvb_diseqc_type` smallint DEFAULT NULL,"
+"  `firewire_speed` int unsigned NOT NULL DEFAULT '0',"
+"  `firewire_model` varchar(32) DEFAULT NULL,"
+"  `firewire_connection` int unsigned NOT NULL DEFAULT '0',"
+"  `signal_timeout` int NOT NULL DEFAULT '1000',"
+"  `channel_timeout` int NOT NULL DEFAULT '3000',"
+"  `dvb_tuning_delay` int unsigned NOT NULL DEFAULT '0',"
+"  `contrast` int NOT NULL DEFAULT '0',"
+"  `brightness` int NOT NULL DEFAULT '0',"
+"  `colour` int NOT NULL DEFAULT '0',"
+"  `hue` int NOT NULL DEFAULT '0',"
+"  `diseqcid` int unsigned DEFAULT NULL,"
+"  `dvb_eitscan` tinyint(1) NOT NULL DEFAULT '1',"
+"  `inputname` varchar(32) NOT NULL DEFAULT 'None',"
+"  `sourceid` int unsigned NOT NULL DEFAULT '0',"
+"  `externalcommand` varchar(128) DEFAULT NULL,"
+"  `changer_device` varchar(128) DEFAULT NULL,"
+"  `changer_model` varchar(128) DEFAULT NULL,"
+"  `tunechan` varchar(10) DEFAULT NULL,"
+"  `startchan` varchar(10) DEFAULT NULL,"
+"  `displayname` varchar(64) NOT NULL DEFAULT '',"
+"  `dishnet_eit` tinyint(1) NOT NULL DEFAULT '0',"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `quicktune` tinyint NOT NULL DEFAULT '0',"
+"  `schedorder` int unsigned NOT NULL DEFAULT '1',"
+"  `livetvorder` int unsigned NOT NULL DEFAULT '1',"
+"  `reclimit` int unsigned NOT NULL DEFAULT '1',"
+"  `schedgroup` tinyint(1) NOT NULL DEFAULT '1',"
+"  PRIMARY KEY (`cardid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE channel ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  channum varchar(10) NOT NULL DEFAULT '',"
-"  freqid varchar(10) DEFAULT NULL,"
-"  sourceid int(10) unsigned DEFAULT NULL,"
-"  callsign varchar(20) NOT NULL DEFAULT '',"
+"CREATE TABLE `cardinput` ("
+"  `cardinputid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `cardid` int unsigned NOT NULL DEFAULT '0',"
+"  `sourceid` int unsigned NOT NULL DEFAULT '0',"
+"  `inputname` varchar(32) NOT NULL DEFAULT '',"
+"  `externalcommand` varchar(128) DEFAULT NULL,"
+"  `changer_device` varchar(128) DEFAULT NULL,"
+"  `changer_model` varchar(128) DEFAULT NULL,"
+"  `tunechan` varchar(10) DEFAULT NULL,"
+"  `startchan` varchar(10) DEFAULT NULL,"
+"  `displayname` varchar(64) NOT NULL DEFAULT '',"
+"  `dishnet_eit` tinyint(1) NOT NULL DEFAULT '0',"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `quicktune` tinyint NOT NULL DEFAULT '0',"
+"  `schedorder` int unsigned NOT NULL DEFAULT '0',"
+"  `livetvorder` int unsigned NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`cardinputid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `channel` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `channum` varchar(10) NOT NULL DEFAULT '',"
+"  `freqid` varchar(10) DEFAULT NULL,"
+"  `sourceid` int unsigned DEFAULT NULL,"
+"  `callsign` varchar(20) NOT NULL DEFAULT '',"
 "  `name` varchar(64) NOT NULL DEFAULT '',"
-"  icon varchar(255) NOT NULL DEFAULT '',"
-"  finetune int(11) DEFAULT NULL,"
-"  videofilters varchar(255) NOT NULL DEFAULT '',"
-"  xmltvid varchar(255) NOT NULL DEFAULT '',"
-"  recpriority int(10) NOT NULL DEFAULT '0',"
-"  contrast int(11) DEFAULT '32768',"
-"  brightness int(11) DEFAULT '32768',"
-"  colour int(11) DEFAULT '32768',"
-"  hue int(11) DEFAULT '32768',"
-"  tvformat varchar(10) NOT NULL DEFAULT 'Default',"
-"  visible tinyint(1) NOT NULL DEFAULT '1',"
-"  outputfilters varchar(255) NOT NULL DEFAULT '',"
-"  useonairguide tinyint(1) DEFAULT '0',"
-"  mplexid smallint(6) DEFAULT NULL,"
-"  serviceid mediumint(8) unsigned DEFAULT NULL,"
-"  tmoffset int(11) NOT NULL DEFAULT '0',"
-"  atsc_major_chan int(10) unsigned NOT NULL DEFAULT '0',"
-"  atsc_minor_chan int(10) unsigned NOT NULL DEFAULT '0',"
-"  last_record datetime NOT NULL,"
-"  default_authority varchar(32) NOT NULL DEFAULT '',"
-"  commmethod int(11) NOT NULL DEFAULT '-1',"
-"  iptvid smallint(6) unsigned DEFAULT NULL,"
-"  PRIMARY KEY (chanid),"
-"  KEY channel_src (channum,sourceid),"
-"  KEY sourceid (sourceid,xmltvid,chanid),"
-"  KEY visible (visible)"
+"  `icon` varchar(255) NOT NULL DEFAULT '',"
+"  `finetune` int DEFAULT NULL,"
+"  `videofilters` varchar(255) NOT NULL DEFAULT '',"
+"  `xmltvid` varchar(255) NOT NULL DEFAULT '',"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `contrast` int DEFAULT '32768',"
+"  `brightness` int DEFAULT '32768',"
+"  `colour` int DEFAULT '32768',"
+"  `hue` int DEFAULT '32768',"
+"  `tvformat` varchar(10) NOT NULL DEFAULT 'Default',"
+"  `visible` tinyint(1) NOT NULL DEFAULT '1',"
+"  `outputfilters` varchar(255) NOT NULL DEFAULT '',"
+"  `useonairguide` tinyint(1) DEFAULT '0',"
+"  `mplexid` smallint DEFAULT NULL,"
+"  `serviceid` mediumint unsigned DEFAULT NULL,"
+"  `service_type` int unsigned DEFAULT '0',"
+"  `tmoffset` int NOT NULL DEFAULT '0',"
+"  `atsc_major_chan` int unsigned NOT NULL DEFAULT '0',"
+"  `atsc_minor_chan` int unsigned NOT NULL DEFAULT '0',"
+"  `last_record` datetime NOT NULL,"
+"  `default_authority` varchar(32) NOT NULL DEFAULT '',"
+"  `commmethod` int NOT NULL DEFAULT '-1',"
+"  `iptvid` smallint unsigned DEFAULT NULL,"
+"  `deleted` timestamp NULL DEFAULT NULL,"
+"  PRIMARY KEY (`chanid`),"
+"  KEY `channel_src` (`channum`,`sourceid`),"
+"  KEY `sourceid` (`sourceid`,`xmltvid`,`chanid`),"
+"  KEY `visible` (`visible`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE channelgroup ("
-"  id int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  chanid int(11) unsigned NOT NULL DEFAULT '0',"
-"  grpid int(11) NOT NULL DEFAULT '1',"
-"  PRIMARY KEY (id)"
+"CREATE TABLE `channelgroup` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `grpid` int NOT NULL DEFAULT '1',"
+"  PRIMARY KEY (`id`),"
+"  KEY `chanid` (`chanid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE channelgroupnames ("
-"  grpid int(10) unsigned NOT NULL AUTO_INCREMENT,"
+"CREATE TABLE `channelgroupnames` ("
+"  `grpid` int unsigned NOT NULL AUTO_INCREMENT,"
 "  `name` varchar(64) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (grpid)"
+"  PRIMARY KEY (`grpid`)"
 ") ENGINE=MyISAM AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;",
-"CREATE TABLE channelscan ("
-"  scanid int(3) unsigned NOT NULL AUTO_INCREMENT,"
-"  cardid int(3) unsigned NOT NULL,"
-"  sourceid int(3) unsigned NOT NULL,"
-"  processed tinyint(1) unsigned NOT NULL,"
-"  scandate datetime NOT NULL,"
-"  PRIMARY KEY (scanid)"
+"CREATE TABLE `channelscan` ("
+"  `scanid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `cardid` int unsigned NOT NULL,"
+"  `sourceid` int unsigned NOT NULL,"
+"  `processed` tinyint unsigned NOT NULL,"
+"  `scandate` datetime NOT NULL,"
+"  PRIMARY KEY (`scanid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE channelscan_channel ("
-"  transportid int(6) unsigned NOT NULL,"
-"  scanid int(3) unsigned NOT NULL,"
-"  mplex_id smallint(6) NOT NULL,"
-"  source_id int(3) unsigned NOT NULL,"
-"  channel_id int(3) unsigned NOT NULL DEFAULT '0',"
-"  callsign varchar(20) NOT NULL DEFAULT '',"
-"  service_name varchar(64) NOT NULL DEFAULT '',"
-"  chan_num varchar(10) NOT NULL DEFAULT '',"
-"  service_id mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  atsc_major_channel int(4) unsigned NOT NULL DEFAULT '0',"
-"  atsc_minor_channel int(4) unsigned NOT NULL DEFAULT '0',"
-"  use_on_air_guide tinyint(1) NOT NULL DEFAULT '0',"
-"  hidden tinyint(1) NOT NULL DEFAULT '0',"
-"  hidden_in_guide tinyint(1) NOT NULL DEFAULT '0',"
-"  freqid varchar(10) NOT NULL DEFAULT '',"
-"  icon varchar(255) NOT NULL DEFAULT '',"
-"  tvformat varchar(10) NOT NULL DEFAULT 'Default',"
-"  xmltvid varchar(64) NOT NULL DEFAULT '',"
-"  pat_tsid int(5) unsigned NOT NULL DEFAULT '0',"
-"  vct_tsid int(5) unsigned NOT NULL DEFAULT '0',"
-"  vct_chan_tsid int(5) unsigned NOT NULL DEFAULT '0',"
-"  sdt_tsid int(5) unsigned NOT NULL DEFAULT '0',"
-"  orig_netid int(5) unsigned NOT NULL DEFAULT '0',"
-"  netid int(5) unsigned NOT NULL DEFAULT '0',"
-"  si_standard varchar(10) NOT NULL,"
-"  in_channels_conf tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  in_pat tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  in_pmt tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  in_vct tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  in_nit tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  in_sdt tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  is_encrypted tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  is_data_service tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  is_audio_service tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  is_opencable tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  could_be_opencable tinyint(1) unsigned NOT NULL DEFAULT '0',"
-"  decryption_status smallint(2) unsigned NOT NULL DEFAULT '0',"
-"  default_authority varchar(32) NOT NULL DEFAULT ''"
+"CREATE TABLE `channelscan_channel` ("
+"  `transportid` int unsigned NOT NULL,"
+"  `scanid` int unsigned NOT NULL,"
+"  `mplex_id` smallint NOT NULL,"
+"  `source_id` int unsigned NOT NULL,"
+"  `channel_id` int unsigned NOT NULL DEFAULT '0',"
+"  `callsign` varchar(20) NOT NULL DEFAULT '',"
+"  `service_name` varchar(64) NOT NULL DEFAULT '',"
+"  `chan_num` varchar(10) NOT NULL DEFAULT '',"
+"  `service_id` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `atsc_major_channel` int unsigned NOT NULL DEFAULT '0',"
+"  `atsc_minor_channel` int unsigned NOT NULL DEFAULT '0',"
+"  `use_on_air_guide` tinyint(1) NOT NULL DEFAULT '0',"
+"  `hidden` tinyint(1) NOT NULL DEFAULT '0',"
+"  `hidden_in_guide` tinyint(1) NOT NULL DEFAULT '0',"
+"  `freqid` varchar(10) NOT NULL DEFAULT '',"
+"  `icon` varchar(255) NOT NULL DEFAULT '',"
+"  `tvformat` varchar(10) NOT NULL DEFAULT 'Default',"
+"  `xmltvid` varchar(64) NOT NULL DEFAULT '',"
+"  `pat_tsid` int unsigned NOT NULL DEFAULT '0',"
+"  `vct_tsid` int unsigned NOT NULL DEFAULT '0',"
+"  `vct_chan_tsid` int unsigned NOT NULL DEFAULT '0',"
+"  `sdt_tsid` int unsigned NOT NULL DEFAULT '0',"
+"  `orig_netid` int unsigned NOT NULL DEFAULT '0',"
+"  `netid` int unsigned NOT NULL DEFAULT '0',"
+"  `si_standard` varchar(10) NOT NULL,"
+"  `in_channels_conf` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `in_pat` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `in_pmt` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `in_vct` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `in_nit` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `in_sdt` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `is_encrypted` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `is_data_service` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `is_audio_service` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `is_opencable` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `could_be_opencable` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `decryption_status` smallint unsigned NOT NULL DEFAULT '0',"
+"  `default_authority` varchar(32) NOT NULL DEFAULT '',"
+"  `service_type` int unsigned NOT NULL DEFAULT '0',"
+"  `logical_channel` int unsigned NOT NULL DEFAULT '0',"
+"  `simulcast_channel` int unsigned NOT NULL DEFAULT '0'"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE channelscan_dtv_multiplex ("
-"  transportid int(6) unsigned NOT NULL AUTO_INCREMENT,"
-"  scanid int(3) unsigned NOT NULL,"
-"  mplexid smallint(6) unsigned NOT NULL,"
-"  frequency bigint(12) unsigned NOT NULL,"
-"  inversion char(1) NOT NULL DEFAULT 'a',"
-"  symbolrate bigint(12) unsigned NOT NULL DEFAULT '0',"
-"  fec varchar(10) NOT NULL DEFAULT 'auto',"
-"  polarity char(1) NOT NULL DEFAULT '',"
-"  hp_code_rate varchar(10) NOT NULL DEFAULT 'auto',"
-"  mod_sys varchar(10) DEFAULT NULL,"
-"  rolloff varchar(4) DEFAULT NULL,"
-"  lp_code_rate varchar(10) NOT NULL DEFAULT 'auto',"
-"  modulation varchar(10) NOT NULL DEFAULT 'auto',"
-"  transmission_mode char(1) NOT NULL DEFAULT 'a',"
-"  guard_interval varchar(10) NOT NULL DEFAULT 'auto',"
-"  hierarchy varchar(10) NOT NULL DEFAULT 'auto',"
-"  bandwidth char(1) NOT NULL DEFAULT 'a',"
-"  sistandard varchar(10) NOT NULL,"
-"  tuner_type smallint(2) unsigned NOT NULL,"
-"  default_authority varchar(32) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (transportid)"
+"CREATE TABLE `channelscan_dtv_multiplex` ("
+"  `transportid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `scanid` int unsigned NOT NULL,"
+"  `mplexid` smallint unsigned NOT NULL,"
+"  `frequency` bigint unsigned NOT NULL,"
+"  `inversion` char(1) NOT NULL DEFAULT 'a',"
+"  `symbolrate` bigint unsigned NOT NULL DEFAULT '0',"
+"  `fec` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `polarity` char(1) NOT NULL DEFAULT '',"
+"  `hp_code_rate` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `mod_sys` varchar(10) DEFAULT NULL,"
+"  `rolloff` varchar(4) DEFAULT NULL,"
+"  `lp_code_rate` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `modulation` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `transmission_mode` char(1) NOT NULL DEFAULT 'a',"
+"  `guard_interval` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `hierarchy` varchar(10) NOT NULL DEFAULT 'auto',"
+"  `bandwidth` char(1) NOT NULL DEFAULT 'a',"
+"  `sistandard` varchar(10) NOT NULL,"
+"  `tuner_type` smallint unsigned NOT NULL,"
+"  `default_authority` varchar(32) NOT NULL DEFAULT '',"
+"  `signal_strength` int NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`transportid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE codecparams ("
-"  `profile` int(10) unsigned NOT NULL DEFAULT '0',"
+"CREATE TABLE `codecparams` ("
+"  `profile` int unsigned NOT NULL DEFAULT '0',"
 "  `name` varchar(128) NOT NULL DEFAULT '',"
 "  `value` varchar(128) DEFAULT NULL,"
 "  PRIMARY KEY (`profile`,`name`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE credits ("
-"  person mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  role set('actor','director','producer','executive_producer','writer','guest_star','host','adapter','presenter','commentator','guest') NOT NULL DEFAULT '',"
-"  UNIQUE KEY chanid (chanid,starttime,person,role),"
-"  KEY person (person,role)"
+"CREATE TABLE `credits` ("
+"  `person` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `role` set('actor','director','producer','executive_producer','writer','guest_star','host','adapter','presenter','commentator','guest') NOT NULL DEFAULT '',"
+"  `priority` tinyint unsigned DEFAULT '0',"
+"  `roleid` mediumint unsigned DEFAULT '0',"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`person`,`role`,`roleid`),"
+"  KEY `person` (`person`,`role`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE customexample ("
-"  rulename varchar(64) NOT NULL,"
-"  fromclause varchar(10000) NOT NULL DEFAULT '',"
-"  whereclause varchar(10000) NOT NULL DEFAULT '',"
-"  search tinyint(4) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (rulename)"
+"CREATE TABLE `customexample` ("
+"  `rulename` varchar(64) NOT NULL,"
+"  `fromclause` varchar(10000) NOT NULL DEFAULT '',"
+"  `whereclause` varchar(10000) NOT NULL DEFAULT '',"
+"  `search` tinyint NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`rulename`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE diseqc_config ("
-"  cardinputid int(10) unsigned NOT NULL,"
-"  diseqcid int(10) unsigned NOT NULL,"
+"CREATE TABLE `diseqc_config` ("
+"  `cardinputid` int unsigned NOT NULL,"
+"  `diseqcid` int unsigned NOT NULL,"
 "  `value` varchar(16) NOT NULL DEFAULT '',"
-"  KEY id (cardinputid)"
+"  KEY `id` (`cardinputid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE diseqc_tree ("
-"  diseqcid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  parentid int(10) unsigned DEFAULT NULL,"
-"  ordinal tinyint(3) unsigned NOT NULL,"
+"CREATE TABLE `diseqc_tree` ("
+"  `diseqcid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `parentid` int unsigned DEFAULT NULL,"
+"  `ordinal` tinyint unsigned NOT NULL,"
 "  `type` varchar(16) NOT NULL DEFAULT '',"
-"  subtype varchar(16) NOT NULL DEFAULT '',"
-"  description varchar(32) NOT NULL DEFAULT '',"
-"  switch_ports tinyint(3) unsigned NOT NULL DEFAULT '0',"
-"  rotor_hi_speed float NOT NULL DEFAULT '0',"
-"  rotor_lo_speed float NOT NULL DEFAULT '0',"
-"  rotor_positions varchar(255) NOT NULL DEFAULT '',"
-"  lnb_lof_switch int(10) NOT NULL DEFAULT '0',"
-"  lnb_lof_hi int(10) NOT NULL DEFAULT '0',"
-"  lnb_lof_lo int(10) NOT NULL DEFAULT '0',"
-"  cmd_repeat int(11) NOT NULL DEFAULT '1',"
-"  lnb_pol_inv tinyint(4) NOT NULL DEFAULT '0',"
-"  address tinyint(3) unsigned NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (diseqcid),"
-"  KEY parentid (parentid)"
+"  `subtype` varchar(16) NOT NULL DEFAULT '',"
+"  `description` varchar(32) NOT NULL DEFAULT '',"
+"  `switch_ports` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `rotor_hi_speed` float NOT NULL DEFAULT '0',"
+"  `rotor_lo_speed` float NOT NULL DEFAULT '0',"
+"  `rotor_positions` varchar(255) NOT NULL DEFAULT '',"
+"  `lnb_lof_switch` int NOT NULL DEFAULT '0',"
+"  `lnb_lof_hi` int NOT NULL DEFAULT '0',"
+"  `lnb_lof_lo` int NOT NULL DEFAULT '0',"
+"  `cmd_repeat` int NOT NULL DEFAULT '1',"
+"  `lnb_pol_inv` tinyint NOT NULL DEFAULT '0',"
+"  `address` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `scr_userband` int unsigned NOT NULL DEFAULT '0',"
+"  `scr_frequency` int unsigned NOT NULL DEFAULT '1400',"
+"  `scr_pin` int NOT NULL DEFAULT '-1',"
+"  PRIMARY KEY (`diseqcid`),"
+"  KEY `parentid` (`parentid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE displayprofilegroups ("
+"CREATE TABLE `displayprofilegroups` ("
 "  `name` varchar(128) NOT NULL,"
-"  hostname varchar(64) NOT NULL,"
-"  profilegroupid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  PRIMARY KEY (`name`,hostname),"
-"  UNIQUE KEY profilegroupid (profilegroupid)"
+"  `hostname` varchar(64) NOT NULL,"
+"  `profilegroupid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  PRIMARY KEY (`name`,`hostname`),"
+"  UNIQUE KEY `profilegroupid` (`profilegroupid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE displayprofiles ("
-"  profilegroupid int(10) unsigned NOT NULL,"
-"  profileid int(10) unsigned NOT NULL AUTO_INCREMENT,"
+"CREATE TABLE `displayprofiles` ("
+"  `profilegroupid` int unsigned NOT NULL,"
+"  `profileid` int unsigned NOT NULL AUTO_INCREMENT,"
 "  `value` varchar(128) NOT NULL,"
 "  `data` varchar(255) NOT NULL DEFAULT '',"
-"  KEY profilegroupid (profilegroupid),"
-"  KEY profileid (profileid,`value`),"
-"  KEY profileid_2 (profileid)"
+"  KEY `profilegroupid` (`profilegroupid`),"
+"  KEY `profileid` (`profileid`,`value`),"
+"  KEY `profileid_2` (`profileid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE dtv_multiplex ("
-"  mplexid smallint(6) NOT NULL AUTO_INCREMENT,"
-"  sourceid smallint(6) DEFAULT NULL,"
-"  transportid int(11) DEFAULT NULL,"
-"  networkid int(11) DEFAULT NULL,"
-"  frequency int(11) DEFAULT NULL,"
-"  inversion char(1) DEFAULT 'a',"
-"  symbolrate int(11) DEFAULT NULL,"
-"  fec varchar(10) DEFAULT 'auto',"
-"  polarity char(1) DEFAULT NULL,"
-"  modulation varchar(10) DEFAULT 'auto',"
-"  bandwidth char(1) DEFAULT 'a',"
-"  lp_code_rate varchar(10) DEFAULT 'auto',"
-"  transmission_mode char(1) DEFAULT 'a',"
-"  guard_interval varchar(10) DEFAULT 'auto',"
-"  visible smallint(1) NOT NULL DEFAULT '0',"
-"  constellation varchar(10) DEFAULT 'auto',"
-"  hierarchy varchar(10) DEFAULT 'auto',"
-"  hp_code_rate varchar(10) DEFAULT 'auto',"
-"  mod_sys varchar(10) DEFAULT NULL,"
-"  rolloff varchar(4) DEFAULT NULL,"
-"  sistandard varchar(10) DEFAULT 'dvb',"
-"  serviceversion smallint(6) DEFAULT '33',"
-"  updatetimestamp timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-"  default_authority varchar(32) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (mplexid)"
+"CREATE TABLE `dtv_multiplex` ("
+"  `mplexid` smallint NOT NULL AUTO_INCREMENT,"
+"  `sourceid` smallint DEFAULT NULL,"
+"  `transportid` int DEFAULT NULL,"
+"  `networkid` int DEFAULT NULL,"
+"  `frequency` int DEFAULT NULL,"
+"  `inversion` char(1) DEFAULT 'a',"
+"  `symbolrate` int DEFAULT NULL,"
+"  `fec` varchar(10) DEFAULT 'auto',"
+"  `polarity` char(1) DEFAULT NULL,"
+"  `modulation` varchar(10) DEFAULT 'auto',"
+"  `bandwidth` char(1) DEFAULT 'a',"
+"  `lp_code_rate` varchar(10) DEFAULT 'auto',"
+"  `transmission_mode` char(1) DEFAULT 'a',"
+"  `guard_interval` varchar(10) DEFAULT 'auto',"
+"  `visible` smallint NOT NULL DEFAULT '0',"
+"  `constellation` varchar(10) DEFAULT 'auto',"
+"  `hierarchy` varchar(10) DEFAULT 'auto',"
+"  `hp_code_rate` varchar(10) DEFAULT 'auto',"
+"  `mod_sys` varchar(10) DEFAULT NULL,"
+"  `rolloff` varchar(4) DEFAULT NULL,"
+"  `sistandard` varchar(10) DEFAULT 'dvb',"
+"  `serviceversion` smallint DEFAULT '33',"
+"  `updatetimestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+"  `default_authority` varchar(32) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`mplexid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE dtv_privatetypes ("
-"  sitype varchar(4) NOT NULL DEFAULT '',"
-"  networkid int(11) NOT NULL DEFAULT '0',"
-"  private_type varchar(20) NOT NULL DEFAULT '',"
-"  private_value varchar(100) NOT NULL DEFAULT ''"
+"CREATE TABLE `dtv_privatetypes` ("
+"  `sitype` varchar(4) NOT NULL DEFAULT '',"
+"  `networkid` int NOT NULL DEFAULT '0',"
+"  `private_type` varchar(20) NOT NULL DEFAULT '',"
+"  `private_value` varchar(100) NOT NULL DEFAULT ''"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE dvdbookmark ("
-"  serialid varchar(16) NOT NULL DEFAULT '',"
+"CREATE TABLE `dvdbookmark` ("
+"  `serialid` varchar(16) NOT NULL DEFAULT '',"
 "  `name` varchar(32) DEFAULT NULL,"
-"  title smallint(6) NOT NULL DEFAULT '0',"
-"  audionum tinyint(4) NOT NULL DEFAULT '-1',"
-"  subtitlenum tinyint(4) NOT NULL DEFAULT '-1',"
-"  framenum bigint(20) NOT NULL DEFAULT '0',"
+"  `title` smallint NOT NULL DEFAULT '0',"
+"  `audionum` tinyint NOT NULL DEFAULT '-1',"
+"  `subtitlenum` tinyint NOT NULL DEFAULT '-1',"
+"  `framenum` bigint NOT NULL DEFAULT '0',"
 "  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-"  PRIMARY KEY (serialid)"
+"  `dvdstate` varchar(1024) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`serialid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE dvdinput ("
-"  intid int(10) unsigned NOT NULL,"
-"  hsize int(10) unsigned DEFAULT NULL,"
-"  vsize int(10) unsigned DEFAULT NULL,"
-"  ar_num int(10) unsigned DEFAULT NULL,"
-"  ar_denom int(10) unsigned DEFAULT NULL,"
-"  fr_code int(10) unsigned DEFAULT NULL,"
-"  letterbox tinyint(1) DEFAULT NULL,"
-"  v_format varchar(16) DEFAULT NULL,"
-"  PRIMARY KEY (intid)"
+"CREATE TABLE `dvdinput` ("
+"  `intid` int unsigned NOT NULL,"
+"  `hsize` int unsigned DEFAULT NULL,"
+"  `vsize` int unsigned DEFAULT NULL,"
+"  `ar_num` int unsigned DEFAULT NULL,"
+"  `ar_denom` int unsigned DEFAULT NULL,"
+"  `fr_code` int unsigned DEFAULT NULL,"
+"  `letterbox` tinyint(1) DEFAULT NULL,"
+"  `v_format` varchar(16) DEFAULT NULL,"
+"  PRIMARY KEY (`intid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE dvdtranscode ("
-"  intid int(11) NOT NULL AUTO_INCREMENT,"
-"  input int(10) unsigned DEFAULT NULL,"
+"CREATE TABLE `dvdtranscode` ("
+"  `intid` int NOT NULL AUTO_INCREMENT,"
+"  `input` int unsigned DEFAULT NULL,"
 "  `name` varchar(128) NOT NULL,"
-"  sync_mode int(10) unsigned DEFAULT NULL,"
-"  use_yv12 tinyint(1) DEFAULT NULL,"
-"  cliptop int(11) DEFAULT NULL,"
-"  clipbottom int(11) DEFAULT NULL,"
-"  clipleft int(11) DEFAULT NULL,"
-"  clipright int(11) DEFAULT NULL,"
-"  f_resize_h int(11) DEFAULT NULL,"
-"  f_resize_w int(11) DEFAULT NULL,"
-"  hq_resize_h int(11) DEFAULT NULL,"
-"  hq_resize_w int(11) DEFAULT NULL,"
-"  grow_h int(11) DEFAULT NULL,"
-"  grow_w int(11) DEFAULT NULL,"
-"  clip2top int(11) DEFAULT NULL,"
-"  clip2bottom int(11) DEFAULT NULL,"
-"  clip2left int(11) DEFAULT NULL,"
-"  clip2right int(11) DEFAULT NULL,"
-"  codec varchar(128) NOT NULL,"
-"  codec_param varchar(128) DEFAULT NULL,"
-"  bitrate int(11) DEFAULT NULL,"
-"  a_sample_r int(11) DEFAULT NULL,"
-"  a_bitrate int(11) DEFAULT NULL,"
-"  two_pass tinyint(1) DEFAULT NULL,"
-"  tc_param varchar(128) DEFAULT NULL,"
-"  PRIMARY KEY (intid)"
+"  `sync_mode` int unsigned DEFAULT NULL,"
+"  `use_yv12` tinyint(1) DEFAULT NULL,"
+"  `cliptop` int DEFAULT NULL,"
+"  `clipbottom` int DEFAULT NULL,"
+"  `clipleft` int DEFAULT NULL,"
+"  `clipright` int DEFAULT NULL,"
+"  `f_resize_h` int DEFAULT NULL,"
+"  `f_resize_w` int DEFAULT NULL,"
+"  `hq_resize_h` int DEFAULT NULL,"
+"  `hq_resize_w` int DEFAULT NULL,"
+"  `grow_h` int DEFAULT NULL,"
+"  `grow_w` int DEFAULT NULL,"
+"  `clip2top` int DEFAULT NULL,"
+"  `clip2bottom` int DEFAULT NULL,"
+"  `clip2left` int DEFAULT NULL,"
+"  `clip2right` int DEFAULT NULL,"
+"  `codec` varchar(128) NOT NULL,"
+"  `codec_param` varchar(128) DEFAULT NULL,"
+"  `bitrate` int DEFAULT NULL,"
+"  `a_sample_r` int DEFAULT NULL,"
+"  `a_bitrate` int DEFAULT NULL,"
+"  `two_pass` tinyint(1) DEFAULT NULL,"
+"  `tc_param` varchar(128) DEFAULT NULL,"
+"  PRIMARY KEY (`intid`)"
 ") ENGINE=MyISAM AUTO_INCREMENT=12 DEFAULT CHARSET=utf8;",
-"CREATE TABLE eit_cache ("
-"  chanid int(10) NOT NULL,"
-"  eventid int(10) unsigned NOT NULL DEFAULT '0',"
-"  tableid tinyint(3) unsigned NOT NULL,"
-"  version tinyint(3) unsigned NOT NULL,"
-"  endtime int(10) unsigned NOT NULL,"
-"  `status` tinyint(4) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (chanid,eventid,`status`)"
+"CREATE TABLE `eit_cache` ("
+"  `chanid` int NOT NULL,"
+"  `eventid` int unsigned NOT NULL DEFAULT '0',"
+"  `tableid` tinyint unsigned NOT NULL,"
+"  `version` tinyint unsigned NOT NULL,"
+"  `endtime` int unsigned NOT NULL,"
+"  `status` tinyint NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`chanid`,`eventid`,`status`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE filemarkup ("
-"  filename text NOT NULL,"
-"  mark mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  `offset` bigint(20) unsigned DEFAULT NULL,"
-"  `type` tinyint(4) NOT NULL DEFAULT '0',"
-"  KEY filename (filename(255))"
+"CREATE TABLE `filemarkup` ("
+"  `filename` text NOT NULL,"
+"  `mark` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `offset` bigint unsigned DEFAULT NULL,"
+"  `type` tinyint NOT NULL DEFAULT '0',"
+"  KEY `filename` (`filename`(255)),"
+"  KEY `type` (`type`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE housekeeping ("
-"  tag varchar(64) NOT NULL DEFAULT '',"
-"  lastrun datetime DEFAULT NULL,"
-"  PRIMARY KEY (tag)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE inputgroup ("
-"  cardinputid int(10) unsigned NOT NULL,"
-"  inputgroupid int(10) unsigned NOT NULL,"
-"  inputgroupname varchar(32) NOT NULL"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE internetcontent ("
+"CREATE TABLE `gallery_directories` ("
+"  `dir_id` int NOT NULL AUTO_INCREMENT,"
+"  `filename` varchar(255) NOT NULL,"
 "  `name` varchar(255) NOT NULL,"
-"  thumbnail varchar(255) DEFAULT NULL,"
-"  `type` smallint(3) NOT NULL,"
-"  author varchar(128) NOT NULL,"
-"  description text NOT NULL,"
-"  commandline text NOT NULL,"
-"  version double NOT NULL,"
-"  updated datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  search tinyint(1) NOT NULL,"
-"  tree tinyint(1) NOT NULL,"
-"  podcast tinyint(1) NOT NULL,"
-"  download tinyint(1) NOT NULL,"
+"  `path` varchar(255) NOT NULL,"
+"  `parent_id` int NOT NULL,"
+"  `dir_count` int NOT NULL DEFAULT '0',"
+"  `file_count` int NOT NULL DEFAULT '0',"
+"  `hidden` tinyint(1) NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`dir_id`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `gallery_files` ("
+"  `file_id` int NOT NULL AUTO_INCREMENT,"
+"  `filename` varchar(255) NOT NULL,"
+"  `name` varchar(255) NOT NULL,"
+"  `path` varchar(255) NOT NULL,"
+"  `dir_id` int NOT NULL DEFAULT '0',"
+"  `type` int NOT NULL DEFAULT '0',"
+"  `modtime` int NOT NULL DEFAULT '0',"
+"  `size` int NOT NULL DEFAULT '0',"
+"  `extension` varchar(255) NOT NULL,"
+"  `angle` int NOT NULL DEFAULT '0',"
+"  `date` int NOT NULL DEFAULT '0',"
+"  `zoom` int NOT NULL DEFAULT '0',"
+"  `hidden` tinyint(1) NOT NULL DEFAULT '0',"
+"  `orientation` int NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`file_id`),"
+"  KEY `dir_id` (`dir_id`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `housekeeping` ("
+"  `tag` varchar(64) NOT NULL,"
+"  `hostname` varchar(64) DEFAULT NULL,"
+"  `lastrun` datetime DEFAULT NULL,"
+"  `lastsuccess` datetime DEFAULT NULL,"
+"  UNIQUE KEY `task` (`tag`,`hostname`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `inputgroup` ("
+"  `cardinputid` int unsigned NOT NULL,"
+"  `inputgroupid` int unsigned NOT NULL,"
+"  `inputgroupname` varchar(128) DEFAULT NULL"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `internetcontent` ("
+"  `name` varchar(255) NOT NULL,"
+"  `thumbnail` varchar(255) DEFAULT NULL,"
+"  `type` smallint NOT NULL,"
+"  `author` varchar(128) NOT NULL,"
+"  `description` text NOT NULL,"
+"  `commandline` text NOT NULL,"
+"  `version` double NOT NULL,"
+"  `updated` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `search` tinyint(1) NOT NULL,"
+"  `tree` tinyint(1) NOT NULL,"
+"  `podcast` tinyint(1) NOT NULL,"
+"  `download` tinyint(1) NOT NULL,"
 "  `host` varchar(128) DEFAULT NULL"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE internetcontentarticles ("
-"  feedtitle varchar(255) NOT NULL,"
-"  path text NOT NULL,"
-"  paththumb text NOT NULL,"
-"  title varchar(255) NOT NULL,"
-"  subtitle varchar(255) NOT NULL,"
-"  season smallint(5) NOT NULL DEFAULT '0',"
-"  episode smallint(5) NOT NULL DEFAULT '0',"
-"  description text NOT NULL,"
-"  url text NOT NULL,"
-"  `type` smallint(3) NOT NULL,"
-"  thumbnail text NOT NULL,"
-"  mediaURL text NOT NULL,"
-"  author varchar(255) NOT NULL,"
+"CREATE TABLE `internetcontentarticles` ("
+"  `feedtitle` varchar(255) NOT NULL,"
+"  `path` text NOT NULL,"
+"  `paththumb` text NOT NULL,"
+"  `title` varchar(255) NOT NULL,"
+"  `subtitle` varchar(255) NOT NULL,"
+"  `season` smallint NOT NULL DEFAULT '0',"
+"  `episode` smallint NOT NULL DEFAULT '0',"
+"  `description` text NOT NULL,"
+"  `url` text NOT NULL,"
+"  `type` smallint NOT NULL,"
+"  `thumbnail` text NOT NULL,"
+"  `mediaURL` text NOT NULL,"
+"  `author` varchar(255) NOT NULL,"
 "  `date` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  `time` int(11) NOT NULL,"
-"  rating varchar(255) NOT NULL,"
-"  filesize bigint(20) NOT NULL,"
-"  player varchar(255) NOT NULL,"
-"  playerargs text NOT NULL,"
-"  download varchar(255) NOT NULL,"
-"  downloadargs text NOT NULL,"
-"  width smallint(6) NOT NULL,"
-"  height smallint(6) NOT NULL,"
+"  `time` int NOT NULL,"
+"  `rating` varchar(255) NOT NULL,"
+"  `filesize` bigint NOT NULL,"
+"  `player` varchar(255) NOT NULL,"
+"  `playerargs` text NOT NULL,"
+"  `download` varchar(255) NOT NULL,"
+"  `downloadargs` text NOT NULL,"
+"  `width` smallint NOT NULL,"
+"  `height` smallint NOT NULL,"
 "  `language` varchar(128) NOT NULL,"
-"  podcast tinyint(1) NOT NULL,"
-"  downloadable tinyint(1) NOT NULL,"
-"  customhtml tinyint(1) NOT NULL,"
-"  countries varchar(255) NOT NULL"
+"  `podcast` tinyint(1) NOT NULL,"
+"  `downloadable` tinyint(1) NOT NULL,"
+"  `customhtml` tinyint(1) NOT NULL,"
+"  `countries` varchar(255) NOT NULL"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE inuseprograms ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  recusage varchar(128) NOT NULL DEFAULT '',"
-"  lastupdatetime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  rechost varchar(64) NOT NULL,"
-"  recdir varchar(255) NOT NULL DEFAULT '',"
-"  KEY chanid (chanid,starttime),"
-"  KEY recusage (recusage,lastupdatetime)"
+"CREATE TABLE `inuseprograms` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `recusage` varchar(128) NOT NULL DEFAULT '',"
+"  `lastupdatetime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  `rechost` varchar(64) NOT NULL,"
+"  `recdir` varchar(255) NOT NULL DEFAULT '',"
+"  KEY `chanid` (`chanid`,`starttime`),"
+"  KEY `recusage` (`recusage`,`lastupdatetime`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE iptv_channel ("
-"  iptvid smallint(6) unsigned NOT NULL AUTO_INCREMENT,"
-"  chanid int(10) unsigned NOT NULL,"
-"  url text NOT NULL,"
+"CREATE TABLE `iptv_channel` ("
+"  `iptvid` smallint unsigned NOT NULL AUTO_INCREMENT,"
+"  `chanid` int unsigned NOT NULL,"
+"  `url` text NOT NULL,"
 "  `type` set('data','rfc2733-1','rfc2733-2','rfc5109-1','rfc5109-2','smpte2022-1','smpte2022-2') DEFAULT NULL,"
-"  bitrate int(10) unsigned NOT NULL,"
-"  PRIMARY KEY (iptvid)"
+"  `bitrate` int unsigned NOT NULL,"
+"  PRIMARY KEY (`iptvid`),"
+"  KEY `chanid` (`chanid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE jobqueue ("
-"  id int(11) NOT NULL AUTO_INCREMENT,"
-"  chanid int(10) NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  inserttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  `type` int(11) NOT NULL DEFAULT '0',"
-"  cmds int(11) NOT NULL DEFAULT '0',"
-"  flags int(11) NOT NULL DEFAULT '0',"
-"  `status` int(11) NOT NULL DEFAULT '0',"
-"  statustime timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  args blob NOT NULL,"
+"CREATE TABLE `jobqueue` ("
+"  `id` int NOT NULL AUTO_INCREMENT,"
+"  `chanid` int NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `inserttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `type` int NOT NULL DEFAULT '0',"
+"  `cmds` int NOT NULL DEFAULT '0',"
+"  `flags` int NOT NULL DEFAULT '0',"
+"  `status` int NOT NULL DEFAULT '0',"
+"  `statustime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  `args` blob NOT NULL,"
 "  `comment` varchar(128) NOT NULL DEFAULT '',"
-"  schedruntime datetime NOT NULL DEFAULT '2007-01-01 00:00:00',"
-"  PRIMARY KEY (id),"
-"  UNIQUE KEY chanid (chanid,starttime,`type`,inserttime)"
+"  `schedruntime` datetime NOT NULL DEFAULT '2007-01-01 00:00:00',"
+"  PRIMARY KEY (`id`),"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`type`,`inserttime`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE jumppoints ("
-"  destination varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(255) DEFAULT NULL,"
-"  keylist varchar(128) DEFAULT NULL,"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (destination,hostname)"
+"CREATE TABLE `jumppoints` ("
+"  `destination` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(255) DEFAULT NULL,"
+"  `keylist` varchar(128) DEFAULT NULL,"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`destination`,`hostname`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE keybindings ("
+"CREATE TABLE `keybindings` ("
 "  `context` varchar(32) NOT NULL DEFAULT '',"
 "  `action` varchar(32) NOT NULL DEFAULT '',"
-"  description varchar(255) DEFAULT NULL,"
-"  keylist varchar(128) DEFAULT NULL,"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (`context`,`action`,hostname)"
+"  `description` varchar(255) DEFAULT NULL,"
+"  `keylist` varchar(128) DEFAULT NULL,"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`context`,`action`,`hostname`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE keyword ("
-"  phrase varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
-"  searchtype int(10) unsigned NOT NULL DEFAULT '3',"
-"  UNIQUE KEY phrase (phrase,searchtype)"
+"CREATE TABLE `keyword` ("
+"  `phrase` varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
+"  `searchtype` int unsigned NOT NULL DEFAULT '3',"
+"  UNIQUE KEY `phrase` (`phrase`,`searchtype`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE livestream ("
-"  id int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  width int(10) unsigned NOT NULL,"
-"  height int(10) unsigned NOT NULL,"
-"  bitrate int(10) unsigned NOT NULL,"
-"  audiobitrate int(10) unsigned NOT NULL,"
-"  samplerate int(10) unsigned NOT NULL,"
-"  audioonlybitrate int(10) unsigned NOT NULL,"
-"  segmentsize int(10) unsigned NOT NULL DEFAULT '10',"
-"  maxsegments int(10) unsigned NOT NULL DEFAULT '0',"
-"  startsegment int(10) unsigned NOT NULL DEFAULT '0',"
-"  currentsegment int(10) unsigned NOT NULL DEFAULT '0',"
-"  segmentcount int(10) unsigned NOT NULL DEFAULT '0',"
-"  percentcomplete int(10) unsigned NOT NULL DEFAULT '0',"
-"  created datetime NOT NULL,"
-"  lastmodified datetime NOT NULL,"
-"  relativeurl varchar(512) NOT NULL,"
-"  fullurl varchar(1024) NOT NULL,"
-"  `status` int(10) unsigned NOT NULL DEFAULT '0',"
-"  statusmessage varchar(256) NOT NULL,"
-"  sourcefile varchar(512) NOT NULL,"
-"  sourcehost varchar(64) NOT NULL,"
-"  sourcewidth int(10) unsigned NOT NULL DEFAULT '0',"
-"  sourceheight int(10) unsigned NOT NULL DEFAULT '0',"
-"  outdir varchar(256) NOT NULL,"
-"  outbase varchar(128) NOT NULL,"
-"  PRIMARY KEY (id)"
+"CREATE TABLE `livestream` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `width` int unsigned NOT NULL,"
+"  `height` int unsigned NOT NULL,"
+"  `bitrate` int unsigned NOT NULL,"
+"  `audiobitrate` int unsigned NOT NULL,"
+"  `samplerate` int unsigned NOT NULL,"
+"  `audioonlybitrate` int unsigned NOT NULL,"
+"  `segmentsize` int unsigned NOT NULL DEFAULT '10',"
+"  `maxsegments` int unsigned NOT NULL DEFAULT '0',"
+"  `startsegment` int unsigned NOT NULL DEFAULT '0',"
+"  `currentsegment` int unsigned NOT NULL DEFAULT '0',"
+"  `segmentcount` int unsigned NOT NULL DEFAULT '0',"
+"  `percentcomplete` int unsigned NOT NULL DEFAULT '0',"
+"  `created` datetime NOT NULL,"
+"  `lastmodified` datetime NOT NULL,"
+"  `relativeurl` varchar(512) NOT NULL,"
+"  `fullurl` varchar(1024) NOT NULL,"
+"  `status` int unsigned NOT NULL DEFAULT '0',"
+"  `statusmessage` varchar(256) NOT NULL,"
+"  `sourcefile` varchar(512) NOT NULL,"
+"  `sourcehost` varchar(64) NOT NULL,"
+"  `sourcewidth` int unsigned NOT NULL DEFAULT '0',"
+"  `sourceheight` int unsigned NOT NULL DEFAULT '0',"
+"  `outdir` varchar(256) NOT NULL,"
+"  `outbase` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`id`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE logging ("
-"  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,"
-"  `host` varchar(64) NOT NULL DEFAULT '',"
-"  application varchar(64) NOT NULL DEFAULT '',"
-"  pid int(11) NOT NULL DEFAULT '0',"
-"  tid int(11) NOT NULL DEFAULT '0',"
-"  thread varchar(64) NOT NULL DEFAULT '',"
-"  filename varchar(255) NOT NULL DEFAULT '',"
-"  line int(11) NOT NULL DEFAULT '0',"
-"  `function` varchar(255) NOT NULL DEFAULT '',"
-"  msgtime datetime NOT NULL,"
-"  `level` int(11) NOT NULL DEFAULT '0',"
-"  message varchar(2048) NOT NULL,"
-"  PRIMARY KEY (id),"
-"  KEY `host` (`host`,application,pid,msgtime),"
-"  KEY msgtime (msgtime),"
-"  KEY `level` (`level`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE mythlog ("
-"  logid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  module varchar(32) NOT NULL DEFAULT '',"
-"  priority int(11) NOT NULL DEFAULT '0',"
-"  acknowledged tinyint(1) DEFAULT '0',"
-"  logdate datetime DEFAULT NULL,"
+"CREATE TABLE `mythlog` ("
+"  `logid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `module` varchar(32) NOT NULL DEFAULT '',"
+"  `priority` int NOT NULL DEFAULT '0',"
+"  `acknowledged` tinyint(1) DEFAULT '0',"
+"  `logdate` datetime DEFAULT NULL,"
 "  `host` varchar(128) DEFAULT NULL,"
-"  message varchar(255) NOT NULL DEFAULT '',"
-"  details varchar(16000) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (logid),"
-"  KEY module (module)"
+"  `message` varchar(255) NOT NULL DEFAULT '',"
+"  `details` varchar(16000) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`logid`),"
+"  KEY `module` (`module`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE oldfind ("
-"  recordid int(11) NOT NULL DEFAULT '0',"
-"  findid int(11) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (recordid,findid)"
+"CREATE TABLE `oldfind` ("
+"  `recordid` int NOT NULL DEFAULT '0',"
+"  `findid` int NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`recordid`,`findid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE oldprogram ("
-"  oldtitle varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
-"  airdate datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  PRIMARY KEY (oldtitle)"
+"CREATE TABLE `oldprogram` ("
+"  `oldtitle` varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
+"  `airdate` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  PRIMARY KEY (`oldtitle`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE oldrecorded ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  endtime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  title varchar(128) NOT NULL DEFAULT '',"
-"  subtitle varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(16000) NOT NULL DEFAULT '',"
-"  season smallint(5) NOT NULL,"
-"  episode smallint(5) NOT NULL,"
-"  category varchar(64) NOT NULL DEFAULT '',"
-"  seriesid varchar(40) NOT NULL DEFAULT '',"
-"  programid varchar(40) NOT NULL DEFAULT '',"
-"  inetref varchar(40) NOT NULL,"
-"  findid int(11) NOT NULL DEFAULT '0',"
-"  recordid int(11) NOT NULL DEFAULT '0',"
-"  station varchar(20) NOT NULL DEFAULT '',"
-"  rectype int(10) unsigned NOT NULL DEFAULT '0',"
+"CREATE TABLE `oldrecorded` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `endtime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `title` varchar(128) NOT NULL DEFAULT '',"
+"  `subtitle` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(16000) NOT NULL DEFAULT '',"
+"  `season` smallint NOT NULL,"
+"  `episode` smallint NOT NULL,"
+"  `category` varchar(64) NOT NULL DEFAULT '',"
+"  `seriesid` varchar(64) DEFAULT NULL,"
+"  `programid` varchar(64) DEFAULT NULL,"
+"  `inetref` varchar(40) NOT NULL,"
+"  `findid` int NOT NULL DEFAULT '0',"
+"  `recordid` int NOT NULL DEFAULT '0',"
+"  `station` varchar(20) NOT NULL DEFAULT '',"
+"  `rectype` int unsigned NOT NULL DEFAULT '0',"
 "  `duplicate` tinyint(1) NOT NULL DEFAULT '0',"
-"  recstatus int(11) NOT NULL DEFAULT '0',"
-"  reactivate smallint(6) NOT NULL DEFAULT '0',"
-"  generic tinyint(1) NOT NULL,"
-"  future tinyint(1) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (station,starttime,title),"
-"  KEY endtime (endtime),"
-"  KEY title (title),"
-"  KEY seriesid (seriesid),"
-"  KEY programid (programid),"
-"  KEY recordid (recordid),"
-"  KEY recstatus (recstatus,programid,seriesid),"
-"  KEY recstatus_2 (recstatus,title,subtitle),"
-"  KEY future (future),"
-"  KEY chanid (chanid,starttime),"
-"  KEY subtitle (subtitle),"
-"  KEY description (description(255))"
+"  `recstatus` int NOT NULL DEFAULT '0',"
+"  `reactivate` smallint NOT NULL DEFAULT '0',"
+"  `generic` tinyint(1) NOT NULL,"
+"  `future` tinyint(1) NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`station`,`starttime`,`title`),"
+"  KEY `endtime` (`endtime`),"
+"  KEY `title` (`title`),"
+"  KEY `seriesid` (`seriesid`),"
+"  KEY `programid` (`programid`),"
+"  KEY `recordid` (`recordid`),"
+"  KEY `recstatus` (`recstatus`,`programid`,`seriesid`),"
+"  KEY `recstatus_2` (`recstatus`,`title`,`subtitle`),"
+"  KEY `future` (`future`),"
+"  KEY `chanid` (`chanid`,`starttime`),"
+"  KEY `subtitle` (`subtitle`),"
+"  KEY `description` (`description`(255))"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE people ("
-"  person mediumint(8) unsigned NOT NULL AUTO_INCREMENT,"
+"CREATE TABLE `people` ("
+"  `person` mediumint unsigned NOT NULL AUTO_INCREMENT,"
 "  `name` varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
-"  PRIMARY KEY (person),"
+"  PRIMARY KEY (`person`),"
 "  UNIQUE KEY `name` (`name`(41))"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE pidcache ("
-"  chanid smallint(6) NOT NULL DEFAULT '0',"
-"  pid int(11) NOT NULL DEFAULT '-1',"
-"  tableid int(11) NOT NULL DEFAULT '-1',"
-"  KEY chanid (chanid)"
+"CREATE TABLE `pidcache` ("
+"  `chanid` smallint NOT NULL DEFAULT '0',"
+"  `pid` int NOT NULL DEFAULT '-1',"
+"  `tableid` int NOT NULL DEFAULT '-1',"
+"  KEY `chanid` (`chanid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE playgroup ("
+"CREATE TABLE `playgroup` ("
 "  `name` varchar(32) NOT NULL DEFAULT '',"
-"  titlematch varchar(255) NOT NULL DEFAULT '',"
-"  skipahead int(11) NOT NULL DEFAULT '0',"
-"  skipback int(11) NOT NULL DEFAULT '0',"
-"  timestretch int(11) NOT NULL DEFAULT '0',"
-"  jump int(11) NOT NULL DEFAULT '0',"
+"  `titlematch` varchar(255) NOT NULL DEFAULT '',"
+"  `skipahead` int NOT NULL DEFAULT '0',"
+"  `skipback` int NOT NULL DEFAULT '0',"
+"  `timestretch` int NOT NULL DEFAULT '0',"
+"  `jump` int NOT NULL DEFAULT '0',"
 "  PRIMARY KEY (`name`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE powerpriority ("
-"  priorityname varchar(64) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,"
-"  recpriority int(10) NOT NULL DEFAULT '0',"
-"  selectclause varchar(16000) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (priorityname)"
+"CREATE TABLE `powerpriority` ("
+"  `priorityname` varchar(64) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `selectclause` varchar(16000) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`priorityname`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE profilegroups ("
-"  id int(10) unsigned NOT NULL AUTO_INCREMENT,"
+"CREATE TABLE `profilegroups` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
 "  `name` varchar(128) DEFAULT NULL,"
-"  cardtype varchar(32) NOT NULL DEFAULT 'V4L',"
-"  is_default int(1) DEFAULT '0',"
-"  hostname varchar(64) DEFAULT NULL,"
-"  PRIMARY KEY (id),"
-"  UNIQUE KEY `name` (`name`,hostname),"
-"  KEY cardtype (cardtype)"
-") ENGINE=MyISAM AUTO_INCREMENT=18 DEFAULT CHARSET=utf8;",
-"CREATE TABLE program ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  endtime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  title varchar(128) NOT NULL DEFAULT '',"
-"  subtitle varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(16000) NOT NULL DEFAULT '',"
-"  category varchar(64) NOT NULL DEFAULT '',"
-"  category_type varchar(64) NOT NULL DEFAULT '',"
-"  airdate year(4) NOT NULL DEFAULT '0000',"
-"  stars float NOT NULL DEFAULT '0',"
-"  previouslyshown tinyint(4) NOT NULL DEFAULT '0',"
-"  title_pronounce varchar(128) NOT NULL DEFAULT '',"
-"  stereo tinyint(1) NOT NULL DEFAULT '0',"
-"  subtitled tinyint(1) NOT NULL DEFAULT '0',"
-"  hdtv tinyint(1) NOT NULL DEFAULT '0',"
-"  closecaptioned tinyint(1) NOT NULL DEFAULT '0',"
-"  partnumber int(11) NOT NULL DEFAULT '0',"
-"  parttotal int(11) NOT NULL DEFAULT '0',"
-"  seriesid varchar(64) NOT NULL DEFAULT '',"
-"  originalairdate date DEFAULT NULL,"
-"  showtype varchar(30) NOT NULL DEFAULT '',"
-"  colorcode varchar(20) NOT NULL DEFAULT '',"
-"  syndicatedepisodenumber varchar(20) NOT NULL DEFAULT '',"
-"  programid varchar(64) NOT NULL DEFAULT '',"
-"  manualid int(10) unsigned NOT NULL DEFAULT '0',"
-"  generic tinyint(1) DEFAULT '0',"
-"  listingsource int(11) NOT NULL DEFAULT '0',"
+"  `cardtype` varchar(32) NOT NULL DEFAULT 'V4L',"
+"  `is_default` int DEFAULT '0',"
+"  `hostname` varchar(64) DEFAULT NULL,"
+"  PRIMARY KEY (`id`),"
+"  UNIQUE KEY `name` (`name`,`hostname`),"
+"  KEY `cardtype` (`cardtype`)"
+") ENGINE=MyISAM AUTO_INCREMENT=20 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `program` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `endtime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `title` varchar(128) NOT NULL DEFAULT '',"
+"  `subtitle` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(16000) NOT NULL DEFAULT '',"
+"  `category` varchar(64) NOT NULL DEFAULT '',"
+"  `category_type` varchar(64) NOT NULL DEFAULT '',"
+"  `airdate` year NOT NULL DEFAULT '0000',"
+"  `stars` float NOT NULL DEFAULT '0',"
+"  `previouslyshown` tinyint NOT NULL DEFAULT '0',"
+"  `title_pronounce` varchar(128) NOT NULL DEFAULT '',"
+"  `stereo` tinyint(1) NOT NULL DEFAULT '0',"
+"  `subtitled` tinyint(1) NOT NULL DEFAULT '0',"
+"  `hdtv` tinyint(1) NOT NULL DEFAULT '0',"
+"  `closecaptioned` tinyint(1) NOT NULL DEFAULT '0',"
+"  `partnumber` int NOT NULL DEFAULT '0',"
+"  `parttotal` int NOT NULL DEFAULT '0',"
+"  `seriesid` varchar(64) NOT NULL DEFAULT '',"
+"  `originalairdate` date DEFAULT NULL,"
+"  `showtype` varchar(30) NOT NULL DEFAULT '',"
+"  `colorcode` varchar(20) NOT NULL DEFAULT '',"
+"  `syndicatedepisodenumber` varchar(20) NOT NULL DEFAULT '',"
+"  `programid` varchar(64) NOT NULL DEFAULT '',"
+"  `manualid` int unsigned NOT NULL DEFAULT '0',"
+"  `generic` tinyint(1) DEFAULT '0',"
+"  `listingsource` int NOT NULL DEFAULT '0',"
 "  `first` tinyint(1) NOT NULL DEFAULT '0',"
 "  `last` tinyint(1) NOT NULL DEFAULT '0',"
-"  audioprop set('STEREO','MONO','SURROUND','DOLBY','HARDHEAR','VISUALIMPAIR') NOT NULL,"
-"  subtitletypes set('HARDHEAR','NORMAL','ONSCREEN','SIGNED') NOT NULL,"
-"  videoprop set('HDTV','WIDESCREEN','AVC') NOT NULL,"
-"  PRIMARY KEY (chanid,starttime,manualid),"
-"  KEY endtime (endtime),"
-"  KEY title (title),"
-"  KEY title_pronounce (title_pronounce),"
-"  KEY seriesid (seriesid),"
-"  KEY id_start_end (chanid,starttime,endtime),"
-"  KEY program_manualid (manualid),"
-"  KEY previouslyshown (previouslyshown),"
-"  KEY programid (programid,starttime),"
-"  KEY starttime (starttime),"
-"  KEY subtitle (subtitle),"
-"  KEY description (description(255))"
+"  `audioprop` set('STEREO','MONO','SURROUND','DOLBY','HARDHEAR','VISUALIMPAIR') NOT NULL,"
+"  `subtitletypes` set('HARDHEAR','NORMAL','ONSCREEN','SIGNED') NOT NULL,"
+"  `videoprop` set('WIDESCREEN','HDTV','MPEG2','AVC','HEVC') NOT NULL,"
+"  `inetref` varchar(40) DEFAULT '',"
+"  `season` int NOT NULL DEFAULT '0',"
+"  `episode` int NOT NULL DEFAULT '0',"
+"  `totalepisodes` int NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`chanid`,`starttime`,`manualid`),"
+"  KEY `endtime` (`endtime`),"
+"  KEY `title_pronounce` (`title_pronounce`),"
+"  KEY `seriesid` (`seriesid`),"
+"  KEY `id_start_end` (`chanid`,`starttime`,`endtime`),"
+"  KEY `program_manualid` (`manualid`),"
+"  KEY `previouslyshown` (`previouslyshown`),"
+"  KEY `programid` (`programid`,`starttime`),"
+"  KEY `starttime` (`starttime`),"
+"  KEY `subtitle` (`subtitle`),"
+"  KEY `description` (`description`(255)),"
+"  KEY `title_subtitle_start` (`title`,`subtitle`,`starttime`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE programgenres ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  relevance char(1) NOT NULL DEFAULT '',"
-"  genre varchar(30) DEFAULT NULL,"
-"  PRIMARY KEY (chanid,starttime,relevance),"
-"  KEY genre (genre)"
+"CREATE TABLE `programgenres` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `relevance` char(1) NOT NULL DEFAULT '',"
+"  `genre` varchar(30) DEFAULT NULL,"
+"  PRIMARY KEY (`chanid`,`starttime`,`relevance`),"
+"  KEY `genre` (`genre`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE programrating ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  `system` varchar(8) DEFAULT NULL,"
-"  rating varchar(16) DEFAULT NULL,"
-"  UNIQUE KEY chanid (chanid,starttime,`system`,rating),"
-"  KEY starttime (starttime,`system`)"
+"CREATE TABLE `programrating` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `system` varchar(128) DEFAULT NULL,"
+"  `rating` varchar(128) DEFAULT NULL,"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`system`,`rating`),"
+"  KEY `starttime` (`starttime`,`system`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recgrouppassword ("
-"  recgroup varchar(32) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
+"CREATE TABLE `recgrouppassword` ("
+"  `recgroup` varchar(32) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
 "  `password` varchar(10) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (recgroup)"
+"  PRIMARY KEY (`recgroup`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE record ("
-"  recordid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  `type` int(10) unsigned NOT NULL DEFAULT '0',"
-"  chanid int(10) unsigned DEFAULT NULL,"
-"  starttime time NOT NULL DEFAULT '00:00:00',"
-"  startdate date NOT NULL DEFAULT '0000-00-00',"
-"  endtime time NOT NULL DEFAULT '00:00:00',"
-"  enddate date NOT NULL DEFAULT '0000-00-00',"
-"  title varchar(128) NOT NULL DEFAULT '',"
-"  subtitle varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(16000) NOT NULL DEFAULT '',"
-"  season smallint(5) NOT NULL,"
-"  episode smallint(5) NOT NULL,"
-"  category varchar(64) NOT NULL DEFAULT '',"
+"CREATE TABLE `recgroups` ("
+"  `recgroupid` smallint NOT NULL AUTO_INCREMENT,"
+"  `recgroup` varchar(64) NOT NULL DEFAULT '',"
+"  `displayname` varchar(64) NOT NULL DEFAULT '',"
+"  `password` varchar(40) NOT NULL DEFAULT '',"
+"  `special` tinyint(1) NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`recgroupid`),"
+"  UNIQUE KEY `recgroup` (`recgroup`)"
+") ENGINE=MyISAM AUTO_INCREMENT=4 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `record` ("
+"  `recordid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `type` int unsigned NOT NULL DEFAULT '0',"
+"  `chanid` int unsigned DEFAULT NULL,"
+"  `starttime` time DEFAULT NULL,"
+"  `startdate` date DEFAULT NULL,"
+"  `endtime` time DEFAULT NULL,"
+"  `enddate` date DEFAULT NULL,"
+"  `title` varchar(128) NOT NULL DEFAULT '',"
+"  `subtitle` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(16000) NOT NULL DEFAULT '',"
+"  `season` smallint NOT NULL,"
+"  `episode` smallint NOT NULL,"
+"  `category` varchar(64) NOT NULL DEFAULT '',"
 "  `profile` varchar(128) NOT NULL DEFAULT 'Default',"
-"  recpriority int(10) NOT NULL DEFAULT '0',"
-"  autoexpire int(11) NOT NULL DEFAULT '0',"
-"  maxepisodes int(11) NOT NULL DEFAULT '0',"
-"  maxnewest int(11) NOT NULL DEFAULT '0',"
-"  startoffset int(11) NOT NULL DEFAULT '0',"
-"  endoffset int(11) NOT NULL DEFAULT '0',"
-"  recgroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  dupmethod int(11) NOT NULL DEFAULT '6',"
-"  dupin int(11) NOT NULL DEFAULT '15',"
-"  station varchar(20) NOT NULL DEFAULT '',"
-"  seriesid varchar(40) NOT NULL DEFAULT '',"
-"  programid varchar(40) NOT NULL DEFAULT '',"
-"  inetref varchar(40) NOT NULL,"
-"  search int(10) unsigned NOT NULL DEFAULT '0',"
-"  autotranscode tinyint(1) NOT NULL DEFAULT '0',"
-"  autocommflag tinyint(1) NOT NULL DEFAULT '0',"
-"  autouserjob1 tinyint(1) NOT NULL DEFAULT '0',"
-"  autouserjob2 tinyint(1) NOT NULL DEFAULT '0',"
-"  autouserjob3 tinyint(1) NOT NULL DEFAULT '0',"
-"  autouserjob4 tinyint(1) NOT NULL DEFAULT '0',"
-"  autometadata tinyint(1) NOT NULL DEFAULT '0',"
-"  findday tinyint(4) NOT NULL DEFAULT '0',"
-"  findtime time NOT NULL DEFAULT '00:00:00',"
-"  findid int(11) NOT NULL DEFAULT '0',"
-"  inactive tinyint(1) NOT NULL DEFAULT '0',"
-"  parentid int(11) NOT NULL DEFAULT '0',"
-"  transcoder int(11) NOT NULL DEFAULT '0',"
-"  playgroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  prefinput int(10) NOT NULL DEFAULT '0',"
-"  next_record datetime NOT NULL,"
-"  last_record datetime NOT NULL,"
-"  last_delete datetime NOT NULL,"
-"  storagegroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  avg_delay int(11) NOT NULL DEFAULT '100',"
-"  filter int(10) unsigned NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (recordid),"
-"  KEY chanid (chanid,starttime),"
-"  KEY title (title),"
-"  KEY seriesid (seriesid),"
-"  KEY programid (programid),"
-"  KEY maxepisodes (maxepisodes),"
-"  KEY search (search),"
-"  KEY `type` (`type`)"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `autoexpire` int NOT NULL DEFAULT '0',"
+"  `maxepisodes` int NOT NULL DEFAULT '0',"
+"  `maxnewest` int NOT NULL DEFAULT '0',"
+"  `startoffset` int NOT NULL DEFAULT '0',"
+"  `endoffset` int NOT NULL DEFAULT '0',"
+"  `recgroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `dupmethod` int NOT NULL DEFAULT '6',"
+"  `dupin` int NOT NULL DEFAULT '15',"
+"  `station` varchar(20) NOT NULL DEFAULT '',"
+"  `seriesid` varchar(64) DEFAULT NULL,"
+"  `programid` varchar(64) DEFAULT NULL,"
+"  `inetref` varchar(40) NOT NULL,"
+"  `search` int unsigned NOT NULL DEFAULT '0',"
+"  `autotranscode` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autocommflag` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autouserjob1` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autouserjob2` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autouserjob3` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autouserjob4` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autometadata` tinyint(1) NOT NULL DEFAULT '0',"
+"  `findday` tinyint NOT NULL DEFAULT '0',"
+"  `findtime` time NOT NULL DEFAULT '00:00:00',"
+"  `findid` int NOT NULL DEFAULT '0',"
+"  `inactive` tinyint(1) NOT NULL DEFAULT '0',"
+"  `parentid` int NOT NULL DEFAULT '0',"
+"  `transcoder` int NOT NULL DEFAULT '0',"
+"  `playgroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `prefinput` int NOT NULL DEFAULT '0',"
+"  `next_record` datetime DEFAULT NULL,"
+"  `last_record` datetime DEFAULT NULL,"
+"  `last_delete` datetime DEFAULT NULL,"
+"  `storagegroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `avg_delay` int NOT NULL DEFAULT '100',"
+"  `filter` int unsigned NOT NULL DEFAULT '0',"
+"  `recgroupid` smallint NOT NULL DEFAULT '1',"
+"  `autoextend` tinyint unsigned DEFAULT '0',"
+"  PRIMARY KEY (`recordid`),"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`startdate`,`title`,`type`),"
+"  KEY `title` (`title`),"
+"  KEY `seriesid` (`seriesid`),"
+"  KEY `programid` (`programid`),"
+"  KEY `maxepisodes` (`maxepisodes`),"
+"  KEY `search` (`search`),"
+"  KEY `type` (`type`),"
+"  KEY `recgroupid` (`recgroupid`)"
 ") ENGINE=MyISAM AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;",
-"CREATE TABLE recorded ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  endtime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  title varchar(128) NOT NULL DEFAULT '',"
-"  subtitle varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(16000) NOT NULL DEFAULT '',"
-"  season smallint(5) NOT NULL,"
-"  episode smallint(5) NOT NULL,"
-"  category varchar(64) NOT NULL DEFAULT '',"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  bookmark tinyint(1) NOT NULL DEFAULT '0',"
-"  editing int(10) unsigned NOT NULL DEFAULT '0',"
-"  cutlist tinyint(1) NOT NULL DEFAULT '0',"
-"  autoexpire int(11) NOT NULL DEFAULT '0',"
-"  commflagged int(10) unsigned NOT NULL DEFAULT '0',"
-"  recgroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  recordid int(11) DEFAULT NULL,"
-"  seriesid varchar(40) NOT NULL DEFAULT '',"
-"  programid varchar(40) NOT NULL DEFAULT '',"
-"  inetref varchar(40) NOT NULL,"
-"  lastmodified timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-"  filesize bigint(20) NOT NULL DEFAULT '0',"
-"  stars float NOT NULL DEFAULT '0',"
-"  previouslyshown tinyint(1) DEFAULT '0',"
-"  originalairdate date DEFAULT NULL,"
+"CREATE TABLE `recorded` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `endtime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `title` varchar(128) NOT NULL DEFAULT '',"
+"  `subtitle` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(16000) NOT NULL DEFAULT '',"
+"  `season` smallint NOT NULL,"
+"  `episode` smallint NOT NULL,"
+"  `category` varchar(64) NOT NULL DEFAULT '',"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  `bookmark` tinyint(1) NOT NULL DEFAULT '0',"
+"  `lastplay` tinyint unsigned DEFAULT '0',"
+"  `editing` int unsigned NOT NULL DEFAULT '0',"
+"  `cutlist` tinyint(1) NOT NULL DEFAULT '0',"
+"  `autoexpire` int NOT NULL DEFAULT '0',"
+"  `commflagged` int unsigned NOT NULL DEFAULT '0',"
+"  `recgroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `recordid` int DEFAULT NULL,"
+"  `seriesid` varchar(64) DEFAULT NULL,"
+"  `programid` varchar(64) DEFAULT NULL,"
+"  `inetref` varchar(40) NOT NULL,"
+"  `lastmodified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+"  `filesize` bigint NOT NULL DEFAULT '0',"
+"  `stars` float NOT NULL DEFAULT '0',"
+"  `previouslyshown` tinyint(1) DEFAULT '0',"
+"  `originalairdate` date DEFAULT NULL,"
 "  `preserve` tinyint(1) NOT NULL DEFAULT '0',"
-"  findid int(11) NOT NULL DEFAULT '0',"
-"  deletepending tinyint(1) NOT NULL DEFAULT '0',"
-"  transcoder int(11) NOT NULL DEFAULT '0',"
-"  timestretch float NOT NULL DEFAULT '1',"
-"  recpriority int(11) NOT NULL DEFAULT '0',"
-"  basename varchar(255) NOT NULL,"
-"  progstart datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  progend datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  playgroup varchar(32) NOT NULL DEFAULT 'Default',"
+"  `findid` int NOT NULL DEFAULT '0',"
+"  `deletepending` tinyint(1) NOT NULL DEFAULT '0',"
+"  `transcoder` int NOT NULL DEFAULT '0',"
+"  `timestretch` float NOT NULL DEFAULT '1',"
+"  `recpriority` int NOT NULL DEFAULT '0',"
+"  `basename` varchar(255) NOT NULL,"
+"  `progstart` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `progend` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `playgroup` varchar(32) NOT NULL DEFAULT 'Default',"
 "  `profile` varchar(32) NOT NULL DEFAULT '',"
 "  `duplicate` tinyint(1) NOT NULL DEFAULT '0',"
-"  transcoded tinyint(1) NOT NULL DEFAULT '0',"
-"  watched tinyint(4) NOT NULL DEFAULT '0',"
-"  storagegroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  bookmarkupdate timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  PRIMARY KEY (chanid,starttime),"
-"  KEY endtime (endtime),"
-"  KEY seriesid (seriesid),"
-"  KEY programid (programid),"
-"  KEY title (title),"
-"  KEY recordid (recordid),"
-"  KEY deletepending (deletepending,lastmodified),"
-"  KEY recgroup (recgroup,endtime)"
+"  `transcoded` tinyint(1) NOT NULL DEFAULT '0',"
+"  `watched` tinyint NOT NULL DEFAULT '0',"
+"  `storagegroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `bookmarkupdate` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `recgroupid` smallint NOT NULL DEFAULT '1',"
+"  `recordedid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `inputname` varchar(32) DEFAULT NULL,"
+"  PRIMARY KEY (`recordedid`),"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`),"
+"  KEY `endtime` (`endtime`),"
+"  KEY `seriesid` (`seriesid`),"
+"  KEY `programid` (`programid`),"
+"  KEY `title` (`title`),"
+"  KEY `recordid` (`recordid`),"
+"  KEY `deletepending` (`deletepending`,`lastmodified`),"
+"  KEY `recgroup` (`recgroup`,`endtime`),"
+"  KEY `recgroupid` (`recgroupid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedartwork ("
-"  inetref varchar(255) NOT NULL,"
-"  season smallint(5) NOT NULL,"
+"CREATE TABLE `recordedartwork` ("
+"  `inetref` varchar(255) NOT NULL,"
+"  `season` smallint NOT NULL,"
 "  `host` text NOT NULL,"
-"  coverart text NOT NULL,"
-"  fanart text NOT NULL,"
-"  banner text NOT NULL"
+"  `coverart` text NOT NULL,"
+"  `fanart` text NOT NULL,"
+"  `banner` text NOT NULL,"
+"  KEY `recordedartwork_ix1` (`inetref`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedcredits ("
-"  person mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  role set('actor','director','producer','executive_producer','writer','guest_star','host','adapter','presenter','commentator','guest') NOT NULL DEFAULT '',"
-"  UNIQUE KEY chanid (chanid,starttime,person,role),"
-"  KEY person (person,role)"
+"CREATE TABLE `recordedcredits` ("
+"  `person` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `role` set('actor','director','producer','executive_producer','writer','guest_star','host','adapter','presenter','commentator','guest') NOT NULL DEFAULT '',"
+"  `priority` tinyint unsigned DEFAULT '0',"
+"  `roleid` mediumint unsigned DEFAULT '0',"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`person`,`role`,`roleid`),"
+"  KEY `person` (`person`,`role`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedfile ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  basename varchar(128) NOT NULL DEFAULT '',"
-"  filesize bigint(20) NOT NULL DEFAULT '0',"
-"  width smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  height smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  fps float(6,3) NOT NULL DEFAULT '0.000',"
-"  aspect float(8,6) NOT NULL DEFAULT '0.000000',"
-"  audio_sample_rate smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  audio_bits_per_sample smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  audio_channels tinyint(3) unsigned NOT NULL DEFAULT '0',"
-"  audio_type varchar(255) NOT NULL DEFAULT '',"
-"  video_type varchar(255) NOT NULL DEFAULT '',"
+"CREATE TABLE `recordedfile` ("
+"  `basename` varchar(128) NOT NULL DEFAULT '',"
+"  `filesize` bigint NOT NULL DEFAULT '0',"
+"  `width` smallint unsigned NOT NULL DEFAULT '0',"
+"  `height` smallint unsigned NOT NULL DEFAULT '0',"
+"  `fps` float(6,3) NOT NULL DEFAULT '0.000',"
+"  `aspect` float(8,6) NOT NULL DEFAULT '0.000000',"
+"  `audio_sample_rate` smallint unsigned NOT NULL DEFAULT '0',"
+"  `audio_channels` tinyint unsigned NOT NULL DEFAULT '0',"
+"  `audio_codec` varchar(255) NOT NULL DEFAULT '',"
+"  `video_codec` varchar(255) NOT NULL DEFAULT '',"
 "  `comment` varchar(255) NOT NULL DEFAULT '',"
-"  hostname varchar(64) NOT NULL,"
-"  storagegroup varchar(32) NOT NULL,"
-"  id int(11) NOT NULL AUTO_INCREMENT,"
-"  PRIMARY KEY (id),"
-"  UNIQUE KEY chanid (chanid,starttime,basename),"
-"  KEY basename (basename)"
+"  `hostname` varchar(64) NOT NULL,"
+"  `storagegroup` varchar(32) NOT NULL,"
+"  `id` int NOT NULL AUTO_INCREMENT,"
+"  `recordedid` int unsigned NOT NULL,"
+"  `container` varchar(255) NOT NULL DEFAULT '',"
+"  `total_bitrate` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `video_avg_bitrate` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `video_max_bitrate` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `audio_avg_bitrate` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `audio_max_bitrate` mediumint unsigned NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`id`),"
+"  UNIQUE KEY `recordedid` (`recordedid`),"
+"  KEY `basename` (`basename`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedmarkup ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  mark mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  `type` tinyint(4) NOT NULL DEFAULT '0',"
-"  `data` int(11) unsigned DEFAULT NULL,"
-"  PRIMARY KEY (chanid,starttime,`type`,mark)"
+"CREATE TABLE `recordedmarkup` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `mark` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `type` tinyint NOT NULL DEFAULT '0',"
+"  `data` int unsigned DEFAULT NULL,"
+"  PRIMARY KEY (`chanid`,`starttime`,`type`,`mark`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedprogram ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  endtime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  title varchar(128) NOT NULL DEFAULT '',"
-"  subtitle varchar(128) NOT NULL DEFAULT '',"
-"  description varchar(16000) NOT NULL DEFAULT '',"
-"  category varchar(64) NOT NULL DEFAULT '',"
-"  category_type varchar(64) NOT NULL DEFAULT '',"
-"  airdate year(4) NOT NULL DEFAULT '0000',"
-"  stars float unsigned NOT NULL DEFAULT '0',"
-"  previouslyshown tinyint(4) NOT NULL DEFAULT '0',"
-"  title_pronounce varchar(128) NOT NULL DEFAULT '',"
-"  stereo tinyint(1) NOT NULL DEFAULT '0',"
-"  subtitled tinyint(1) NOT NULL DEFAULT '0',"
-"  hdtv tinyint(1) NOT NULL DEFAULT '0',"
-"  closecaptioned tinyint(1) NOT NULL DEFAULT '0',"
-"  partnumber int(11) NOT NULL DEFAULT '0',"
-"  parttotal int(11) NOT NULL DEFAULT '0',"
-"  seriesid varchar(40) NOT NULL DEFAULT '',"
-"  originalairdate date DEFAULT NULL,"
-"  showtype varchar(30) NOT NULL DEFAULT '',"
-"  colorcode varchar(20) NOT NULL DEFAULT '',"
-"  syndicatedepisodenumber varchar(20) NOT NULL DEFAULT '',"
-"  programid varchar(40) NOT NULL DEFAULT '',"
-"  manualid int(10) unsigned NOT NULL DEFAULT '0',"
-"  generic tinyint(1) DEFAULT '0',"
-"  listingsource int(11) NOT NULL DEFAULT '0',"
+"CREATE TABLE `recordedprogram` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `endtime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `title` varchar(128) NOT NULL DEFAULT '',"
+"  `subtitle` varchar(128) NOT NULL DEFAULT '',"
+"  `description` varchar(16000) NOT NULL DEFAULT '',"
+"  `category` varchar(64) NOT NULL DEFAULT '',"
+"  `category_type` varchar(64) NOT NULL DEFAULT '',"
+"  `airdate` year NOT NULL DEFAULT '0000',"
+"  `stars` float unsigned NOT NULL DEFAULT '0',"
+"  `previouslyshown` tinyint NOT NULL DEFAULT '0',"
+"  `title_pronounce` varchar(128) NOT NULL DEFAULT '',"
+"  `stereo` tinyint(1) NOT NULL DEFAULT '0',"
+"  `subtitled` tinyint(1) NOT NULL DEFAULT '0',"
+"  `hdtv` tinyint(1) NOT NULL DEFAULT '0',"
+"  `closecaptioned` tinyint(1) NOT NULL DEFAULT '0',"
+"  `partnumber` int NOT NULL DEFAULT '0',"
+"  `parttotal` int NOT NULL DEFAULT '0',"
+"  `seriesid` varchar(64) DEFAULT NULL,"
+"  `originalairdate` date DEFAULT NULL,"
+"  `showtype` varchar(30) NOT NULL DEFAULT '',"
+"  `colorcode` varchar(20) NOT NULL DEFAULT '',"
+"  `syndicatedepisodenumber` varchar(20) NOT NULL DEFAULT '',"
+"  `programid` varchar(64) DEFAULT NULL,"
+"  `manualid` int unsigned NOT NULL DEFAULT '0',"
+"  `generic` tinyint(1) DEFAULT '0',"
+"  `listingsource` int NOT NULL DEFAULT '0',"
 "  `first` tinyint(1) NOT NULL DEFAULT '0',"
 "  `last` tinyint(1) NOT NULL DEFAULT '0',"
-"  audioprop set('STEREO','MONO','SURROUND','DOLBY','HARDHEAR','VISUALIMPAIR') NOT NULL,"
-"  subtitletypes set('HARDHEAR','NORMAL','ONSCREEN','SIGNED') NOT NULL,"
-"  videoprop set('HDTV','WIDESCREEN','AVC','720','1080','DAMAGED') NOT NULL,"
-"  PRIMARY KEY (chanid,starttime,manualid),"
-"  KEY endtime (endtime),"
-"  KEY title (title),"
-"  KEY title_pronounce (title_pronounce),"
-"  KEY seriesid (seriesid),"
-"  KEY programid (programid),"
-"  KEY id_start_end (chanid,starttime,endtime)"
+"  `audioprop` set('STEREO','MONO','SURROUND','DOLBY','HARDHEAR','VISUALIMPAIR') NOT NULL,"
+"  `subtitletypes` set('HARDHEAR','NORMAL','ONSCREEN','SIGNED') NOT NULL,"
+"  `videoprop` set('WIDESCREEN','HDTV','MPEG2','AVC','HEVC','720','1080','4K','3DTV','PROGRESSIVE','DAMAGED') NOT NULL,"
+"  `inetref` varchar(40) DEFAULT '',"
+"  `season` int NOT NULL DEFAULT '0',"
+"  `episode` int NOT NULL DEFAULT '0',"
+"  `totalepisodes` int NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`chanid`,`starttime`,`manualid`),"
+"  KEY `endtime` (`endtime`),"
+"  KEY `title` (`title`),"
+"  KEY `title_pronounce` (`title_pronounce`),"
+"  KEY `seriesid` (`seriesid`),"
+"  KEY `programid` (`programid`),"
+"  KEY `id_start_end` (`chanid`,`starttime`,`endtime`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedrating ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  `system` varchar(8) DEFAULT NULL,"
-"  rating varchar(16) DEFAULT NULL,"
-"  UNIQUE KEY chanid (chanid,starttime,`system`,rating),"
-"  KEY starttime (starttime,`system`)"
+"CREATE TABLE `recordedrating` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `system` varchar(128) DEFAULT NULL,"
+"  `rating` varchar(128) DEFAULT NULL,"
+"  UNIQUE KEY `chanid` (`chanid`,`starttime`,`system`,`rating`),"
+"  KEY `starttime` (`starttime`,`system`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordedseek ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  mark mediumint(8) unsigned NOT NULL DEFAULT '0',"
-"  `offset` bigint(20) unsigned NOT NULL,"
-"  `type` tinyint(4) NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (chanid,starttime,`type`,mark)"
+"CREATE TABLE `recordedseek` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `mark` mediumint unsigned NOT NULL DEFAULT '0',"
+"  `offset` bigint unsigned NOT NULL,"
+"  `type` tinyint NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`chanid`,`starttime`,`type`,`mark`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordfilter ("
-"  filterid int(10) unsigned NOT NULL,"
-"  description varchar(64) DEFAULT NULL,"
-"  clause varchar(256) DEFAULT NULL,"
-"  newruledefault tinyint(1) DEFAULT '0',"
-"  PRIMARY KEY (filterid)"
+"CREATE TABLE `recordfilter` ("
+"  `filterid` int unsigned NOT NULL,"
+"  `description` varchar(64) DEFAULT NULL,"
+"  `clause` varchar(256) DEFAULT NULL,"
+"  `newruledefault` tinyint(1) DEFAULT '0',"
+"  PRIMARY KEY (`filterid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordingprofiles ("
-"  id int(10) unsigned NOT NULL AUTO_INCREMENT,"
+"CREATE TABLE `recordingprofiles` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
 "  `name` varchar(128) DEFAULT NULL,"
-"  videocodec varchar(128) DEFAULT NULL,"
-"  audiocodec varchar(128) DEFAULT NULL,"
-"  profilegroup int(10) unsigned NOT NULL DEFAULT '0',"
-"  PRIMARY KEY (id),"
-"  KEY profilegroup (profilegroup)"
-") ENGINE=MyISAM AUTO_INCREMENT=70 DEFAULT CHARSET=utf8;",
-"CREATE TABLE recordmatch ("
-"  recordid int(10) unsigned NOT NULL,"
-"  chanid int(10) unsigned NOT NULL,"
-"  starttime datetime NOT NULL,"
-"  manualid int(10) unsigned NOT NULL,"
-"  oldrecduplicate tinyint(1) DEFAULT NULL,"
-"  recduplicate tinyint(1) DEFAULT NULL,"
-"  findduplicate tinyint(1) DEFAULT NULL,"
-"  oldrecstatus int(11) DEFAULT NULL,"
-"  findid int(11) NOT NULL DEFAULT '0',"
-"  UNIQUE KEY recordid (recordid,chanid,starttime),"
-"  KEY chanid (chanid,starttime,manualid),"
-"  KEY recordid_2 (recordid,findid)"
+"  `videocodec` varchar(128) DEFAULT NULL,"
+"  `audiocodec` varchar(128) DEFAULT NULL,"
+"  `profilegroup` int unsigned NOT NULL DEFAULT '0',"
+"  PRIMARY KEY (`id`),"
+"  KEY `profilegroup` (`profilegroup`)"
+") ENGINE=MyISAM AUTO_INCREMENT=78 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `recordmatch` ("
+"  `recordid` int unsigned NOT NULL,"
+"  `chanid` int unsigned NOT NULL,"
+"  `starttime` datetime NOT NULL,"
+"  `manualid` int unsigned NOT NULL,"
+"  `oldrecduplicate` tinyint(1) DEFAULT NULL,"
+"  `recduplicate` tinyint(1) DEFAULT NULL,"
+"  `findduplicate` tinyint(1) DEFAULT NULL,"
+"  `oldrecstatus` int DEFAULT NULL,"
+"  `findid` int NOT NULL DEFAULT '0',"
+"  UNIQUE KEY `recordid` (`recordid`,`chanid`,`starttime`),"
+"  KEY `chanid` (`chanid`,`starttime`,`manualid`),"
+"  KEY `recordid_2` (`recordid`,`findid`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE scannerfile ("
-"  fileid bigint(20) unsigned NOT NULL AUTO_INCREMENT,"
-"  filesize bigint(20) unsigned NOT NULL DEFAULT '0',"
-"  filehash varchar(64) NOT NULL DEFAULT '',"
-"  added timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-"  PRIMARY KEY (fileid),"
-"  UNIQUE KEY filehash (filehash)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE scannerpath ("
-"  fileid bigint(20) unsigned NOT NULL,"
-"  hostname varchar(64) NOT NULL DEFAULT 'localhost',"
-"  storagegroup varchar(32) NOT NULL DEFAULT 'Default',"
-"  filename varchar(255) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (fileid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE settings ("
-"  `value` varchar(128) NOT NULL DEFAULT '',"
-"  `data` varchar(16000) NOT NULL DEFAULT '',"
-"  hostname varchar(64) DEFAULT NULL,"
-"  KEY `value` (`value`,hostname)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE storagegroup ("
-"  id int(11) NOT NULL AUTO_INCREMENT,"
-"  groupname varchar(32) NOT NULL,"
-"  hostname varchar(64) NOT NULL DEFAULT '',"
-"  dirname varchar(235) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
-"  PRIMARY KEY (id),"
-"  UNIQUE KEY grouphostdir (groupname,hostname,dirname),"
-"  KEY hostname (hostname)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE tvchain ("
-"  chanid int(10) unsigned NOT NULL DEFAULT '0',"
-"  starttime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  chainid varchar(128) NOT NULL DEFAULT '',"
-"  chainpos int(10) NOT NULL DEFAULT '0',"
-"  discontinuity tinyint(1) NOT NULL DEFAULT '0',"
-"  watching int(10) NOT NULL DEFAULT '0',"
-"  hostprefix varchar(128) NOT NULL DEFAULT '',"
-"  cardtype varchar(32) NOT NULL DEFAULT 'V4L',"
-"  input varchar(32) NOT NULL DEFAULT '',"
-"  channame varchar(32) NOT NULL DEFAULT '',"
-"  endtime datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
-"  PRIMARY KEY (chanid,starttime)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE tvosdmenu ("
-"  osdcategory varchar(32) NOT NULL,"
-"  livetv tinyint(4) NOT NULL DEFAULT '0',"
-"  recorded tinyint(4) NOT NULL DEFAULT '0',"
-"  video tinyint(4) NOT NULL DEFAULT '0',"
-"  dvd tinyint(4) NOT NULL DEFAULT '0',"
-"  description varchar(32) NOT NULL,"
-"  PRIMARY KEY (osdcategory)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE upnpmedia ("
-"  intid int(10) unsigned NOT NULL DEFAULT '0',"
-"  class varchar(64) NOT NULL DEFAULT '',"
-"  itemtype varchar(128) NOT NULL DEFAULT '',"
-"  parentid int(10) unsigned NOT NULL DEFAULT '0',"
-"  itemproperties varchar(255) NOT NULL DEFAULT '',"
-"  filepath varchar(512) NOT NULL DEFAULT '',"
-"  title varchar(255) NOT NULL DEFAULT '',"
-"  filename varchar(512) NOT NULL DEFAULT '',"
-"  coverart varchar(512) NOT NULL DEFAULT '',"
-"  PRIMARY KEY (intid),"
-"  KEY class (class),"
-"  KEY filepath (filepath(333)),"
-"  KEY parentid (parentid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videocast ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  cast varchar(128) NOT NULL,"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videocategory ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  category varchar(128) NOT NULL,"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videocollection ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  title varchar(256) NOT NULL,"
-"  contenttype set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
-"  plot text,"
-"  network varchar(128) DEFAULT NULL,"
-"  collectionref varchar(128) NOT NULL,"
-"  certification varchar(128) DEFAULT NULL,"
-"  genre varchar(128) DEFAULT '',"
-"  releasedate date DEFAULT NULL,"
-"  `language` varchar(10) DEFAULT NULL,"
-"  `status` varchar(64) DEFAULT NULL,"
-"  rating float DEFAULT '0',"
-"  ratingcount int(10) DEFAULT '0',"
-"  runtime smallint(5) unsigned DEFAULT '0',"
-"  banner text,"
-"  fanart text,"
-"  coverart text,"
-"  PRIMARY KEY (intid),"
-"  KEY title (title)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videocountry ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  country varchar(128) NOT NULL,"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videogenre ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  genre varchar(128) NOT NULL,"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videometadata ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  title varchar(128) NOT NULL,"
-"  subtitle text NOT NULL,"
-"  tagline varchar(255) DEFAULT NULL,"
-"  director varchar(128) NOT NULL,"
-"  studio varchar(128) DEFAULT NULL,"
-"  plot text,"
-"  rating varchar(128) NOT NULL,"
-"  inetref varchar(255) NOT NULL,"
-"  collectionref int(10) NOT NULL DEFAULT '-1',"
-"  homepage text NOT NULL,"
-"  `year` int(10) unsigned NOT NULL,"
-"  releasedate date NOT NULL,"
-"  userrating float NOT NULL,"
-"  length int(10) unsigned NOT NULL,"
-"  playcount int(10) NOT NULL DEFAULT '0',"
-"  season smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  episode smallint(5) unsigned NOT NULL DEFAULT '0',"
-"  showlevel int(10) unsigned NOT NULL,"
-"  filename text NOT NULL,"
-"  `hash` varchar(128) NOT NULL,"
-"  coverfile text NOT NULL,"
-"  childid int(11) NOT NULL DEFAULT '-1',"
-"  browse tinyint(1) NOT NULL DEFAULT '1',"
-"  watched tinyint(1) NOT NULL DEFAULT '0',"
-"  processed tinyint(1) NOT NULL DEFAULT '0',"
-"  playcommand varchar(255) DEFAULT NULL,"
-"  category int(10) unsigned NOT NULL DEFAULT '0',"
-"  trailer text,"
-"  `host` text NOT NULL,"
-"  screenshot text,"
-"  banner text,"
-"  fanart text,"
-"  insertdate timestamp NULL DEFAULT CURRENT_TIMESTAMP,"
-"  contenttype set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
-"  PRIMARY KEY (intid),"
-"  KEY director (director),"
-"  KEY title (title)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videometadatacast ("
-"  idvideo int(10) unsigned NOT NULL,"
-"  idcast int(10) unsigned NOT NULL,"
-"  UNIQUE KEY idvideo (idvideo,idcast)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videometadatacountry ("
-"  idvideo int(10) unsigned NOT NULL,"
-"  idcountry int(10) unsigned NOT NULL,"
-"  UNIQUE KEY idvideo_2 (idvideo,idcountry),"
-"  KEY idvideo (idvideo),"
-"  KEY idcountry (idcountry)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videometadatagenre ("
-"  idvideo int(10) unsigned NOT NULL,"
-"  idgenre int(10) unsigned NOT NULL,"
-"  UNIQUE KEY idvideo_2 (idvideo,idgenre),"
-"  KEY idvideo (idvideo),"
-"  KEY idgenre (idgenre)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videopart ("
-"  fileid bigint(20) unsigned NOT NULL,"
-"  videoid int(10) unsigned NOT NULL,"
-"  `order` smallint(5) unsigned NOT NULL DEFAULT '1',"
-"  PRIMARY KEY (videoid,`order`)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videopathinfo ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  path text,"
-"  contenttype set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
-"  collectionref int(10) DEFAULT '0',"
-"  recurse tinyint(1) DEFAULT '0',"
-"  PRIMARY KEY (intid)"
-") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videosource ("
-"  sourceid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  `name` varchar(128) NOT NULL DEFAULT '',"
-"  xmltvgrabber varchar(128) DEFAULT NULL,"
-"  userid varchar(128) NOT NULL DEFAULT '',"
-"  freqtable varchar(16) NOT NULL DEFAULT 'default',"
-"  lineupid varchar(64) DEFAULT NULL,"
-"  `password` varchar(64) DEFAULT NULL,"
-"  useeit smallint(6) NOT NULL DEFAULT '0',"
-"  configpath varchar(4096) DEFAULT NULL,"
-"  dvb_nit_id int(6) DEFAULT '-1',"
-"  PRIMARY KEY (sourceid),"
+"CREATE TABLE `roles` ("
+"  `roleid` mediumint unsigned NOT NULL AUTO_INCREMENT,"
+"  `name` varchar(128) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`roleid`),"
 "  UNIQUE KEY `name` (`name`)"
 ") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
-"CREATE TABLE videotypes ("
-"  intid int(10) unsigned NOT NULL AUTO_INCREMENT,"
-"  extension varchar(128) NOT NULL,"
-"  playcommand varchar(255) NOT NULL,"
-"  f_ignore tinyint(1) DEFAULT NULL,"
-"  use_default tinyint(1) DEFAULT NULL,"
-"  PRIMARY KEY (intid)"
+"CREATE TABLE `scannerfile` ("
+"  `fileid` bigint unsigned NOT NULL AUTO_INCREMENT,"
+"  `filesize` bigint unsigned NOT NULL DEFAULT '0',"
+"  `filehash` varchar(64) NOT NULL DEFAULT '',"
+"  `added` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+"  PRIMARY KEY (`fileid`),"
+"  UNIQUE KEY `filehash` (`filehash`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `scannerpath` ("
+"  `fileid` bigint unsigned NOT NULL,"
+"  `hostname` varchar(64) NOT NULL DEFAULT 'localhost',"
+"  `storagegroup` varchar(32) NOT NULL DEFAULT 'Default',"
+"  `filename` varchar(255) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`fileid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `settings` ("
+"  `value` varchar(128) NOT NULL DEFAULT '',"
+"  `data` varchar(16000) NOT NULL DEFAULT '',"
+"  `hostname` varchar(64) DEFAULT NULL,"
+"  KEY `value` (`value`,`hostname`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `sportsapi` ("
+"  `id` int unsigned NOT NULL,"
+"  `provider` tinyint unsigned DEFAULT '0',"
+"  `name` varchar(128) NOT NULL,"
+"  `key1` varchar(64) NOT NULL,"
+"  `key2` varchar(64) NOT NULL,"
+"  PRIMARY KEY (`id`),"
+"  UNIQUE KEY `provider` (`provider`,`key1`(25),`key2`(50))"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `sportscleanup` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `provider` tinyint unsigned DEFAULT '0',"
+"  `weight` int unsigned NOT NULL,"
+"  `key1` varchar(256) NOT NULL,"
+"  `name` varchar(256) NOT NULL,"
+"  `pattern` varchar(256) NOT NULL,"
+"  `nth` tinyint unsigned NOT NULL,"
+"  `replacement` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`id`)"
+") ENGINE=MyISAM AUTO_INCREMENT=32 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `sportslisting` ("
+"  `id` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `api` int unsigned NOT NULL,"
+"  `title` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`id`)"
+") ENGINE=MyISAM AUTO_INCREMENT=96 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `storagegroup` ("
+"  `id` int NOT NULL AUTO_INCREMENT,"
+"  `groupname` varchar(32) NOT NULL,"
+"  `hostname` varchar(64) NOT NULL DEFAULT '',"
+"  `dirname` varchar(235) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`id`),"
+"  UNIQUE KEY `grouphostdir` (`groupname`,`hostname`,`dirname`),"
+"  KEY `hostname` (`hostname`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `tvchain` ("
+"  `chanid` int unsigned NOT NULL DEFAULT '0',"
+"  `starttime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  `chainid` varchar(128) NOT NULL DEFAULT '',"
+"  `chainpos` int NOT NULL DEFAULT '0',"
+"  `discontinuity` tinyint(1) NOT NULL DEFAULT '0',"
+"  `watching` int NOT NULL DEFAULT '0',"
+"  `hostprefix` varchar(128) NOT NULL DEFAULT '',"
+"  `cardtype` varchar(32) NOT NULL DEFAULT 'V4L',"
+"  `input` varchar(32) NOT NULL DEFAULT '',"
+"  `channame` varchar(32) NOT NULL DEFAULT '',"
+"  `endtime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  PRIMARY KEY (`chanid`,`starttime`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `tvosdmenu` ("
+"  `osdcategory` varchar(32) NOT NULL,"
+"  `livetv` tinyint NOT NULL DEFAULT '0',"
+"  `recorded` tinyint NOT NULL DEFAULT '0',"
+"  `video` tinyint NOT NULL DEFAULT '0',"
+"  `dvd` tinyint NOT NULL DEFAULT '0',"
+"  `description` varchar(32) NOT NULL,"
+"  PRIMARY KEY (`osdcategory`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `upnpmedia` ("
+"  `intid` int unsigned NOT NULL DEFAULT '0',"
+"  `class` varchar(64) NOT NULL DEFAULT '',"
+"  `itemtype` varchar(128) NOT NULL DEFAULT '',"
+"  `parentid` int unsigned NOT NULL DEFAULT '0',"
+"  `itemproperties` varchar(255) NOT NULL DEFAULT '',"
+"  `filepath` varchar(512) NOT NULL DEFAULT '',"
+"  `title` varchar(255) NOT NULL DEFAULT '',"
+"  `filename` varchar(512) NOT NULL DEFAULT '',"
+"  `coverart` varchar(512) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`intid`),"
+"  KEY `class` (`class`),"
+"  KEY `filepath` (`filepath`(333)),"
+"  KEY `parentid` (`parentid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `user_permissions` ("
+"  `userid` int unsigned NOT NULL,"
+"  `permission` varchar(128) NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`userid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `user_sessions` ("
+"  `sessiontoken` varchar(40) NOT NULL DEFAULT '',"
+"  `userid` int unsigned NOT NULL,"
+"  `client` varchar(128) NOT NULL,"
+"  `created` datetime NOT NULL,"
+"  `lastactive` datetime NOT NULL,"
+"  `expires` datetime NOT NULL,"
+"  PRIMARY KEY (`sessiontoken`),"
+"  UNIQUE KEY `userid_client` (`userid`,`client`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `users` ("
+"  `userid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `username` varchar(128) NOT NULL DEFAULT '',"
+"  `password_digest` varchar(32) NOT NULL DEFAULT '',"
+"  `lastlogin` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',"
+"  PRIMARY KEY (`userid`),"
+"  KEY `username` (`username`)"
+") ENGINE=MyISAM AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videocast` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `cast` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`intid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videocategory` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `category` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`intid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videocollection` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `title` varchar(256) NOT NULL,"
+"  `contenttype` set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
+"  `plot` text,"
+"  `network` varchar(128) DEFAULT NULL,"
+"  `collectionref` varchar(128) NOT NULL,"
+"  `certification` varchar(128) DEFAULT NULL,"
+"  `genre` varchar(128) DEFAULT '',"
+"  `releasedate` date DEFAULT NULL,"
+"  `language` varchar(10) DEFAULT NULL,"
+"  `status` varchar(64) DEFAULT NULL,"
+"  `rating` float DEFAULT '0',"
+"  `ratingcount` int DEFAULT '0',"
+"  `runtime` smallint unsigned DEFAULT '0',"
+"  `banner` text,"
+"  `fanart` text,"
+"  `coverart` text,"
+"  PRIMARY KEY (`intid`),"
+"  KEY `title` (`title`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videocountry` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `country` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`intid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videogenre` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `genre` varchar(128) NOT NULL,"
+"  PRIMARY KEY (`intid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videometadata` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `title` varchar(128) NOT NULL,"
+"  `subtitle` text NOT NULL,"
+"  `tagline` varchar(255) DEFAULT NULL,"
+"  `director` varchar(128) NOT NULL,"
+"  `studio` varchar(128) DEFAULT NULL,"
+"  `plot` text,"
+"  `rating` varchar(128) NOT NULL,"
+"  `inetref` varchar(255) NOT NULL,"
+"  `collectionref` int NOT NULL DEFAULT '-1',"
+"  `homepage` text NOT NULL,"
+"  `year` int unsigned NOT NULL,"
+"  `releasedate` date NOT NULL,"
+"  `userrating` float NOT NULL,"
+"  `length` int unsigned NOT NULL,"
+"  `playcount` int NOT NULL DEFAULT '0',"
+"  `season` smallint unsigned NOT NULL DEFAULT '0',"
+"  `episode` smallint unsigned NOT NULL DEFAULT '0',"
+"  `showlevel` int unsigned NOT NULL,"
+"  `filename` text NOT NULL,"
+"  `hash` varchar(128) NOT NULL,"
+"  `coverfile` text NOT NULL,"
+"  `childid` int NOT NULL DEFAULT '-1',"
+"  `browse` tinyint(1) NOT NULL DEFAULT '1',"
+"  `watched` tinyint(1) NOT NULL DEFAULT '0',"
+"  `processed` tinyint(1) NOT NULL DEFAULT '0',"
+"  `playcommand` varchar(255) DEFAULT NULL,"
+"  `category` int unsigned NOT NULL DEFAULT '0',"
+"  `trailer` text,"
+"  `host` text NOT NULL,"
+"  `screenshot` text,"
+"  `banner` text,"
+"  `fanart` text,"
+"  `insertdate` timestamp NULL DEFAULT CURRENT_TIMESTAMP,"
+"  `contenttype` set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
+"  PRIMARY KEY (`intid`),"
+"  KEY `director` (`director`),"
+"  KEY `title` (`title`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videometadatacast` ("
+"  `idvideo` int unsigned NOT NULL,"
+"  `idcast` int unsigned NOT NULL,"
+"  UNIQUE KEY `idvideo` (`idvideo`,`idcast`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videometadatacountry` ("
+"  `idvideo` int unsigned NOT NULL,"
+"  `idcountry` int unsigned NOT NULL,"
+"  UNIQUE KEY `idvideo_2` (`idvideo`,`idcountry`),"
+"  KEY `idvideo` (`idvideo`),"
+"  KEY `idcountry` (`idcountry`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videometadatagenre` ("
+"  `idvideo` int unsigned NOT NULL,"
+"  `idgenre` int unsigned NOT NULL,"
+"  UNIQUE KEY `idvideo_2` (`idvideo`,`idgenre`),"
+"  KEY `idvideo` (`idvideo`),"
+"  KEY `idgenre` (`idgenre`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videopart` ("
+"  `fileid` bigint unsigned NOT NULL,"
+"  `videoid` int unsigned NOT NULL,"
+"  `order` smallint unsigned NOT NULL DEFAULT '1',"
+"  PRIMARY KEY (`videoid`,`order`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videopathinfo` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `path` text,"
+"  `contenttype` set('MOVIE','TELEVISION','ADULT','MUSICVIDEO','HOMEVIDEO') NOT NULL DEFAULT '',"
+"  `collectionref` int DEFAULT '0',"
+"  `recurse` tinyint(1) DEFAULT '0',"
+"  PRIMARY KEY (`intid`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videosource` ("
+"  `sourceid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `name` varchar(128) NOT NULL DEFAULT '',"
+"  `xmltvgrabber` varchar(128) DEFAULT NULL,"
+"  `userid` varchar(128) DEFAULT NULL,"
+"  `freqtable` varchar(16) NOT NULL DEFAULT 'default',"
+"  `lineupid` varchar(64) DEFAULT NULL,"
+"  `password` varchar(64) DEFAULT NULL,"
+"  `useeit` smallint NOT NULL DEFAULT '0',"
+"  `configpath` varchar(4096) DEFAULT NULL,"
+"  `dvb_nit_id` int DEFAULT '-1',"
+"  `bouquet_id` int unsigned DEFAULT NULL,"
+"  `region_id` int unsigned DEFAULT NULL,"
+"  `scanfrequency` int unsigned DEFAULT '0',"
+"  `lcnoffset` int unsigned DEFAULT '0',"
+"  PRIMARY KEY (`sourceid`),"
+"  UNIQUE KEY `name` (`name`)"
+") ENGINE=MyISAM DEFAULT CHARSET=utf8;",
+"CREATE TABLE `videotypes` ("
+"  `intid` int unsigned NOT NULL AUTO_INCREMENT,"
+"  `extension` varchar(128) NOT NULL,"
+"  `playcommand` varchar(255) NOT NULL,"
+"  `f_ignore` tinyint(1) DEFAULT NULL,"
+"  `use_default` tinyint(1) DEFAULT NULL,"
+"  PRIMARY KEY (`intid`)"
 ") ENGINE=MyISAM AUTO_INCREMENT=33 DEFAULT CHARSET=utf8;",
 
-"INSERT INTO channelgroupnames VALUES (1,'Favorites');",
-R"(INSERT INTO customexample VALUES ('New Flix','','program.category_type = \'movie\' AND program.airdate >= \n     YEAR(DATE_SUB(NOW(), INTERVAL 1 YEAR)) \nAND program.stars > 0.5 ',1);)",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',9018,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',9018,'guide_fixup','2');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',256,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',257,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',256,'tv_types','1,150,134,133');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',257,'tv_types','1,150,134,133');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4100,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4101,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4102,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4103,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4104,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4105,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4106,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4107,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4097,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4098,'sdt_mapping','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4100,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4101,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4102,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4103,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4104,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4105,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4106,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4107,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4097,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4098,'tv_types','1,145,154');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4100,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4101,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4102,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4103,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4104,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4105,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4106,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4107,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4096,'guide_fixup','5');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4097,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4098,'guide_fixup','1');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',94,'tv_types','1,128');",
-"INSERT INTO dtv_privatetypes VALUES ('atsc',1793,'guide_fixup','3');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',40999,'guide_fixup','4');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',70,'force_guide_present','yes');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',70,'guide_ranges','80,80,96,96');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4112,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4115,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4116,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',12802,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',12803,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',12829,'channel_numbers','131');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',40999,'parse_subtitle_list','1070,1308,1041,1306,1307,1030,1016,1131,1068,1069');",
-"INSERT INTO dtv_privatetypes VALUES ('dvb',4096,'guide_fixup','5');",
-"INSERT INTO dvdinput VALUES (1,720,480,16,9,1,1,'ntsc');",
-"INSERT INTO dvdinput VALUES (2,720,480,16,9,1,0,'ntsc');",
-"INSERT INTO dvdinput VALUES (3,720,480,4,3,1,1,'ntsc');",
-"INSERT INTO dvdinput VALUES (4,720,480,4,3,1,0,'ntsc');",
-"INSERT INTO dvdinput VALUES (5,720,576,16,9,3,1,'pal');",
-"INSERT INTO dvdinput VALUES (6,720,576,16,9,3,0,'pal');",
-"INSERT INTO dvdinput VALUES (7,720,576,4,3,3,1,'pal');",
-"INSERT INTO dvdinput VALUES (8,720,576,4,3,3,0,'pal');",
-"INSERT INTO dvdtranscode VALUES (1,1,'Good',2,1,16,16,0,0,2,0,0,0,0,0,32,32,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (2,2,'Excellent',2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'divx5',NULL,0,NULL,NULL,1,NULL);",
-"INSERT INTO dvdtranscode VALUES (3,2,'Good',2,1,0,0,8,8,0,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (4,2,'Medium',2,1,0,0,8,8,5,5,0,0,0,0,0,0,0,0,'divx5',NULL,1200,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (5,3,'Good',2,1,0,0,0,0,0,0,0,0,2,0,80,80,8,8,'divx5',NULL,0,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (6,4,'Excellent',2,1,0,0,0,0,0,0,0,0,2,0,0,0,0,0,'divx5',NULL,0,NULL,NULL,1,NULL);",
-"INSERT INTO dvdtranscode VALUES (7,4,'Good',2,1,0,0,8,8,0,2,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (8,5,'Good',1,1,16,16,0,0,5,0,0,0,0,0,40,40,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (9,6,'Good',1,1,0,0,16,16,5,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (10,7,'Good',1,1,0,0,0,0,1,0,0,0,0,0,76,76,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO dvdtranscode VALUES (11,8,'Good',1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
-"INSERT INTO playgroup VALUES ('Default','',30,5,100,0);",
-"INSERT INTO profilegroups VALUES (1,'Software Encoders (v4l based)','V4L',1,NULL);",
-"INSERT INTO profilegroups VALUES (2,'IVTV MPEG-2 Encoders','MPEG',1,NULL);",
-"INSERT INTO profilegroups VALUES (3,'Hardware MJPEG Encoders (Matrox G200-TV, Miro DC10, etc)','MJPEG',1,NULL);",
-"INSERT INTO profilegroups VALUES (4,'Hardware HDTV','HDTV',1,NULL);",
-"INSERT INTO profilegroups VALUES (5,'Hardware DVB Encoders','DVB',1,NULL);",
-"INSERT INTO profilegroups VALUES (6,'Transcoders','TRANSCODE',1,NULL);",
-"INSERT INTO profilegroups VALUES (7,'FireWire Input','FIREWIRE',1,NULL);",
-"INSERT INTO profilegroups VALUES (8,'USB Mpeg-4 Encoder (Plextor ConvertX, etc)','GO7007',1,NULL);",
-"INSERT INTO profilegroups VALUES (14,'Import Recorder','IMPORT',1,NULL);",
-"INSERT INTO profilegroups VALUES (10,'Freebox Input','Freebox',1,NULL);",
-"INSERT INTO profilegroups VALUES (11,'HDHomeRun Recorders','HDHOMERUN',1,NULL);",
-"INSERT INTO profilegroups VALUES (12,'CRC IP Recorders','CRC_IP',1,NULL);",
-"INSERT INTO profilegroups VALUES (13,'HD-PVR Recorders','HDPVR',1,NULL);",
-"INSERT INTO profilegroups VALUES (15,'ASI Recorder (DVEO)','ASI',1,NULL);",
-"INSERT INTO profilegroups VALUES (16,'OCUR Recorder (CableLabs)','OCUR',1,NULL);",
-"INSERT INTO profilegroups VALUES (17,'Ceton Recorder','CETON',1,NULL);",
-"INSERT INTO record VALUES (1,11,0,'21:57:44','2012-08-11','21:57:44','2012-08-11','Default (Template)','','',0,0,'Default','Default',0,0,0,0,0,0,'Default',6,15,'','','','',0,0,1,0,0,0,0,1,-1,'00:00:00',735091,0,0,0,'Default',0,'0000-00-00 00:00:00','0000-00-00 00:00:00','0000-00-00 00:00:00','Default',100,0);",
-"INSERT INTO recordfilter VALUES (0,'New episode','program.previouslyshown = 0',0);",
-"INSERT INTO recordfilter VALUES (1,'Identifiable episode','program.generic = 0',0);",
-"INSERT INTO recordfilter VALUES (2,'First showing','program.first > 0',0);",
-R"(INSERT INTO recordfilter VALUES (3,'Prime time','HOUR(CONVERT_TZ(program.starttime, \'Etc/UTC\', \'SYSTEM\')) >= 19 AND HOUR(CONVERT_TZ(program.starttime, \'Etc/UTC\', \'SYSTEM\')) < 22',0);)",
-"INSERT INTO recordfilter VALUES (4,'Commercial free','channel.commmethod = -2',0);",
-"INSERT INTO recordfilter VALUES (5,'High definition','program.hdtv > 0',0);",
-R"(INSERT INTO recordfilter VALUES (6,'This episode','(RECTABLE.programid <> \'\' AND program.programid = RECTABLE.programid) OR (RECTABLE.programid = \'\' AND program.subtitle = RECTABLE.subtitle AND program.description = RECTABLE.description)',0);)",
-"INSERT INTO recordfilter VALUES (7,'This series','(RECTABLE.seriesid <> \\'\\' AND program.seriesid = RECTABLE.seriesid)',0);",
-"INSERT INTO recordingprofiles VALUES (1,'Default',NULL,NULL,1);",
-"INSERT INTO recordingprofiles VALUES (2,'Live TV',NULL,NULL,1);",
-"INSERT INTO recordingprofiles VALUES (3,'High Quality',NULL,NULL,1);",
-"INSERT INTO recordingprofiles VALUES (4,'Low Quality',NULL,NULL,1);",
-"INSERT INTO recordingprofiles VALUES (5,'Default',NULL,NULL,2);",
-"INSERT INTO recordingprofiles VALUES (6,'Live TV',NULL,NULL,2);",
-"INSERT INTO recordingprofiles VALUES (7,'High Quality',NULL,NULL,2);",
-"INSERT INTO recordingprofiles VALUES (8,'Low Quality',NULL,NULL,2);",
-"INSERT INTO recordingprofiles VALUES (9,'Default',NULL,NULL,3);",
-"INSERT INTO recordingprofiles VALUES (10,'Live TV',NULL,NULL,3);",
-"INSERT INTO recordingprofiles VALUES (11,'High Quality',NULL,NULL,3);",
-"INSERT INTO recordingprofiles VALUES (12,'Low Quality',NULL,NULL,3);",
-"INSERT INTO recordingprofiles VALUES (13,'Default',NULL,NULL,4);",
-"INSERT INTO recordingprofiles VALUES (14,'Live TV',NULL,NULL,4);",
-"INSERT INTO recordingprofiles VALUES (15,'High Quality',NULL,NULL,4);",
-"INSERT INTO recordingprofiles VALUES (16,'Low Quality',NULL,NULL,4);",
-"INSERT INTO recordingprofiles VALUES (17,'Default',NULL,NULL,5);",
-"INSERT INTO recordingprofiles VALUES (18,'Live TV',NULL,NULL,5);",
-"INSERT INTO recordingprofiles VALUES (19,'High Quality',NULL,NULL,5);",
-"INSERT INTO recordingprofiles VALUES (20,'Low Quality',NULL,NULL,5);",
-"INSERT INTO recordingprofiles VALUES (21,'RTjpeg/MPEG4',NULL,NULL,6);",
-"INSERT INTO recordingprofiles VALUES (22,'MPEG2',NULL,NULL,6);",
-"INSERT INTO recordingprofiles VALUES (23,'Default',NULL,NULL,8);",
-"INSERT INTO recordingprofiles VALUES (24,'Live TV',NULL,NULL,8);",
-"INSERT INTO recordingprofiles VALUES (25,'High Quality',NULL,NULL,8);",
-"INSERT INTO recordingprofiles VALUES (26,'Low Quality',NULL,NULL,8);",
-"INSERT INTO recordingprofiles VALUES (27,'High Quality',NULL,NULL,6);",
-"INSERT INTO recordingprofiles VALUES (28,'Medium Quality',NULL,NULL,6);",
-"INSERT INTO recordingprofiles VALUES (29,'Low Quality',NULL,NULL,6);",
-"INSERT INTO recordingprofiles VALUES (30,'Default',NULL,NULL,10);",
-"INSERT INTO recordingprofiles VALUES (31,'Live TV',NULL,NULL,10);",
-"INSERT INTO recordingprofiles VALUES (32,'High Quality',NULL,NULL,10);",
-"INSERT INTO recordingprofiles VALUES (33,'Low Quality',NULL,NULL,10);",
-"INSERT INTO recordingprofiles VALUES (34,'Default',NULL,NULL,11);",
-"INSERT INTO recordingprofiles VALUES (35,'Live TV',NULL,NULL,11);",
-"INSERT INTO recordingprofiles VALUES (36,'High Quality',NULL,NULL,11);",
-"INSERT INTO recordingprofiles VALUES (37,'Low Quality',NULL,NULL,11);",
-"INSERT INTO recordingprofiles VALUES (38,'Default',NULL,NULL,12);",
-"INSERT INTO recordingprofiles VALUES (39,'Live TV',NULL,NULL,12);",
-"INSERT INTO recordingprofiles VALUES (40,'High Quality',NULL,NULL,12);",
-"INSERT INTO recordingprofiles VALUES (41,'Low Quality',NULL,NULL,12);",
-"INSERT INTO recordingprofiles VALUES (42,'Default',NULL,NULL,7);",
-"INSERT INTO recordingprofiles VALUES (43,'Live TV',NULL,NULL,7);",
-"INSERT INTO recordingprofiles VALUES (44,'High Quality',NULL,NULL,7);",
-"INSERT INTO recordingprofiles VALUES (45,'Low Quality',NULL,NULL,7);",
-"INSERT INTO recordingprofiles VALUES (46,'Default',NULL,NULL,9);",
-"INSERT INTO recordingprofiles VALUES (47,'Live TV',NULL,NULL,9);",
-"INSERT INTO recordingprofiles VALUES (48,'High Quality',NULL,NULL,9);",
-"INSERT INTO recordingprofiles VALUES (49,'Low Quality',NULL,NULL,9);",
-"INSERT INTO recordingprofiles VALUES (50,'Default',NULL,NULL,13);",
-"INSERT INTO recordingprofiles VALUES (51,'Live TV',NULL,NULL,13);",
-"INSERT INTO recordingprofiles VALUES (52,'High Quality',NULL,NULL,13);",
-"INSERT INTO recordingprofiles VALUES (53,'Low Quality',NULL,NULL,13);",
-"INSERT INTO recordingprofiles VALUES (54,'Default',NULL,NULL,14);",
-"INSERT INTO recordingprofiles VALUES (55,'Live TV',NULL,NULL,14);",
-"INSERT INTO recordingprofiles VALUES (56,'High Quality',NULL,NULL,14);",
-"INSERT INTO recordingprofiles VALUES (57,'Low Quality',NULL,NULL,14);",
-"INSERT INTO recordingprofiles VALUES (58,'Default',NULL,NULL,15);",
-"INSERT INTO recordingprofiles VALUES (59,'Live TV',NULL,NULL,15);",
-"INSERT INTO recordingprofiles VALUES (60,'High Quality',NULL,NULL,15);",
-"INSERT INTO recordingprofiles VALUES (61,'Low Quality',NULL,NULL,15);",
-"INSERT INTO recordingprofiles VALUES (62,'Default',NULL,NULL,16);",
-"INSERT INTO recordingprofiles VALUES (63,'Live TV',NULL,NULL,16);",
-"INSERT INTO recordingprofiles VALUES (64,'High Quality',NULL,NULL,16);",
-"INSERT INTO recordingprofiles VALUES (65,'Low Quality',NULL,NULL,16);",
-"INSERT INTO recordingprofiles VALUES (66,'Default',NULL,NULL,17);",
-"INSERT INTO recordingprofiles VALUES (67,'Live TV',NULL,NULL,17);",
-"INSERT INTO recordingprofiles VALUES (68,'High Quality',NULL,NULL,17);",
-"INSERT INTO recordingprofiles VALUES (69,'Low Quality',NULL,NULL,17);",
-"INSERT INTO settings VALUES ('mythfilldatabaseLastRunStart','',NULL);",
-"INSERT INTO settings VALUES ('mythfilldatabaseLastRunEnd','',NULL);",
-"INSERT INTO settings VALUES ('mythfilldatabaseLastRunStatus','',NULL);",
-"INSERT INTO settings VALUES ('DataDirectMessage','',NULL);",
-"INSERT INTO settings VALUES ('HaveRepeats','0',NULL);",
-"INSERT INTO settings VALUES ('DBSchemaVer','1307',NULL);",
-"INSERT INTO settings VALUES ('DefaultTranscoder','0',NULL);",
-"INSERT INTO videotypes VALUES (1,'txt','',1,0);",
-"INSERT INTO videotypes VALUES (2,'log','',1,0);",
-"INSERT INTO videotypes VALUES (3,'mpg','Internal',0,0);",
-"INSERT INTO videotypes VALUES (4,'avi','',0,1);",
-"INSERT INTO videotypes VALUES (5,'vob','Internal',0,0);",
-"INSERT INTO videotypes VALUES (6,'mpeg','Internal',0,0);",
-"INSERT INTO videotypes VALUES (8,'iso','Internal',0,0);",
-"INSERT INTO videotypes VALUES (9,'img','Internal',0,0);",
-"INSERT INTO videotypes VALUES (10,'mkv','Internal',0,0);",
-"INSERT INTO videotypes VALUES (11,'mp4','Internal',0,0);",
-"INSERT INTO videotypes VALUES (12,'m2ts','Internal',0,0);",
-"INSERT INTO videotypes VALUES (13,'evo','Internal',0,0);",
-"INSERT INTO videotypes VALUES (14,'divx','Internal',0,0);",
-"INSERT INTO videotypes VALUES (15,'mov','Internal',0,0);",
-"INSERT INTO videotypes VALUES (16,'qt','Internal',0,0);",
-"INSERT INTO videotypes VALUES (17,'wmv','Internal',0,0);",
-"INSERT INTO videotypes VALUES (18,'3gp','Internal',0,0);",
-"INSERT INTO videotypes VALUES (19,'asf','Internal',0,0);",
-"INSERT INTO videotypes VALUES (20,'ogg','Internal',0,0);",
-"INSERT INTO videotypes VALUES (21,'ogm','Internal',0,0);",
-"INSERT INTO videotypes VALUES (22,'flv','Internal',0,0);",
-"INSERT INTO videotypes VALUES (23,'ogv','Internal',0,0);",
-"INSERT INTO videotypes VALUES (25,'nut','Internal',0,0);",
-"INSERT INTO videotypes VALUES (26,'mxf','Internal',0,0);",
-"INSERT INTO videotypes VALUES (27,'m4v','Internal',0,0);",
-"INSERT INTO videotypes VALUES (28,'rm','Internal',0,0);",
-"INSERT INTO videotypes VALUES (29,'ts','Internal',0,0);",
-"INSERT INTO videotypes VALUES (30,'swf','Internal',0,0);",
-"INSERT INTO videotypes VALUES (31,'f4v','Internal',0,0);",
-"INSERT INTO videotypes VALUES (32,'nuv','Internal',0,0);"
+"INSERT INTO `channelgroupnames` VALUES (1,'Favorites');",
+"INSERT INTO `customexample` VALUES ('New Flix','','program.category_type = \\'movie\\' AND program.airdate >= \\n     YEAR(DATE_SUB(NOW(), INTERVAL 1 YEAR)) \\nAND program.stars > 0.5 ',1);",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',9018,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',9018,'guide_fixup','2');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',256,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',257,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',256,'tv_types','1,150,134,133');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',257,'tv_types','1,150,134,133');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4100,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4101,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4102,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4103,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4104,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4105,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4106,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4107,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4097,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4098,'sdt_mapping','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4100,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4101,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4102,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4103,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4104,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4105,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4106,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4107,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4097,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4098,'tv_types','1,145,154');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4100,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4101,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4102,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4103,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4104,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4105,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4106,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4107,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4096,'guide_fixup','5');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4097,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4098,'guide_fixup','1');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',94,'tv_types','1,128');",
+"INSERT INTO `dtv_privatetypes` VALUES ('atsc',1793,'guide_fixup','3');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',40999,'guide_fixup','4');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',70,'force_guide_present','yes');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',70,'guide_ranges','80,80,96,96');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4112,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4115,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4116,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',12802,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',12803,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',12829,'channel_numbers','131');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',40999,'parse_subtitle_list','1070,1308,1041,1306,1307,1030,1016,1131,1068,1069');",
+"INSERT INTO `dtv_privatetypes` VALUES ('dvb',4096,'guide_fixup','5');",
+"INSERT INTO `dvdinput` VALUES (1,720,480,16,9,1,1,'ntsc');",
+"INSERT INTO `dvdinput` VALUES (2,720,480,16,9,1,0,'ntsc');",
+"INSERT INTO `dvdinput` VALUES (3,720,480,4,3,1,1,'ntsc');",
+"INSERT INTO `dvdinput` VALUES (4,720,480,4,3,1,0,'ntsc');",
+"INSERT INTO `dvdinput` VALUES (5,720,576,16,9,3,1,'pal');",
+"INSERT INTO `dvdinput` VALUES (6,720,576,16,9,3,0,'pal');",
+"INSERT INTO `dvdinput` VALUES (7,720,576,4,3,3,1,'pal');",
+"INSERT INTO `dvdinput` VALUES (8,720,576,4,3,3,0,'pal');",
+"INSERT INTO `dvdtranscode` VALUES (1,1,'Good',2,1,16,16,0,0,2,0,0,0,0,0,32,32,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (2,2,'Excellent',2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'divx5',NULL,0,NULL,NULL,1,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (3,2,'Good',2,1,0,0,8,8,0,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (4,2,'Medium',2,1,0,0,8,8,5,5,0,0,0,0,0,0,0,0,'divx5',NULL,1200,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (5,3,'Good',2,1,0,0,0,0,0,0,0,0,2,0,80,80,8,8,'divx5',NULL,0,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (6,4,'Excellent',2,1,0,0,0,0,0,0,0,0,2,0,0,0,0,0,'divx5',NULL,0,NULL,NULL,1,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (7,4,'Good',2,1,0,0,8,8,0,2,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (8,5,'Good',1,1,16,16,0,0,5,0,0,0,0,0,40,40,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (9,6,'Good',1,1,0,0,16,16,5,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (10,7,'Good',1,1,0,0,0,0,1,0,0,0,0,0,76,76,8,8,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `dvdtranscode` VALUES (11,8,'Good',1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,'divx5',NULL,1618,NULL,NULL,0,NULL);",
+"INSERT INTO `playgroup` VALUES ('Default','',30,5,100,0);",
+"INSERT INTO `profilegroups` VALUES (1,'Software Encoders (v4l based)','V4L',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (2,'IVTV MPEG-2 Encoders','MPEG',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (3,'Hardware MJPEG Encoders (Matrox G200-TV, Miro DC10, etc)','MJPEG',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (4,'Hardware HDTV','HDTV',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (5,'Hardware DVB Encoders','DVB',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (6,'Transcoders','TRANSCODE',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (7,'FireWire Input','FIREWIRE',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (8,'USB Mpeg-4 Encoder (Plextor ConvertX, etc)','GO7007',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (14,'Import Recorder','IMPORT',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (10,'Freebox Input','FREEBOX',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (11,'HDHomeRun Recorders','HDHOMERUN',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (12,'CRC IP Recorders','CRC_IP',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (13,'HD-PVR Recorders','HDPVR',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (15,'ASI Recorder (DVEO)','ASI',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (16,'OCUR Recorder (CableLabs)','OCUR',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (17,'Ceton Recorder','CETON',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (18,'VBox Recorder','VBOX',1,NULL);",
+"INSERT INTO `profilegroups` VALUES (19,'Sat>IP Recorder','SATIP',1,NULL);",
+"INSERT INTO `recgroups` VALUES (1,'Default','','',1);",
+"INSERT INTO `recgroups` VALUES (2,'LiveTV','','',1);",
+"INSERT INTO `recgroups` VALUES (3,'Deleted','','',1);",
+"INSERT INTO `record` VALUES (1,11,0,'21:57:44','2012-08-11','21:57:44','2012-08-11','Default (Template)','','',0,0,'Default','Default',0,0,0,0,0,0,'Default',6,15,'','','','',0,0,1,0,0,0,0,1,-1,'00:00:00',735091,0,0,0,'Default',0,NULL,NULL,NULL,'Default',100,0,1,0);",
+"INSERT INTO `recordfilter` VALUES (0,'New episode','program.previouslyshown = 0',0);",
+"INSERT INTO `recordfilter` VALUES (1,'Identifiable episode','program.generic = 0',0);",
+"INSERT INTO `recordfilter` VALUES (2,'First showing','program.first > 0',0);",
+"INSERT INTO `recordfilter` VALUES (3,'Prime time','HOUR(CONVERT_TZ(program.starttime, \\'Etc/UTC\\', \\'SYSTEM\\')) >= 19 AND HOUR(CONVERT_TZ(program.starttime, \\'Etc/UTC\\', \\'SYSTEM\\')) < 22',0);",
+"INSERT INTO `recordfilter` VALUES (4,'Commercial free','channel.commmethod = -2',0);",
+"INSERT INTO `recordfilter` VALUES (5,'High definition','program.hdtv > 0',0);",
+"INSERT INTO `recordfilter` VALUES (6,'This episode','(RECTABLE.programid <> \\'\\' AND program.programid = RECTABLE.programid) OR (RECTABLE.programid = \\'\\' AND program.subtitle = RECTABLE.subtitle AND program.description = RECTABLE.description)',0);",
+"INSERT INTO `recordfilter` VALUES (7,'This series','(RECTABLE.seriesid <> \\'\\' AND program.seriesid = RECTABLE.seriesid)',0);",
+"INSERT INTO `recordfilter` VALUES (8,'This time','ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ(  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), \\'Etc/UTC\\', \\'SYSTEM\\'),   CONVERT_TZ(program.starttime, \\'Etc/UTC\\', \\'SYSTEM\\'))) MOD 1440   NOT BETWEEN 11 AND 1429',0);",
+"INSERT INTO `recordfilter` VALUES (9,'This day and time','ABS(TIMESTAMPDIFF(MINUTE, CONVERT_TZ(  ADDTIME(RECTABLE.startdate, RECTABLE.starttime), \\'Etc/UTC\\', \\'SYSTEM\\'),   CONVERT_TZ(program.starttime, \\'Etc/UTC\\', \\'SYSTEM\\'))) MOD 10080   NOT BETWEEN 11 AND 10069',0);",
+"INSERT INTO `recordfilter` VALUES (10,'This channel','channel.callsign = RECTABLE.station',0);",
+"INSERT INTO `recordfilter` VALUES (11,'No episodes','program.category_type <> \\'series\\'',0);",
+"INSERT INTO `recordfilter` VALUES (12,'Priority channel','channel.recpriority > 0',0);",
+"INSERT INTO `recordingprofiles` VALUES (1,'Default',NULL,NULL,1);",
+"INSERT INTO `recordingprofiles` VALUES (2,'Live TV',NULL,NULL,1);",
+"INSERT INTO `recordingprofiles` VALUES (3,'High Quality',NULL,NULL,1);",
+"INSERT INTO `recordingprofiles` VALUES (4,'Low Quality',NULL,NULL,1);",
+"INSERT INTO `recordingprofiles` VALUES (5,'Default',NULL,NULL,2);",
+"INSERT INTO `recordingprofiles` VALUES (6,'Live TV',NULL,NULL,2);",
+"INSERT INTO `recordingprofiles` VALUES (7,'High Quality',NULL,NULL,2);",
+"INSERT INTO `recordingprofiles` VALUES (8,'Low Quality',NULL,NULL,2);",
+"INSERT INTO `recordingprofiles` VALUES (9,'Default',NULL,NULL,3);",
+"INSERT INTO `recordingprofiles` VALUES (10,'Live TV',NULL,NULL,3);",
+"INSERT INTO `recordingprofiles` VALUES (11,'High Quality',NULL,NULL,3);",
+"INSERT INTO `recordingprofiles` VALUES (12,'Low Quality',NULL,NULL,3);",
+"INSERT INTO `recordingprofiles` VALUES (13,'Default',NULL,NULL,4);",
+"INSERT INTO `recordingprofiles` VALUES (14,'Live TV',NULL,NULL,4);",
+"INSERT INTO `recordingprofiles` VALUES (15,'High Quality',NULL,NULL,4);",
+"INSERT INTO `recordingprofiles` VALUES (16,'Low Quality',NULL,NULL,4);",
+"INSERT INTO `recordingprofiles` VALUES (17,'Default',NULL,NULL,5);",
+"INSERT INTO `recordingprofiles` VALUES (18,'Live TV',NULL,NULL,5);",
+"INSERT INTO `recordingprofiles` VALUES (19,'High Quality',NULL,NULL,5);",
+"INSERT INTO `recordingprofiles` VALUES (20,'Low Quality',NULL,NULL,5);",
+"INSERT INTO `recordingprofiles` VALUES (21,'RTjpeg/MPEG4',NULL,NULL,6);",
+"INSERT INTO `recordingprofiles` VALUES (22,'MPEG2',NULL,NULL,6);",
+"INSERT INTO `recordingprofiles` VALUES (23,'Default',NULL,NULL,8);",
+"INSERT INTO `recordingprofiles` VALUES (24,'Live TV',NULL,NULL,8);",
+"INSERT INTO `recordingprofiles` VALUES (25,'High Quality',NULL,NULL,8);",
+"INSERT INTO `recordingprofiles` VALUES (26,'Low Quality',NULL,NULL,8);",
+"INSERT INTO `recordingprofiles` VALUES (27,'High Quality',NULL,NULL,6);",
+"INSERT INTO `recordingprofiles` VALUES (28,'Medium Quality',NULL,NULL,6);",
+"INSERT INTO `recordingprofiles` VALUES (29,'Low Quality',NULL,NULL,6);",
+"INSERT INTO `recordingprofiles` VALUES (30,'Default',NULL,NULL,10);",
+"INSERT INTO `recordingprofiles` VALUES (31,'Live TV',NULL,NULL,10);",
+"INSERT INTO `recordingprofiles` VALUES (32,'High Quality',NULL,NULL,10);",
+"INSERT INTO `recordingprofiles` VALUES (33,'Low Quality',NULL,NULL,10);",
+"INSERT INTO `recordingprofiles` VALUES (34,'Default',NULL,NULL,11);",
+"INSERT INTO `recordingprofiles` VALUES (35,'Live TV',NULL,NULL,11);",
+"INSERT INTO `recordingprofiles` VALUES (36,'High Quality',NULL,NULL,11);",
+"INSERT INTO `recordingprofiles` VALUES (37,'Low Quality',NULL,NULL,11);",
+"INSERT INTO `recordingprofiles` VALUES (38,'Default',NULL,NULL,12);",
+"INSERT INTO `recordingprofiles` VALUES (39,'Live TV',NULL,NULL,12);",
+"INSERT INTO `recordingprofiles` VALUES (40,'High Quality',NULL,NULL,12);",
+"INSERT INTO `recordingprofiles` VALUES (41,'Low Quality',NULL,NULL,12);",
+"INSERT INTO `recordingprofiles` VALUES (42,'Default',NULL,NULL,7);",
+"INSERT INTO `recordingprofiles` VALUES (43,'Live TV',NULL,NULL,7);",
+"INSERT INTO `recordingprofiles` VALUES (44,'High Quality',NULL,NULL,7);",
+"INSERT INTO `recordingprofiles` VALUES (45,'Low Quality',NULL,NULL,7);",
+"INSERT INTO `recordingprofiles` VALUES (46,'Default',NULL,NULL,9);",
+"INSERT INTO `recordingprofiles` VALUES (47,'Live TV',NULL,NULL,9);",
+"INSERT INTO `recordingprofiles` VALUES (48,'High Quality',NULL,NULL,9);",
+"INSERT INTO `recordingprofiles` VALUES (49,'Low Quality',NULL,NULL,9);",
+"INSERT INTO `recordingprofiles` VALUES (50,'Default',NULL,NULL,13);",
+"INSERT INTO `recordingprofiles` VALUES (51,'Live TV',NULL,NULL,13);",
+"INSERT INTO `recordingprofiles` VALUES (52,'High Quality',NULL,NULL,13);",
+"INSERT INTO `recordingprofiles` VALUES (53,'Low Quality',NULL,NULL,13);",
+"INSERT INTO `recordingprofiles` VALUES (54,'Default',NULL,NULL,14);",
+"INSERT INTO `recordingprofiles` VALUES (55,'Live TV',NULL,NULL,14);",
+"INSERT INTO `recordingprofiles` VALUES (56,'High Quality',NULL,NULL,14);",
+"INSERT INTO `recordingprofiles` VALUES (57,'Low Quality',NULL,NULL,14);",
+"INSERT INTO `recordingprofiles` VALUES (58,'Default',NULL,NULL,15);",
+"INSERT INTO `recordingprofiles` VALUES (59,'Live TV',NULL,NULL,15);",
+"INSERT INTO `recordingprofiles` VALUES (60,'High Quality',NULL,NULL,15);",
+"INSERT INTO `recordingprofiles` VALUES (61,'Low Quality',NULL,NULL,15);",
+"INSERT INTO `recordingprofiles` VALUES (62,'Default',NULL,NULL,16);",
+"INSERT INTO `recordingprofiles` VALUES (63,'Live TV',NULL,NULL,16);",
+"INSERT INTO `recordingprofiles` VALUES (64,'High Quality',NULL,NULL,16);",
+"INSERT INTO `recordingprofiles` VALUES (65,'Low Quality',NULL,NULL,16);",
+"INSERT INTO `recordingprofiles` VALUES (66,'Default',NULL,NULL,17);",
+"INSERT INTO `recordingprofiles` VALUES (67,'Live TV',NULL,NULL,17);",
+"INSERT INTO `recordingprofiles` VALUES (68,'High Quality',NULL,NULL,17);",
+"INSERT INTO `recordingprofiles` VALUES (69,'Low Quality',NULL,NULL,17);",
+"INSERT INTO `recordingprofiles` VALUES (70,'Default',NULL,NULL,18);",
+"INSERT INTO `recordingprofiles` VALUES (71,'Live TV',NULL,NULL,18);",
+"INSERT INTO `recordingprofiles` VALUES (72,'High Quality',NULL,NULL,18);",
+"INSERT INTO `recordingprofiles` VALUES (73,'Low Quality',NULL,NULL,18);",
+"INSERT INTO `recordingprofiles` VALUES (74,'Default',NULL,NULL,19);",
+"INSERT INTO `recordingprofiles` VALUES (75,'Live TV',NULL,NULL,19);",
+"INSERT INTO `recordingprofiles` VALUES (76,'High Quality',NULL,NULL,19);",
+"INSERT INTO `recordingprofiles` VALUES (77,'Low Quality',NULL,NULL,19);",
+"INSERT INTO `settings` VALUES ('mythfilldatabaseLastRunStart','',NULL);",
+"INSERT INTO `settings` VALUES ('mythfilldatabaseLastRunEnd','',NULL);",
+"INSERT INTO `settings` VALUES ('mythfilldatabaseLastRunStatus','',NULL);",
+"INSERT INTO `settings` VALUES ('DataDirectMessage','',NULL);",
+"INSERT INTO `settings` VALUES ('HaveRepeats','0',NULL);",
+"INSERT INTO `settings` VALUES ('DBSchemaVer','1382',NULL);",
+"INSERT INTO `settings` VALUES ('HardwareProfileEnabled','0',NULL);",
+"INSERT INTO `settings` VALUES ('ImageStorageGroupName','Images',NULL);",
+"INSERT INTO `settings` VALUES ('ImageSortOrder','0',NULL);",
+"INSERT INTO `settings` VALUES ('ImageShowHiddenFiles','0',NULL);",
+"INSERT INTO `settings` VALUES ('ImageSlideShowTime','3500',NULL);",
+"INSERT INTO `settings` VALUES ('ImageTransitionType','1',NULL);",
+"INSERT INTO `settings` VALUES ('ImageTransitionTime','1000',NULL);",
+"INSERT INTO `sportsapi` VALUES (1,1,'Major League Baseball','baseball','mlb');",
+"INSERT INTO `sportsapi` VALUES (2,1,'NCAA Men\\'s Baseball','baseball','college-baseball');",
+"INSERT INTO `sportsapi` VALUES (3,1,'NCAA Women\\'s Softball','baseball','college-softball');",
+"INSERT INTO `sportsapi` VALUES (4,1,'Olympic Men\\'s Baseball','baseball','olympics-baseball');",
+"INSERT INTO `sportsapi` VALUES (5,1,'World Baseball Classic','baseball','world-baseball-classic');",
+"INSERT INTO `sportsapi` VALUES (6,1,'Little League Baseball','baseball','llb');",
+"INSERT INTO `sportsapi` VALUES (7,1,'Caribbean Series','baseball','caribbean-series');",
+"INSERT INTO `sportsapi` VALUES (8,1,'Dominican Winter League','baseball','dominican-winter-league');",
+"INSERT INTO `sportsapi` VALUES (9,1,'Venezuelan Winter League','baseball','venezuelan-winter-league');",
+"INSERT INTO `sportsapi` VALUES (10,1,'Mexican League','baseball','mexican-winter-league');",
+"INSERT INTO `sportsapi` VALUES (11,1,'Puerto Rican Winter League','baseball','puerto-rican-winter-league');",
+"INSERT INTO `sportsapi` VALUES (20,1,'National Football League','football','nfl');",
+"INSERT INTO `sportsapi` VALUES (21,1,'NCAA - Football','football','college-football');",
+"INSERT INTO `sportsapi` VALUES (22,1,'XFL','football','xfl');",
+"INSERT INTO `sportsapi` VALUES (23,1,'Canadian Football League','football','cfl');",
+"INSERT INTO `sportsapi` VALUES (40,1,'National Basketball Association','basketball','nba');",
+"INSERT INTO `sportsapi` VALUES (41,1,'Women\\'s National Basketball Association','basketball','wnba');",
+"INSERT INTO `sportsapi` VALUES (42,1,'NCAA Men\\'s Basketball','basketball','mens-college-basketball');",
+"INSERT INTO `sportsapi` VALUES (43,1,'NCAA Women\\'s Basketball','basketball','womens-college-basketball');",
+"INSERT INTO `sportsapi` VALUES (44,1,'Olympics Men\\'s Basketball','basketball','mens-olympic-basketball');",
+"INSERT INTO `sportsapi` VALUES (45,1,'Olympics Women\\'s Basketball','basketball','womens-olympic-basketball');",
+"INSERT INTO `sportsapi` VALUES (46,1,'National Basketball Association Summer League Las Vegas','basketball','nba-summer-las-vegas');",
+"INSERT INTO `sportsapi` VALUES (47,1,'National Basketball Association Summer League Utah','basketball','nba-summer-utah');",
+"INSERT INTO `sportsapi` VALUES (48,1,'National Basketball Association Summer League Orlando','basketball','nba-summer-orlando');",
+"INSERT INTO `sportsapi` VALUES (49,1,'National Basketball Association Summer League Sacramento','basketball','nba-summer-sacramento');",
+"INSERT INTO `sportsapi` VALUES (50,1,'NBA G League','basketball','nba-development');",
+"INSERT INTO `sportsapi` VALUES (51,1,'International Basketball Federation','basketball','fiba');",
+"INSERT INTO `sportsapi` VALUES (60,1,'National Hockey League','hockey','nfl');",
+"INSERT INTO `sportsapi` VALUES (61,1,'NCAA Men\\'s Ice Hockey','hockey','mens-college-hockey');",
+"INSERT INTO `sportsapi` VALUES (62,1,'NCAA Women\\'s Hockey','hockey','womens-college-hockey');",
+"INSERT INTO `sportsapi` VALUES (63,1,'World Cup of Hockey','hockey','hockey-world-cup');",
+"INSERT INTO `sportsapi` VALUES (64,1,'Men\\'s Olympic Ice Hockey','hockey','mens-olympic-hockey');",
+"INSERT INTO `sportsapi` VALUES (65,1,'Women\\'s Olympic Ice Hockey','hockey','womens-olympic-hockey');",
+"INSERT INTO `sportsapi` VALUES (66,1,'NCAA Women\\'s Field Hockey','field-hockey','womens-college-field-hockey');",
+"INSERT INTO `sportsapi` VALUES (80,1,'NCAA Men\\'s Volleyball','volleyball','mens-college-volleyball');",
+"INSERT INTO `sportsapi` VALUES (81,1,'NCAA Women\\'s Volleyball','volleyball','womens-college-volleyball');",
+"INSERT INTO `sportsapi` VALUES (100,1,'NCAA Men\\'s Lacrosse','lacrosse','mens-college-lacrosse');",
+"INSERT INTO `sportsapi` VALUES (101,1,'NCAA Women\\'s Lacrosse','lacrosse','womens-college-lacrosse');",
+"INSERT INTO `sportsapi` VALUES (120,1,'NCAA Men\\'s Water Polo','water-polo','mens-college-water-polo');",
+"INSERT INTO `sportsapi` VALUES (121,1,'NCAA Women\\'s Water Polo','water-polo','womens-college-water-polo');",
+"INSERT INTO `sportsapi` VALUES (200,1,'NCAA Men\\'s Soccer','soccer','usa.ncaa.m.1');",
+"INSERT INTO `sportsapi` VALUES (201,1,'NCAA Women\\'s Soccer','soccer','usa.ncaa.w.1');",
+"INSERT INTO `sportsapi` VALUES (202,1,'Major League Soccer','soccer','usa.1');",
+"INSERT INTO `sportsapi` VALUES (203,1,'English Premier League','soccer','eng.1');",
+"INSERT INTO `sportsapi` VALUES (204,1,'English League Championship','soccer','eng.2');",
+"INSERT INTO `sportsapi` VALUES (205,1,'Italian Serie A','soccer','ita.1');",
+"INSERT INTO `sportsapi` VALUES (206,1,'French Ligue 1','soccer','fra.1');",
+"INSERT INTO `sportsapi` VALUES (207,1,'French Ligue 2','soccer','fra.2');",
+"INSERT INTO `sportsapi` VALUES (208,1,'Spanish LaLiga','soccer','esp.1');",
+"INSERT INTO `sportsapi` VALUES (209,1,'German Bundesliga','soccer','ger.1');",
+"INSERT INTO `sportsapi` VALUES (210,1,'German 2. Bundesliga','soccer','ger.2');",
+"INSERT INTO `sportsapi` VALUES (211,1,'Mexican Liga BBVA MX','soccer','mex.1');",
+"INSERT INTO `sportsapi` VALUES (212,1,'Copa Do Brasil','soccer','bra.copa_do_brazil');",
+"INSERT INTO `sportsapi` VALUES (213,1,'CONCACAF Leagues Cup','soccer','concacaf.leagues.cup');",
+"INSERT INTO `sportsapi` VALUES (214,1,'CONCACAF League','soccer','concacaf.league');",
+"INSERT INTO `sportsapi` VALUES (215,1,'CONCACAF Champions League','soccer','concacaf.champions');",
+"INSERT INTO `sportsapi` VALUES (216,1,'CONCACAF Nations League','soccer','concacaf.nations.league');",
+"INSERT INTO `sportsapi` VALUES (217,1,'CONCACAF Gold Cup','soccer','concacaf.gold');",
+"INSERT INTO `sportsapi` VALUES (218,1,'FIFA World Cup','soccer','fifa.world');",
+"INSERT INTO `sportsapi` VALUES (219,1,'FIFA World Cup Qualifying - UEFA','soccer','fifa.worldq.uefa');",
+"INSERT INTO `sportsapi` VALUES (220,1,'FIFA World Cup Qualifying - CONCACAF','soccer','fifa.worldq.concacaf');",
+"INSERT INTO `sportsapi` VALUES (221,1,'FIFA World Cup Qualifying - CONMEBOL','soccer','fifa.worldq.conmebol');",
+"INSERT INTO `sportsapi` VALUES (222,1,'FIFA World Cup Qualifying - AFC','soccer','fifa.worldq.afc');",
+"INSERT INTO `sportsapi` VALUES (223,1,'FIFA World Cup Qualifying - CAF','soccer','fifa.worldq.caf');",
+"INSERT INTO `sportsapi` VALUES (224,1,'FIFA World Cup Qualifying - OFC','soccer','fifa.worldq.ofc');",
+"INSERT INTO `sportsapi` VALUES (225,1,'UEFA Champions League','soccer','uefa.champions');",
+"INSERT INTO `sportsapi` VALUES (226,1,'UEFA Europa League','soccer','uefa.europa');",
+"INSERT INTO `sportsapi` VALUES (227,1,'UEFA Europa Conference League','soccer','uefa.europa.conf');",
+"INSERT INTO `sportsapi` VALUES (228,1,'English Carabao Cup','soccer','eng.league_cup');",
+"INSERT INTO `sportsapi` VALUES (229,1,'USL Championship','soccer','usa.usl.1');",
+"INSERT INTO `sportsapi` VALUES (230,1,'United States NWSL','soccer','usa.nwsl');",
+"INSERT INTO `sportsapi` VALUES (231,1,'FA Women\\'s Super League','soccer','eng.w.1');",
+"INSERT INTO `sportsapi` VALUES (232,1,'English FA Cup','soccer','eng.fa');",
+"INSERT INTO `sportsapi` VALUES (233,1,'Spanish Copa del Rey','soccer','esp.copa_del_rey');",
+"INSERT INTO `sportsapi` VALUES (234,1,'German DFB Pokal','soccer','ger.dfb_pokal');",
+"INSERT INTO `sportsapi` VALUES (235,1,'Italian Coppa Italia','soccer','ita.coppa_italia');",
+"INSERT INTO `sportsapi` VALUES (236,1,'French Coupe de France','soccer','fra.coupe_de_france');",
+"INSERT INTO `sportsapi` VALUES (237,1,'AFC Champions League','soccer','afc.champions');",
+"INSERT INTO `sportsapi` VALUES (238,1,'Dutch KNVB Beker','soccer','ned.cup');",
+"INSERT INTO `sportsapi` VALUES (239,1,'Dutch Eredivisie','soccer','ned.1');",
+"INSERT INTO `sportsapi` VALUES (240,1,'Portuguese Liga','soccer','por.1');",
+"INSERT INTO `sportsapi` VALUES (241,1,'Russian Premier League','soccer','rus.1');",
+"INSERT INTO `sportsapi` VALUES (242,1,'Mexican Liga de Expansión MX','soccer','mex.2');",
+"INSERT INTO `sportsapi` VALUES (243,1,'Mexican Copa MX','soccer','mex.copa_mx');",
+"INSERT INTO `sportsapi` VALUES (244,1,'Campeones Cup','soccer','campeones.cup');",
+"INSERT INTO `sportsapi` VALUES (245,1,'United States Open Cup','soccer','usa.open');",
+"INSERT INTO `sportsapi` VALUES (246,1,'USL League One','soccer','usa.usl.l1');",
+"INSERT INTO `sportsapi` VALUES (247,1,'Scottish Premiership','soccer','sco.1');",
+"INSERT INTO `sportsapi` VALUES (248,1,'Chinese Super League','soccer','chn.1');",
+"INSERT INTO `sportsapi` VALUES (249,1,'Australian A-League','soccer','aus.1');",
+"INSERT INTO `sportsapi` VALUES (250,1,'International Friendly','soccer','fifa.friendly');",
+"INSERT INTO `sportsapi` VALUES (251,1,'Women\\'s International Friendly','soccer','fifa.friendly.w');",
+"INSERT INTO `sportsapi` VALUES (252,1,'UEFA European Under-21 Championship Qualifying','soccer','uefa.euro_u21_qual');",
+"INSERT INTO `sportsapi` VALUES (253,1,'FIFA Women\\'s World Cup','soccer','fifa.wwc');",
+"INSERT INTO `sportsapi` VALUES (254,1,'FIFA Club World Cup','soccer','fifa.cwc');",
+"INSERT INTO `sportsapi` VALUES (255,1,'CONCACAF Gold Cup Qualifying','soccer','concacaf.gold_qual');",
+"INSERT INTO `sportsapi` VALUES (256,1,'CONCACAF Nations League Qualifying','soccer','concacaf.nations.league_qual');",
+"INSERT INTO `sportsapi` VALUES (257,1,'CONCACAF Cup','soccer','concacaf.confederations_playoff');",
+"INSERT INTO `sportsapi` VALUES (258,1,'UEFA Nations League','soccer','uefa.nations');",
+"INSERT INTO `sportsapi` VALUES (259,1,'UEFA European Championship','soccer','uefa.euro');",
+"INSERT INTO `sportsapi` VALUES (260,1,'UEFA European Championship Qualifying','soccer','uefa.euroq');",
+"INSERT INTO `sportsapi` VALUES (261,1,'Copa America','soccer','conmebol.america');",
+"INSERT INTO `sportsapi` VALUES (262,1,'AFC Asian Cup','soccer','afc.asian.cup');",
+"INSERT INTO `sportsapi` VALUES (263,1,'AFC Asian Cup Qualifiers','soccer','afc.cupq');",
+"INSERT INTO `sportsapi` VALUES (264,1,'Africa Cup of Nations qualifying','soccer','caf.nations_qual');",
+"INSERT INTO `sportsapi` VALUES (265,1,'Africa Cup of Nations','soccer','caf.nations');",
+"INSERT INTO `sportsapi` VALUES (266,1,'Africa Nations Championship','soccer','caf.championship');",
+"INSERT INTO `sportsapi` VALUES (267,1,'WAFU Cup of Nations','soccer','wafu.nations');",
+"INSERT INTO `sportsapi` VALUES (268,1,'SheBelieves Cup','soccer','fifa.shebelieves');",
+"INSERT INTO `sportsapi` VALUES (269,1,'FIFA Confederations Cup','soccer','fifa.confederations');",
+"INSERT INTO `sportsapi` VALUES (270,1,'Non-FIFA Friendly','soccer','nonfifa');",
+"INSERT INTO `sportsapi` VALUES (271,1,'Spanish LaLiga 2','soccer','esp.2');",
+"INSERT INTO `sportsapi` VALUES (272,1,'Spanish Supercopa','soccer','esp.super_cup');",
+"INSERT INTO `sportsapi` VALUES (273,1,'Portuguese Liga Promotion/Relegation Playoffs','soccer','por.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (274,1,'Belgian First Division A - Promotion/Relegation Playoffs','soccer','bel.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (275,1,'Belgian First Division A','soccer','bel.1');",
+"INSERT INTO `sportsapi` VALUES (276,1,'Austrian Bundesliga','soccer','aut.1');",
+"INSERT INTO `sportsapi` VALUES (277,1,'Turkish Super Lig','soccer','tur.1');",
+"INSERT INTO `sportsapi` VALUES (278,1,'Austrian Bundesliga Promotion/Relegation Playoffs','soccer','aut.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (279,1,'Greek Super League','soccer','gre.1');",
+"INSERT INTO `sportsapi` VALUES (280,1,'Greek Super League Promotion/Relegation Playoffs','soccer','gre.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (281,1,'Swiss Super League','soccer','sui.1');",
+"INSERT INTO `sportsapi` VALUES (282,1,'Swiss Super League Promotion/Relegation Playoffs','soccer','sui.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (283,1,'UEFA Women\\'s Champions League','soccer','uefa.wchampions');",
+"INSERT INTO `sportsapi` VALUES (284,1,'International Champions Cup','soccer','global.champs_cup');",
+"INSERT INTO `sportsapi` VALUES (285,1,'Women\\'s International Champions Cup','soccer','global.wchamps_cup');",
+"INSERT INTO `sportsapi` VALUES (286,1,'Club Friendly','soccer','club.friendly');",
+"INSERT INTO `sportsapi` VALUES (287,1,'UEFA Champions League Qualifying','soccer','uefa.champions_qual');",
+"INSERT INTO `sportsapi` VALUES (288,1,'UEFA Europa Conference League Qualifying','soccer','uefa.europa.conf_qual');",
+"INSERT INTO `sportsapi` VALUES (289,1,'UEFA Europa League Qualifying','soccer','uefa.europa_qual');",
+"INSERT INTO `sportsapi` VALUES (290,1,'UEFA Super Cup','soccer','uefa.super_cup');",
+"INSERT INTO `sportsapi` VALUES (291,1,'English FA Community Shield','soccer','eng.charity');",
+"INSERT INTO `sportsapi` VALUES (292,1,'Supercoppa Italiana','soccer','ita.super_cup');",
+"INSERT INTO `sportsapi` VALUES (293,1,'French Trophee des Champions','soccer','fra.super_cup');",
+"INSERT INTO `sportsapi` VALUES (294,1,'Dutch Johan Cruyff Shield','soccer','ned.supercup');",
+"INSERT INTO `sportsapi` VALUES (295,1,'Trofeo Joan Gamper','soccer','esp.joan_gamper');",
+"INSERT INTO `sportsapi` VALUES (296,1,'German DFL-Supercup','soccer','ger.super_cup');",
+"INSERT INTO `sportsapi` VALUES (297,1,'Audi Cup','soccer','ger.audi_cup');",
+"INSERT INTO `sportsapi` VALUES (298,1,'Premier League Asia Trophy','soccer','eng.asia_trophy');",
+"INSERT INTO `sportsapi` VALUES (299,1,'Emirates Cup','soccer','friendly.emirates_cup');",
+"INSERT INTO `sportsapi` VALUES (300,1,'Japanese J League World Challenge','soccer','jpn.world_challenge');",
+"INSERT INTO `sportsapi` VALUES (301,1,'SuperCopa Euroamericana','soccer','euroamericana.supercopa');",
+"INSERT INTO `sportsapi` VALUES (302,1,'Men\\'s Olympic Tournament','soccer','fifa.olympics');",
+"INSERT INTO `sportsapi` VALUES (303,1,'Women\\'s Olympic Tournament','soccer','fifa.w.olympics');",
+"INSERT INTO `sportsapi` VALUES (304,1,'CONMEBOL Pre-Olympic Tournament','soccer','fifa.conmebol.olympicsq');",
+"INSERT INTO `sportsapi` VALUES (305,1,'CONCACAF Men\\'s Olympic Qualifying','soccer','fifa.concacaf.olympicsq');",
+"INSERT INTO `sportsapi` VALUES (306,1,'CONCACAF Women\\'s Olympic Qualifying Tournament','soccer','fifa.w.concacaf.olympicsq');",
+"INSERT INTO `sportsapi` VALUES (307,1,'CONCACAF Women\\'s Championship','soccer','concacaf.womens.championship');",
+"INSERT INTO `sportsapi` VALUES (308,1,'FIFA Under-20 World Cup','soccer','fifa.world.u20');",
+"INSERT INTO `sportsapi` VALUES (309,1,'FIFA Under-17 World Cup','soccer','fifa.world.u17');",
+"INSERT INTO `sportsapi` VALUES (310,1,'Toulon Tournament','soccer','global.toulon');",
+"INSERT INTO `sportsapi` VALUES (311,1,'UEFA European Under-21 Championship','soccer','uefa.euro_u21');",
+"INSERT INTO `sportsapi` VALUES (312,1,'UEFA European Under-19 Championship','soccer','uefa.euro.u19');",
+"INSERT INTO `sportsapi` VALUES (313,1,'Under-21 International Friendly','soccer','fifa.friendly_u21');",
+"INSERT INTO `sportsapi` VALUES (314,1,'UEFA Women\\'s European Championship','soccer','uefa.weuro');",
+"INSERT INTO `sportsapi` VALUES (315,1,'German Bundesliga Promotion/Relegation Playoff','soccer','ger.playoff.relegation');",
+"INSERT INTO `sportsapi` VALUES (316,1,'German 2. Bundesliga Promotion/Relegation Playoffs','soccer','ger.2.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (317,1,'English Women\\'s FA Cup','soccer','eng.w.fa');",
+"INSERT INTO `sportsapi` VALUES (318,1,'English Women\\'s FA Community Shield','soccer','eng.w.charity');",
+"INSERT INTO `sportsapi` VALUES (319,1,'English EFL Trophy','soccer','eng.trophy');",
+"INSERT INTO `sportsapi` VALUES (320,1,'English National League','soccer','eng.5');",
+"INSERT INTO `sportsapi` VALUES (321,1,'English League One','soccer','eng.3');",
+"INSERT INTO `sportsapi` VALUES (322,1,'English League Two','soccer','eng.4');",
+"INSERT INTO `sportsapi` VALUES (323,1,'Scottish Cup','soccer','sco.tennents');",
+"INSERT INTO `sportsapi` VALUES (324,1,'Scottish League Cup','soccer','sco.cis');",
+"INSERT INTO `sportsapi` VALUES (325,1,'Scottish Premiership Promotion/Relegation Playoffs','soccer','sco.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (326,1,'Scottish League One','soccer','sco.3');",
+"INSERT INTO `sportsapi` VALUES (327,1,'Scottish Championship','soccer','sco.2');",
+"INSERT INTO `sportsapi` VALUES (328,1,'Scottish Championship Promotion/Relegation Playoffs','soccer','sco.2.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (329,1,'Scottish League One Promotion/Relegation Playoffs','soccer','sco.3.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (330,1,'Scottish League Two Promotion/Relegation Playoffs','soccer','sco.4.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (331,1,'Scottish League Two','soccer','sco.4');",
+"INSERT INTO `sportsapi` VALUES (332,1,'Scottish League Challenge Cup','soccer','sco.challenge');",
+"INSERT INTO `sportsapi` VALUES (333,1,'Dutch Eredivisie Promotion/Relegation Playoffs','soccer','ned.playoff.relegation');",
+"INSERT INTO `sportsapi` VALUES (334,1,'Dutch Eredivisie Cup','soccer','ned.w.eredivisie_cup');",
+"INSERT INTO `sportsapi` VALUES (335,1,'Dutch Keuken Kampioen Divisie','soccer','ned.2');",
+"INSERT INTO `sportsapi` VALUES (336,1,'Dutch Tweede Divisie','soccer','ned.3');",
+"INSERT INTO `sportsapi` VALUES (337,1,'Dutch KNVB Beker Vrouwen','soccer','ned.w.knvb_cup');",
+"INSERT INTO `sportsapi` VALUES (338,1,'Dutch Vrouwen Eredivisie','soccer','ned.w.1');",
+"INSERT INTO `sportsapi` VALUES (339,1,'Italian Serie B','soccer','ita.2');",
+"INSERT INTO `sportsapi` VALUES (340,1,'French Ligue 1 Promotion/Relegation Playoffs','soccer','fra.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (341,1,'French Ligue 2 Promotion/Relegation Playoffs','soccer','fra.2.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (342,1,'Swedish Allsvenskan','soccer','swe.1');",
+"INSERT INTO `sportsapi` VALUES (343,1,'Swedish Allsvenskanliga Promotion/Relegation Playoffs','soccer','swe.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (344,1,'Danish Superliga','soccer','den.1');",
+"INSERT INTO `sportsapi` VALUES (345,1,'Danish SAS-Ligaen Promotion/Relegation Playoffs','soccer','den.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (346,1,'Romanian Liga 1 Promotion/Relegation Playoffs','soccer','rou.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (347,1,'Romanian Liga 1','soccer','rou.1');",
+"INSERT INTO `sportsapi` VALUES (348,1,'Norwegian Eliteserien Promotion/Relegation Playoffs','soccer','nor.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (349,1,'Norwegian Eliteserien','soccer','nor.1');",
+"INSERT INTO `sportsapi` VALUES (350,1,'Maltese Premier League','soccer','mlt.1');",
+"INSERT INTO `sportsapi` VALUES (351,1,'Israeli Premier League','soccer','isr.1');",
+"INSERT INTO `sportsapi` VALUES (352,1,'Irish Premier Division Promotion/Relegation Playoffs','soccer','ir1.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (353,1,'Irish Premier Division','soccer','irl.1');",
+"INSERT INTO `sportsapi` VALUES (354,1,'Welsh Premier League','soccer','wal.1');",
+"INSERT INTO `sportsapi` VALUES (355,1,'Northern Irish Premiership','soccer','nir.1');",
+"INSERT INTO `sportsapi` VALUES (356,1,'CONMEBOL Copa Libertadores','soccer','conmebol.libertadores');",
+"INSERT INTO `sportsapi` VALUES (357,1,'CONMEBOL Copa Sudamericana','soccer','conmebol.sudamericana');",
+"INSERT INTO `sportsapi` VALUES (358,1,'CONMEBOL Recopa Sudamericana','soccer','conmebol.recopa');",
+"INSERT INTO `sportsapi` VALUES (359,1,'Argentine Liga Profesional de Fútbol','soccer','arg.1');",
+"INSERT INTO `sportsapi` VALUES (360,1,'Copa Argentina','soccer','arg.copa');",
+"INSERT INTO `sportsapi` VALUES (361,1,'Argentine Copa de la Liga Profesional','soccer','arg.copa_lpf');",
+"INSERT INTO `sportsapi` VALUES (362,1,'Argentine Copa de la Superliga','soccer','arg.copa_de_la_superliga');",
+"INSERT INTO `sportsapi` VALUES (363,1,'Argentine Trofeo de Campeones de la Superliga','soccer','arg.trofeo_de_la_campeones');",
+"INSERT INTO `sportsapi` VALUES (364,1,'Argentine Supercopa','soccer','arg.supercopa');",
+"INSERT INTO `sportsapi` VALUES (365,1,'Argentine Nacional B','soccer','arg.2');",
+"INSERT INTO `sportsapi` VALUES (366,1,'Argentine Primera B','soccer','arg.3');",
+"INSERT INTO `sportsapi` VALUES (367,1,'Argentine Primera C','soccer','arg.4');",
+"INSERT INTO `sportsapi` VALUES (368,1,'Argentine Primera D','soccer','arg.5');",
+"INSERT INTO `sportsapi` VALUES (369,1,'Supercopa Do Brazil','soccer','bra.supercopa_do_brazil');",
+"INSERT INTO `sportsapi` VALUES (370,1,'Brazilian Serie A','soccer','bra.1');",
+"INSERT INTO `sportsapi` VALUES (371,1,'Brazilian Serie B','soccer','bra.2');",
+"INSERT INTO `sportsapi` VALUES (372,1,'Brazilian Serie C','soccer','bra.3');",
+"INSERT INTO `sportsapi` VALUES (373,1,'Copa Do Nordeste','soccer','bra.copa_do_nordeste');",
+"INSERT INTO `sportsapi` VALUES (374,1,'Brazilian Campeonato Carioca','soccer','bra.camp.carioca');",
+"INSERT INTO `sportsapi` VALUES (375,1,'Brazilian Campeonato Paulista','soccer','bra.camp.paulista');",
+"INSERT INTO `sportsapi` VALUES (376,1,'Brazilian Campeonato Gaucho','soccer','bra.camp.gaucho');",
+"INSERT INTO `sportsapi` VALUES (377,1,'Brazilian Campeonato Mineiro','soccer','bra.camp.mineiro');",
+"INSERT INTO `sportsapi` VALUES (378,1,'Chilean Primera División','soccer','chi.1');",
+"INSERT INTO `sportsapi` VALUES (379,1,'Copa Chile','soccer','chi.copa_chi');",
+"INSERT INTO `sportsapi` VALUES (380,1,'International U20 Friendly','soccer','fifa.u20.friendly');",
+"INSERT INTO `sportsapi` VALUES (381,1,'Segunda División de Chile','soccer','chi.2');",
+"INSERT INTO `sportsapi` VALUES (382,1,'Chilean Supercopa','soccer','chi.super_cup');",
+"INSERT INTO `sportsapi` VALUES (383,1,'Uruguayan Primera Division','soccer','uru.1');",
+"INSERT INTO `sportsapi` VALUES (384,1,'Segunda División de Uruguay','soccer','uru.2');",
+"INSERT INTO `sportsapi` VALUES (385,1,'Colombian SuperLiga','soccer','col.superliga');",
+"INSERT INTO `sportsapi` VALUES (386,1,'Colombian Primera A','soccer','col.1');",
+"INSERT INTO `sportsapi` VALUES (387,1,'Colombian Primera B','soccer','col.2');",
+"INSERT INTO `sportsapi` VALUES (388,1,'Peruvian Supercopa','soccer','per.supercopa');",
+"INSERT INTO `sportsapi` VALUES (389,1,'Copa Colombia','soccer','col.copa');",
+"INSERT INTO `sportsapi` VALUES (390,1,'Peruvian Primera Profesional','soccer','per.1');",
+"INSERT INTO `sportsapi` VALUES (391,1,'Paraguayan Primera Division','soccer','par.1');",
+"INSERT INTO `sportsapi` VALUES (392,1,'Ecuadoran Primera A','soccer','ecu.1');",
+"INSERT INTO `sportsapi` VALUES (393,1,'Ecuadoran Supercopa','soccer','ecu.supercopa');",
+"INSERT INTO `sportsapi` VALUES (394,1,'Ecuador Serie B','soccer','ecu.2');",
+"INSERT INTO `sportsapi` VALUES (395,1,'Venezuelan Primera Profesional','soccer','ven.1');",
+"INSERT INTO `sportsapi` VALUES (396,1,'United States NWSL Challenge Cup','soccer','usa.nwsl.cup');",
+"INSERT INTO `sportsapi` VALUES (397,1,'Segunda División de Venezuela','soccer','ven.2');",
+"INSERT INTO `sportsapi` VALUES (398,1,'Bolivian Liga Profesional','soccer','bol.1');",
+"INSERT INTO `sportsapi` VALUES (399,1,'Mexican Supercopa MX','soccer','mex.supercopa');",
+"INSERT INTO `sportsapi` VALUES (400,1,'Mexican Campeon de Campeones','soccer','mex.campeon');",
+"INSERT INTO `sportsapi` VALUES (401,1,'CONCACAF Champions Cup','soccer','concacaf.champions_cup');",
+"INSERT INTO `sportsapi` VALUES (402,1,'CONCACAF U23 Tournament','soccer','concacaf.u23');",
+"INSERT INTO `sportsapi` VALUES (403,1,'Honduran Primera Division','soccer','hon.1');",
+"INSERT INTO `sportsapi` VALUES (404,1,'Costa Rican Primera Division','soccer','crc.1');",
+"INSERT INTO `sportsapi` VALUES (405,1,'Jamaican Premier League','soccer','jam.1');",
+"INSERT INTO `sportsapi` VALUES (406,1,'Guatemalan Liga Nacional','soccer','gua.1');",
+"INSERT INTO `sportsapi` VALUES (407,1,'Australian W-League','soccer','aus.w.1');",
+"INSERT INTO `sportsapi` VALUES (408,1,'Salvadoran Primera Division','soccer','slv.1');",
+"INSERT INTO `sportsapi` VALUES (409,1,'AFF Cup','soccer','aff.championship');",
+"INSERT INTO `sportsapi` VALUES (410,1,'AFC Cup','soccer','afc.cup');",
+"INSERT INTO `sportsapi` VALUES (411,1,'SAFF Championship','soccer','afc.saff.championship');",
+"INSERT INTO `sportsapi` VALUES (412,1,'Chinese Super League Promotion/Relegation Playoffs','soccer','chn.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (413,1,'Japanese J League','soccer','jpn.1');",
+"INSERT INTO `sportsapi` VALUES (414,1,'Indonesian Liga 1','soccer','idn.1');",
+"INSERT INTO `sportsapi` VALUES (415,1,'Indian Super League','soccer','ind.1');",
+"INSERT INTO `sportsapi` VALUES (416,1,'Indian I-League','soccer','ind.2');",
+"INSERT INTO `sportsapi` VALUES (417,1,'Malaysian Super League','soccer','mys.1');",
+"INSERT INTO `sportsapi` VALUES (418,1,'Singaporean Premier League','soccer','sgp.1');",
+"INSERT INTO `sportsapi` VALUES (419,1,'Thai League 1','soccer','tha.1');",
+"INSERT INTO `sportsapi` VALUES (420,1,'Bangabandhu Cup','soccer','bangabandhu.cup');",
+"INSERT INTO `sportsapi` VALUES (421,1,'COSAFA Cup','soccer','caf.cosafa');",
+"INSERT INTO `sportsapi` VALUES (422,1,'CAF Champions League','soccer','caf.champions');",
+"INSERT INTO `sportsapi` VALUES (423,1,'South African Premiership Promotion/Relegation Playoffs','soccer','rsa.1.promotion.relegation');",
+"INSERT INTO `sportsapi` VALUES (424,1,'CAF Confederations Cup','soccer','caf.confed');",
+"INSERT INTO `sportsapi` VALUES (425,1,'South African Premiership','soccer','rsa.1');",
+"INSERT INTO `sportsapi` VALUES (426,1,'South African First Division','soccer','rsa.2');",
+"INSERT INTO `sportsapi` VALUES (427,1,'South African Telkom Knockout','soccer','rsa.telkom_knockout');",
+"INSERT INTO `sportsapi` VALUES (428,1,'South African Nedbank Cup','soccer','rsa.nedbank');",
+"INSERT INTO `sportsapi` VALUES (429,1,'MTN 8 Cup','soccer','rsa.mtn8');",
+"INSERT INTO `sportsapi` VALUES (430,1,'Nigerian Professional League','soccer','nga.1');",
+"INSERT INTO `sportsapi` VALUES (431,1,'Ghanaian Premier League','soccer','gha.1');",
+"INSERT INTO `sportsapi` VALUES (432,1,'Zambian Super League','soccer','zam.1');",
+"INSERT INTO `sportsapi` VALUES (433,1,'Kenyan Premier League','soccer','ken.1');",
+"INSERT INTO `sportsapi` VALUES (434,1,'Zimbabwean Premier Soccer League','soccer','zim.1');",
+"INSERT INTO `sportsapi` VALUES (435,1,'Ugandan Premier League','soccer','uga.1');",
+"INSERT INTO `sportsapi` VALUES (436,1,'Misc. U.S. Soccer Games','soccer','generic.ussf');",
+"INSERT INTO `sportsapi` VALUES (1000,2,'Major League Baseball','baseball','mlb');",
+"INSERT INTO `sportscleanup` VALUES (1,1,1000,'soccer','(SE)','\\\\(\\\\w+\\\\)',0,'');",
+"INSERT INTO `sportscleanup` VALUES (2,1,1000,'soccer','AFC','\\\\AA\\\\.?F\\\\.?C\\\\.?|\\\\bA\\\\.?F\\\\.?C\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (3,1,1000,'soccer','AC etc.','\\\\AA\\\\.?[AC]\\\\.?|\\\\bA\\\\.?[AC]\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (4,1,1000,'soccer','BK','\\\\AB\\\\.?K\\\\.?|\\\\bB\\\\.?K\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (5,1,1000,'soccer','BSC','\\\\AB\\\\.?S\\\\.?C\\\\.?|\\\\bB\\\\.?S\\\\.?C\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (6,1,1000,'soccer','CSyD','\\\\AC\\\\.?S\\\\.?( y )?D\\\\.?|\\\\bC\\\\.?S\\\\.?( y )?D\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (7,1,1000,'soccer','CD etc.','\\\\AC\\\\.?[ADFRS]\\\\.?|\\\\bC\\\\.?[ADFRS]\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (8,1,1000,'soccer','FC','\\\\AF\\\\.?C\\\\.?|\\\\bF\\\\.?C\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (9,1,1000,'soccer','HSC','\\\\AH\\\\.?S\\\\.?C\\\\.?|\\\\bH\\\\.?S\\\\.?C\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (10,1,1000,'soccer','RC etc.','\\\\AR\\\\.?[BC]\\\\.?|\\\\bR\\\\.?[BC]\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (11,1,1000,'soccer','SC etc.','\\\\AS\\\\.?[ACV]\\\\.?|\\\\bS\\\\.?[ACV]\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (12,1,1000,'soccer','TSG','\\\\AT\\\\.?S\\\\.?G\\\\.?|\\\\bT\\\\.?S\\\\.?G\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (13,1,1000,'soccer','VFB etc.','\\\\AV\\\\.?F\\\\.?[BL]\\\\.?|\\\\bV\\\\.?F\\\\.?[BL]\\\\.?\\\\Z',0,'');",
+"INSERT INTO `sportscleanup` VALUES (14,1,2000,'all','','Inglaterra',0,'England');",
+"INSERT INTO `sportscleanup` VALUES (15,1,2000,'all','','Munchen',0,'Munich');",
+"INSERT INTO `sportscleanup` VALUES (16,1,1100,'basketball','Cal State','Cal State',0,'CSU');",
+"INSERT INTO `sportscleanup` VALUES (17,1,1000,'basketball','Grambling','Grambling State',0,'Grambling');",
+"INSERT INTO `sportscleanup` VALUES (18,1,1000,'basketball','Hawaii','Hawaii',0,'Hawai\\'i');",
+"INSERT INTO `sportscleanup` VALUES (19,1,1000,'basketball','LIU','LIU',0,'Long Island University');",
+"INSERT INTO `sportscleanup` VALUES (20,1,1100,'basketball','Loyola','Loyola-',0,'Loyola ');",
+"INSERT INTO `sportscleanup` VALUES (21,1,1000,'basketball','Loyola (Md.)','Loyola (Md.)',0,'Loyola (MD)');",
+"INSERT INTO `sportscleanup` VALUES (22,1,1000,'basketball','McNeese','McNeese State',0,'McNeese');",
+"INSERT INTO `sportscleanup` VALUES (23,1,1000,'basketball','Miami (OH)','Miami (Ohio)',0,'Miami (OH)');",
+"INSERT INTO `sportscleanup` VALUES (24,1,1000,'basketball','UAB','Alabama-Birmingham',0,'UAB');",
+"INSERT INTO `sportscleanup` VALUES (25,1,1000,'basketball','UConn','Connecticut',0,'UConn');",
+"INSERT INTO `sportscleanup` VALUES (26,1,1000,'basketball','UMass','Massachusetts',0,'UMass');",
+"INSERT INTO `sportscleanup` VALUES (27,1,1100,'basketball','UNC','UNC-',0,'UNC ');",
+"INSERT INTO `sportscleanup` VALUES (28,1,1000,'basketball','UTEP','Texas-El Paso',0,'UTEP');",
+"INSERT INTO `sportscleanup` VALUES (29,1,1100,'basketball','Texas','Texas-',0,'UT ');",
+"INSERT INTO `sportscleanup` VALUES (30,1,1000,'basketball','Chattanooga','UT-Chattanooga',0,'Chattanooga');",
+"INSERT INTO `sportscleanup` VALUES (31,1,1100,'basketball','UT','UT-',0,'UT ');",
+"INSERT INTO `sportslisting` VALUES (1,1,'\\\\A(?:MLB Baseball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (2,1,'\\\\A(?:Béisbol MLB)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (3,1,'\\\\A(?:MLB All-Star Game)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (4,1,'\\\\A(?:World Series)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (5,2,'\\\\A(?:College Baseball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (6,2,'\\\\A(?:College World Series)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (7,3,'\\\\A(?:College Softball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (8,4,'\\\\A(?:Women\\'s College World Series)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (9,10,'\\\\A(?:Béisbol Liga Mexicana)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (10,20,'\\\\A(?:N\\\\w+ Football)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (11,20,'\\\\A(?:Super Bowl( [CLXVI]+)?)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (12,20,'\\\\A(?:Fútbol Americano NFL)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (13,21,'\\\\A(?:College Football)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (14,21,'\\\\A(?:\\\\w+ Bowl)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (15,21,'\\\\A(?:Fútbol Americano de Universitario)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (16,40,'\\\\A(?:NBA Basketball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (17,40,'\\\\A(?:NBA Finals)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (18,41,'\\\\A(?:WNBA Basketball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (19,41,'\\\\A(?:WNBA Finals)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (20,42,'\\\\A(?:College Basketball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (21,42,'\\\\A(?:NCAA Basketball Tournament)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (22,43,'\\\\A(?:Women\\'s College Basketball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (23,43,'\\\\A(?:NCAA Women\\'s Basketball Tournament)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (24,60,'\\\\A(?:NHL Hockey)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (25,60,'\\\\A(?:NHL Winter Classic)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (26,60,'\\\\A(?:NHL \\\\w+ Conference Final)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (27,60,'\\\\A(?:Stanley Cup Finals)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (28,61,'\\\\A(?:College Hockey)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (29,61,'\\\\A(?:Frozen Four)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (30,62,'\\\\A(?:Women\\'s College Hockey)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (31,66,'\\\\A(?:College Field Hockey)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (32,80,'\\\\A(?:College Volleyball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (33,81,'\\\\A(?:Women\\'s College Volleyball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (34,100,'\\\\A(?:College Lacrosse)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (35,101,'\\\\A(?:Women\\'s College Lacrosse)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (36,120,'\\\\A(?:College Water Polo)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (37,121,'\\\\A(?:Women\\'s College Water Polo)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (38,200,'\\\\A(?:College Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (39,201,'\\\\A(?:Women\\'s College Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (40,202,'\\\\A(?:MLS Soccer|Fútbol MLS)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (41,203,'\\\\A(?:(Premier League|EPL) Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (42,203,'\\\\A(?:English Premier League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (43,203,'\\\\A(?:Fútbol Premier League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (44,205,'\\\\A(?:Italian Serie A Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (45,339,'\\\\A(?:Italian Serie B Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (46,206,'\\\\A(?:French Ligue 1 Soccer|Fútbol Ligue 1|Fútbol Liga 1)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (47,207,'\\\\A(?:French Ligue 2 Soccer|Fútbol Ligue 2|Fútbol Liga 2)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (48,208,'\\\\A(?:Fútbol LaLiga)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (49,208,'\\\\A(?:Fútbol Español Primera Division)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (50,208,'\\\\A(?:Spanish Primera Division Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (51,209,'\\\\A(?:(German )?Bundesliga Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (52,209,'\\\\A(?:Fútbol Bundesliga)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (53,209,'\\\\A(?:Fútbol Copa de Alemania)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (54,210,'\\\\A(?:German 2. Bundesliga Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (55,211,'\\\\A(?:Fútbol Mexicano Primera División|Fútbol Mexicano Liga Premier|Fútbol Mexicano)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (56,211,'\\\\A(?:Mexico Primera Division Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (57,212,'\\\\A(?:Copa do Brazil Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (58,214,'\\\\A(?:CONCACAF League Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (59,215,'\\\\A(?:CONCACAF Champions League Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (60,216,'\\\\A(?:CONCACAF Nations League Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (61,217,'\\\\A(?:CONCACAF Gold Cup Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (62,218,'\\\\A(?:FIFA World Cup Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (63,219,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (64,220,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (65,221,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (66,222,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (67,223,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (68,224,'\\\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (69,225,'\\\\A(?:Fútbol UEFA Champions League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (70,225,'\\\\A(?:UEFA Champions League Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (71,226,'\\\\A(?:Fútbol UEFA Europa League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (72,229,'\\\\A(?:Fútbol USL Championship)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (73,229,'\\\\A(?:USL Championship Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (74,230,'\\\\A(?:NWSL Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (75,231,'\\\\A(?:FA Women\\'s Super League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (76,242,'\\\\A(?:Fútbol Mexicano Liga Expansión)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (77,258,'\\\\A(?:UEFA Nations League Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (78,258,'\\\\A(?:Fútbol UEFA Nations League)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (79,271,'\\\\A(?:Fútbol Español Segunda Division)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (80,277,'\\\\A(?:Fútbol Turco Superliga)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (81,277,'\\\\A(?:Turkish Super Lig Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (82,279,'\\\\A(?:Superleague Greek Soccer)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (83,356,'\\\\A(?:Fútbol CONMEBOL Libertadores)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (84,357,'\\\\A(?:Fútbol CONMEBOL Sudamericana)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (85,359,'\\\\A(?:Fútbol Argentino Primera División)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (86,360,'\\\\A(?:Fútbol Copa Argentina)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (87,365,'\\\\A(?:Fútbol Argentino Primera Nacional( B)?)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (88,366,'\\\\A(?:Fútbol Argentino Primera B)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (89,367,'\\\\A(?:Fútbol Argentino Primera C)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (90,368,'\\\\A(?:Fútbol Argentino Primera D)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (91,386,'\\\\A(?:Fútbol Columbiano Primera División)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (92,403,'\\\\A(?:Fútbol Hondureño Primera División)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (93,404,'\\\\A(?:Fútbol Costarricense Primera División)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (94,1000,'\\\\A(?:MLB Baseball)\\\\z');",
+"INSERT INTO `sportslisting` VALUES (95,1000,'\\\\A(?:Béisbol MLB)\\\\z');",
+"INSERT INTO `users` VALUES (1,'admin','bcd911b2ecb15ffbd6d8e6e744d60cf6','0000-00-00 00:00:00');",
+"INSERT INTO `videotypes` VALUES (1,'txt','',1,0);",
+"INSERT INTO `videotypes` VALUES (2,'log','',1,0);",
+"INSERT INTO `videotypes` VALUES (3,'mpg','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (4,'avi','',0,1);",
+"INSERT INTO `videotypes` VALUES (5,'vob','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (6,'mpeg','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (8,'iso','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (9,'img','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (10,'mkv','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (11,'mp4','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (12,'m2ts','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (13,'evo','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (14,'divx','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (15,'mov','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (16,'qt','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (17,'wmv','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (18,'3gp','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (19,'asf','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (20,'ogg','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (21,'ogm','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (22,'flv','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (23,'ogv','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (25,'nut','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (26,'mxf','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (27,'m4v','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (28,'rm','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (29,'ts','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (30,'swf','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (31,'f4v','Internal',0,0);",
+"INSERT INTO `videotypes` VALUES (32,'nuv','Internal',0,0);"
+
+// NOLINTEND(modernize-raw-string-literal)
+
 };
 
     QString dbver = "";
     if (!performActualUpdate("MythTV", "DBSchemaVer",
-                             updates, "1307", dbver))
+                             updates, "1382", dbver))
         return false;
 
     GetMythDB()->SetHaveSchema(true);
 
     return true;
+}
+
+DBUpdates getRecordingExtenderDbInfo (int version)
+{
+    switch (version)
+    {
+      case -1:
+        return {
+            R"(DROP TABLE IF EXISTS sportscleanup;)",
+            R"(DROP TABLE IF EXISTS sportslisting;)",
+            R"(DROP TABLE IF EXISTS sportsapi;)",
+        };
+
+      case 0:
+        return {
+            R"(ALTER TABLE record ADD COLUMN autoextend
+                TINYINT UNSIGNED DEFAULT 0;)",
+        };
+
+      case 1:
+        return {
+            R"(CREATE TABLE sportsapi (
+              id INT UNSIGNED PRIMARY KEY,
+              provider TINYINT UNSIGNED DEFAULT 0,
+              name VARCHAR(128) NOT NULL,
+              key1 VARCHAR(64) NOT NULL,
+              key2 VARCHAR(64) NOT NULL,
+              UNIQUE(provider,key1(25),key2(50))
+              ) ENGINE=MyISAM DEFAULT CHARSET=utf8;)",
+            R"(INSERT INTO sportsapi
+            VALUES
+              (   1,1,'Major League Baseball','baseball','mlb'),
+              (   2,1,'NCAA Men''s Baseball','baseball','college-baseball'),
+              (   3,1,'NCAA Women''s Softball','baseball','college-softball'),
+              (   4,1,'Olympic Men''s Baseball','baseball','olympics-baseball'),
+              (   5,1,'World Baseball Classic','baseball','world-baseball-classic'),
+              (   6,1,'Little League Baseball','baseball','llb'),
+              (   7,1,'Caribbean Series','baseball','caribbean-series'),
+              (   8,1,'Dominican Winter League','baseball','dominican-winter-league'),
+              (   9,1,'Venezuelan Winter League','baseball','venezuelan-winter-league'),
+              (  10,1,'Mexican League','baseball','mexican-winter-league'),
+              (  11,1,'Puerto Rican Winter League','baseball','puerto-rican-winter-league');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              (  20,1,'National Football League','football','nfl'),
+              (  21,1,'NCAA - Football','football','college-football'),
+              (  22,1,'XFL','football','xfl'),
+              (  23,1,'Canadian Football League','football','cfl');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              (  40,1,'National Basketball Association','basketball','nba'),
+              (  41,1,'Women''s National Basketball Association','basketball','wnba'),
+              (  42,1,'NCAA Men''s Basketball','basketball','mens-college-basketball'),
+              (  43,1,'NCAA Women''s Basketball','basketball','womens-college-basketball'),
+              (  44,1,'Olympics Men''s Basketball','basketball','mens-olympic-basketball'),
+              (  45,1,'Olympics Women''s Basketball','basketball','womens-olympic-basketball'),
+              (  46,1,'National Basketball Association Summer League Las Vegas','basketball','nba-summer-las-vegas'),
+              (  47,1,'National Basketball Association Summer League Utah','basketball','nba-summer-utah'),
+              (  48,1,'National Basketball Association Summer League Orlando','basketball','nba-summer-orlando'),
+              (  49,1,'National Basketball Association Summer League Sacramento','basketball','nba-summer-sacramento'),
+              (  50,1,'NBA G League','basketball','nba-development'),
+              (  51,1,'International Basketball Federation','basketball','fiba');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              (  60,1,'National Hockey League','hockey','nfl'),
+              (  61,1,'NCAA Men''s Ice Hockey','hockey','mens-college-hockey'),
+              (  62,1,'NCAA Women''s Hockey','hockey','womens-college-hockey'),
+              (  63,1,'World Cup of Hockey','hockey','hockey-world-cup'),
+              (  64,1,'Men''s Olympic Ice Hockey','hockey','mens-olympic-hockey'),
+              (  65,1,'Women''s Olympic Ice Hockey','hockey','womens-olympic-hockey'),
+              (  66,1,'NCAA Women''s Field Hockey','field-hockey','womens-college-field-hockey');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              (  80,1,'NCAA Men''s Volleyball','volleyball','mens-college-volleyball'),
+              (  81,1,'NCAA Women''s Volleyball','volleyball','womens-college-volleyball');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              ( 100,1,'NCAA Men''s Lacrosse','lacrosse','mens-college-lacrosse'),
+              ( 101,1,'NCAA Women''s Lacrosse','lacrosse','womens-college-lacrosse');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              ( 120,1,'NCAA Men''s Water Polo','water-polo','mens-college-water-polo'),
+              ( 121,1,'NCAA Women''s Water Polo','water-polo','womens-college-water-polo');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              ( 200,1,'NCAA Men''s Soccer','soccer','usa.ncaa.m.1'),
+              ( 201,1,'NCAA Women''s Soccer','soccer','usa.ncaa.w.1'),
+              ( 202,1,'Major League Soccer','soccer','usa.1'),
+              ( 203,1,'English Premier League','soccer','eng.1'),
+              ( 204,1,'English League Championship','soccer','eng.2'),
+              ( 205,1,'Italian Serie A','soccer','ita.1'),
+              ( 206,1,'French Ligue 1','soccer','fra.1'),
+              ( 207,1,'French Ligue 2','soccer','fra.2'),
+              ( 208,1,'Spanish LaLiga','soccer','esp.1'),
+              ( 209,1,'German Bundesliga','soccer','ger.1'),
+              ( 210,1,'German 2. Bundesliga','soccer','ger.2'),
+              ( 211,1,'Mexican Liga BBVA MX','soccer','mex.1'),
+              ( 212,1,'Copa Do Brasil','soccer','bra.copa_do_brazil'),
+              ( 213,1,'CONCACAF Leagues Cup','soccer','concacaf.leagues.cup'),
+              ( 214,1,'CONCACAF League','soccer','concacaf.league'),
+              ( 215,1,'CONCACAF Champions League','soccer','concacaf.champions'),
+              ( 216,1,'CONCACAF Nations League','soccer','concacaf.nations.league'),
+              ( 217,1,'CONCACAF Gold Cup','soccer','concacaf.gold'),
+              ( 218,1,'FIFA World Cup','soccer','fifa.world'),
+              ( 219,1,'FIFA World Cup Qualifying - UEFA','soccer','fifa.worldq.uefa'),
+              ( 220,1,'FIFA World Cup Qualifying - CONCACAF','soccer','fifa.worldq.concacaf'),
+              ( 221,1,'FIFA World Cup Qualifying - CONMEBOL','soccer','fifa.worldq.conmebol'),
+              ( 222,1,'FIFA World Cup Qualifying - AFC','soccer','fifa.worldq.afc'),
+              ( 223,1,'FIFA World Cup Qualifying - CAF','soccer','fifa.worldq.caf'),
+              ( 224,1,'FIFA World Cup Qualifying - OFC','soccer','fifa.worldq.ofc'),
+              ( 225,1,'UEFA Champions League','soccer','uefa.champions'),
+              ( 226,1,'UEFA Europa League','soccer','uefa.europa'),
+              ( 227,1,'UEFA Europa Conference League','soccer','uefa.europa.conf'),
+              ( 228,1,'English Carabao Cup','soccer','eng.league_cup'),
+              ( 229,1,'USL Championship','soccer','usa.usl.1'),
+              ( 230,1,'United States NWSL','soccer','usa.nwsl'),
+              ( 231,1,'FA Women''s Super League','soccer','eng.w.1'),
+              ( 232,1,'English FA Cup','soccer','eng.fa'),
+              ( 233,1,'Spanish Copa del Rey','soccer','esp.copa_del_rey'),
+              ( 234,1,'German DFB Pokal','soccer','ger.dfb_pokal'),
+              ( 235,1,'Italian Coppa Italia','soccer','ita.coppa_italia'),
+              ( 236,1,'French Coupe de France','soccer','fra.coupe_de_france'),
+              ( 237,1,'AFC Champions League','soccer','afc.champions'),
+              ( 238,1,'Dutch KNVB Beker','soccer','ned.cup'),
+              ( 239,1,'Dutch Eredivisie','soccer','ned.1'),
+              ( 240,1,'Portuguese Liga','soccer','por.1'),
+              ( 241,1,'Russian Premier League','soccer','rus.1'),
+              ( 242,1,'Mexican Liga de Expansión MX','soccer','mex.2'),
+              ( 243,1,'Mexican Copa MX','soccer','mex.copa_mx'),
+              ( 244,1,'Campeones Cup','soccer','campeones.cup'),
+              ( 245,1,'United States Open Cup','soccer','usa.open'),
+              ( 246,1,'USL League One','soccer','usa.usl.l1'),
+              ( 247,1,'Scottish Premiership','soccer','sco.1'),
+              ( 248,1,'Chinese Super League','soccer','chn.1'),
+              ( 249,1,'Australian A-League','soccer','aus.1'),
+              ( 250,1,'International Friendly','soccer','fifa.friendly'),
+              ( 251,1,'Women''s International Friendly','soccer','fifa.friendly.w'),
+              ( 252,1,'UEFA European Under-21 Championship Qualifying','soccer','uefa.euro_u21_qual'),
+              ( 253,1,'FIFA Women''s World Cup','soccer','fifa.wwc'),
+              ( 254,1,'FIFA Club World Cup','soccer','fifa.cwc'),
+              ( 255,1,'CONCACAF Gold Cup Qualifying','soccer','concacaf.gold_qual'),
+              ( 256,1,'CONCACAF Nations League Qualifying','soccer','concacaf.nations.league_qual'),
+              ( 257,1,'CONCACAF Cup','soccer','concacaf.confederations_playoff'),
+              ( 258,1,'UEFA Nations League','soccer','uefa.nations'),
+              ( 259,1,'UEFA European Championship','soccer','uefa.euro'),
+              ( 260,1,'UEFA European Championship Qualifying','soccer','uefa.euroq'),
+              ( 261,1,'Copa America','soccer','conmebol.america'),
+              ( 262,1,'AFC Asian Cup','soccer','afc.asian.cup'),
+              ( 263,1,'AFC Asian Cup Qualifiers','soccer','afc.cupq'),
+              ( 264,1,'Africa Cup of Nations qualifying','soccer','caf.nations_qual'),
+              ( 265,1,'Africa Cup of Nations','soccer','caf.nations'),
+              ( 266,1,'Africa Nations Championship','soccer','caf.championship'),
+              ( 267,1,'WAFU Cup of Nations','soccer','wafu.nations'),
+              ( 268,1,'SheBelieves Cup','soccer','fifa.shebelieves'),
+              ( 269,1,'FIFA Confederations Cup','soccer','fifa.confederations'),
+              ( 270,1,'Non-FIFA Friendly','soccer','nonfifa'),
+              ( 271,1,'Spanish LaLiga 2','soccer','esp.2'),
+              ( 272,1,'Spanish Supercopa','soccer','esp.super_cup'),
+              ( 273,1,'Portuguese Liga Promotion/Relegation Playoffs','soccer','por.1.promotion.relegation'),
+              ( 274,1,'Belgian First Division A - Promotion/Relegation Playoffs','soccer','bel.promotion.relegation'),
+              ( 275,1,'Belgian First Division A','soccer','bel.1'),
+              ( 276,1,'Austrian Bundesliga','soccer','aut.1'),
+              ( 277,1,'Turkish Super Lig','soccer','tur.1'),
+              ( 278,1,'Austrian Bundesliga Promotion/Relegation Playoffs','soccer','aut.promotion.relegation'),
+              ( 279,1,'Greek Super League','soccer','gre.1'),
+              ( 280,1,'Greek Super League Promotion/Relegation Playoffs','soccer','gre.1.promotion.relegation'),
+              ( 281,1,'Swiss Super League','soccer','sui.1'),
+              ( 282,1,'Swiss Super League Promotion/Relegation Playoffs','soccer','sui.1.promotion.relegation'),
+              ( 283,1,'UEFA Women''s Champions League','soccer','uefa.wchampions'),
+              ( 284,1,'International Champions Cup','soccer','global.champs_cup'),
+              ( 285,1,'Women''s International Champions Cup','soccer','global.wchamps_cup'),
+              ( 286,1,'Club Friendly','soccer','club.friendly'),
+              ( 287,1,'UEFA Champions League Qualifying','soccer','uefa.champions_qual'),
+              ( 288,1,'UEFA Europa Conference League Qualifying','soccer','uefa.europa.conf_qual'),
+              ( 289,1,'UEFA Europa League Qualifying','soccer','uefa.europa_qual'),
+              ( 290,1,'UEFA Super Cup','soccer','uefa.super_cup'),
+              ( 291,1,'English FA Community Shield','soccer','eng.charity'),
+              ( 292,1,'Supercoppa Italiana','soccer','ita.super_cup'),
+              ( 293,1,'French Trophee des Champions','soccer','fra.super_cup'),
+              ( 294,1,'Dutch Johan Cruyff Shield','soccer','ned.supercup'),
+              ( 295,1,'Trofeo Joan Gamper','soccer','esp.joan_gamper'),
+              ( 296,1,'German DFL-Supercup','soccer','ger.super_cup'),
+              ( 297,1,'Audi Cup','soccer','ger.audi_cup'),
+              ( 298,1,'Premier League Asia Trophy','soccer','eng.asia_trophy'),
+              ( 299,1,'Emirates Cup','soccer','friendly.emirates_cup'),
+              ( 300,1,'Japanese J League World Challenge','soccer','jpn.world_challenge'),
+              ( 301,1,'SuperCopa Euroamericana','soccer','euroamericana.supercopa'),
+              ( 302,1,'Men''s Olympic Tournament','soccer','fifa.olympics'),
+              ( 303,1,'Women''s Olympic Tournament','soccer','fifa.w.olympics'),
+              ( 304,1,'CONMEBOL Pre-Olympic Tournament','soccer','fifa.conmebol.olympicsq'),
+              ( 305,1,'CONCACAF Men''s Olympic Qualifying','soccer','fifa.concacaf.olympicsq'),
+              ( 306,1,'CONCACAF Women''s Olympic Qualifying Tournament','soccer','fifa.w.concacaf.olympicsq'),
+              ( 307,1,'CONCACAF Women''s Championship','soccer','concacaf.womens.championship'),
+              ( 308,1,'FIFA Under-20 World Cup','soccer','fifa.world.u20'),
+              ( 309,1,'FIFA Under-17 World Cup','soccer','fifa.world.u17'),
+              ( 310,1,'Toulon Tournament','soccer','global.toulon'),
+              ( 311,1,'UEFA European Under-21 Championship','soccer','uefa.euro_u21'),
+              ( 312,1,'UEFA European Under-19 Championship','soccer','uefa.euro.u19'),
+              ( 313,1,'Under-21 International Friendly','soccer','fifa.friendly_u21'),
+              ( 314,1,'UEFA Women''s European Championship','soccer','uefa.weuro'),
+              ( 315,1,'German Bundesliga Promotion/Relegation Playoff','soccer','ger.playoff.relegation'),
+              ( 316,1,'German 2. Bundesliga Promotion/Relegation Playoffs','soccer','ger.2.promotion.relegation'),
+              ( 317,1,'English Women''s FA Cup','soccer','eng.w.fa'),
+              ( 318,1,'English Women''s FA Community Shield','soccer','eng.w.charity'),
+              ( 319,1,'English EFL Trophy','soccer','eng.trophy'),
+              ( 320,1,'English National League','soccer','eng.5'),
+              ( 321,1,'English League One','soccer','eng.3'),
+              ( 322,1,'English League Two','soccer','eng.4'),
+              ( 323,1,'Scottish Cup','soccer','sco.tennents'),
+              ( 324,1,'Scottish League Cup','soccer','sco.cis'),
+              ( 325,1,'Scottish Premiership Promotion/Relegation Playoffs','soccer','sco.1.promotion.relegation'),
+              ( 326,1,'Scottish League One','soccer','sco.3'),
+              ( 327,1,'Scottish Championship','soccer','sco.2'),
+              ( 328,1,'Scottish Championship Promotion/Relegation Playoffs','soccer','sco.2.promotion.relegation'),
+              ( 329,1,'Scottish League One Promotion/Relegation Playoffs','soccer','sco.3.promotion.relegation'),
+              ( 330,1,'Scottish League Two Promotion/Relegation Playoffs','soccer','sco.4.promotion.relegation'),
+              ( 331,1,'Scottish League Two','soccer','sco.4'),
+              ( 332,1,'Scottish League Challenge Cup','soccer','sco.challenge'),
+              ( 333,1,'Dutch Eredivisie Promotion/Relegation Playoffs','soccer','ned.playoff.relegation'),
+              ( 334,1,'Dutch Eredivisie Cup','soccer','ned.w.eredivisie_cup'),
+              ( 335,1,'Dutch Keuken Kampioen Divisie','soccer','ned.2'),
+              ( 336,1,'Dutch Tweede Divisie','soccer','ned.3'),
+              ( 337,1,'Dutch KNVB Beker Vrouwen','soccer','ned.w.knvb_cup'),
+              ( 338,1,'Dutch Vrouwen Eredivisie','soccer','ned.w.1'),
+              ( 339,1,'Italian Serie B','soccer','ita.2'),
+              ( 340,1,'French Ligue 1 Promotion/Relegation Playoffs','soccer','fra.1.promotion.relegation'),
+              ( 341,1,'French Ligue 2 Promotion/Relegation Playoffs','soccer','fra.2.promotion.relegation'),
+              ( 342,1,'Swedish Allsvenskan','soccer','swe.1'),
+              ( 343,1,'Swedish Allsvenskanliga Promotion/Relegation Playoffs','soccer','swe.1.promotion.relegation'),
+              ( 344,1,'Danish Superliga','soccer','den.1'),
+              ( 345,1,'Danish SAS-Ligaen Promotion/Relegation Playoffs','soccer','den.promotion.relegation'),
+              ( 346,1,'Romanian Liga 1 Promotion/Relegation Playoffs','soccer','rou.1.promotion.relegation'),
+              ( 347,1,'Romanian Liga 1','soccer','rou.1'),
+              ( 348,1,'Norwegian Eliteserien Promotion/Relegation Playoffs','soccer','nor.1.promotion.relegation'),
+              ( 349,1,'Norwegian Eliteserien','soccer','nor.1'),
+              ( 350,1,'Maltese Premier League','soccer','mlt.1'),
+              ( 351,1,'Israeli Premier League','soccer','isr.1'),
+              ( 352,1,'Irish Premier Division Promotion/Relegation Playoffs','soccer','ir1.1.promotion.relegation'),
+              ( 353,1,'Irish Premier Division','soccer','irl.1'),
+              ( 354,1,'Welsh Premier League','soccer','wal.1'),
+              ( 355,1,'Northern Irish Premiership','soccer','nir.1'),
+              ( 356,1,'CONMEBOL Copa Libertadores','soccer','conmebol.libertadores'),
+              ( 357,1,'CONMEBOL Copa Sudamericana','soccer','conmebol.sudamericana'),
+              ( 358,1,'CONMEBOL Recopa Sudamericana','soccer','conmebol.recopa'),
+              ( 359,1,'Argentine Liga Profesional de Fútbol','soccer','arg.1'),
+              ( 360,1,'Copa Argentina','soccer','arg.copa'),
+              ( 361,1,'Argentine Copa de la Liga Profesional','soccer','arg.copa_lpf'),
+              ( 362,1,'Argentine Copa de la Superliga','soccer','arg.copa_de_la_superliga'),
+              ( 363,1,'Argentine Trofeo de Campeones de la Superliga','soccer','arg.trofeo_de_la_campeones'),
+              ( 364,1,'Argentine Supercopa','soccer','arg.supercopa'),
+              ( 365,1,'Argentine Nacional B','soccer','arg.2'),
+              ( 366,1,'Argentine Primera B','soccer','arg.3'),
+              ( 367,1,'Argentine Primera C','soccer','arg.4'),
+              ( 368,1,'Argentine Primera D','soccer','arg.5'),
+              ( 369,1,'Supercopa Do Brazil','soccer','bra.supercopa_do_brazil'),
+              ( 370,1,'Brazilian Serie A','soccer','bra.1'),
+              ( 371,1,'Brazilian Serie B','soccer','bra.2'),
+              ( 372,1,'Brazilian Serie C','soccer','bra.3'),
+              ( 373,1,'Copa Do Nordeste','soccer','bra.copa_do_nordeste'),
+              ( 374,1,'Brazilian Campeonato Carioca','soccer','bra.camp.carioca'),
+              ( 375,1,'Brazilian Campeonato Paulista','soccer','bra.camp.paulista'),
+              ( 376,1,'Brazilian Campeonato Gaucho','soccer','bra.camp.gaucho'),
+              ( 377,1,'Brazilian Campeonato Mineiro','soccer','bra.camp.mineiro'),
+              ( 378,1,'Chilean Primera División','soccer','chi.1'),
+              ( 379,1,'Copa Chile','soccer','chi.copa_chi'),
+              ( 380,1,'International U20 Friendly','soccer','fifa.u20.friendly'),
+              ( 381,1,'Segunda División de Chile','soccer','chi.2'),
+              ( 382,1,'Chilean Supercopa','soccer','chi.super_cup'),
+              ( 383,1,'Uruguayan Primera Division','soccer','uru.1'),
+              ( 384,1,'Segunda División de Uruguay','soccer','uru.2'),
+              ( 385,1,'Colombian SuperLiga','soccer','col.superliga'),
+              ( 386,1,'Colombian Primera A','soccer','col.1'),
+              ( 387,1,'Colombian Primera B','soccer','col.2'),
+              ( 388,1,'Peruvian Supercopa','soccer','per.supercopa'),
+              ( 389,1,'Copa Colombia','soccer','col.copa'),
+              ( 390,1,'Peruvian Primera Profesional','soccer','per.1'),
+              ( 391,1,'Paraguayan Primera Division','soccer','par.1'),
+              ( 392,1,'Ecuadoran Primera A','soccer','ecu.1'),
+              ( 393,1,'Ecuadoran Supercopa','soccer','ecu.supercopa'),
+              ( 394,1,'Ecuador Serie B','soccer','ecu.2'),
+              ( 395,1,'Venezuelan Primera Profesional','soccer','ven.1'),
+              ( 396,1,'United States NWSL Challenge Cup','soccer','usa.nwsl.cup'),
+              ( 397,1,'Segunda División de Venezuela','soccer','ven.2'),
+              ( 398,1,'Bolivian Liga Profesional','soccer','bol.1'),
+              ( 399,1,'Mexican Supercopa MX','soccer','mex.supercopa'),
+              ( 400,1,'Mexican Campeon de Campeones','soccer','mex.campeon'),
+              ( 401,1,'CONCACAF Champions Cup','soccer','concacaf.champions_cup'),
+              ( 402,1,'CONCACAF U23 Tournament','soccer','concacaf.u23'),
+              ( 403,1,'Honduran Primera Division','soccer','hon.1'),
+              ( 404,1,'Costa Rican Primera Division','soccer','crc.1'),
+              ( 405,1,'Jamaican Premier League','soccer','jam.1'),
+              ( 406,1,'Guatemalan Liga Nacional','soccer','gua.1'),
+              ( 407,1,'Australian W-League','soccer','aus.w.1'),
+              ( 408,1,'Salvadoran Primera Division','soccer','slv.1'),
+              ( 409,1,'AFF Cup','soccer','aff.championship'),
+              ( 410,1,'AFC Cup','soccer','afc.cup'),
+              ( 411,1,'SAFF Championship','soccer','afc.saff.championship'),
+              ( 412,1,'Chinese Super League Promotion/Relegation Playoffs','soccer','chn.1.promotion.relegation'),
+              ( 413,1,'Japanese J League','soccer','jpn.1'),
+              ( 414,1,'Indonesian Liga 1','soccer','idn.1'),
+              ( 415,1,'Indian Super League','soccer','ind.1'),
+              ( 416,1,'Indian I-League','soccer','ind.2'),
+              ( 417,1,'Malaysian Super League','soccer','mys.1'),
+              ( 418,1,'Singaporean Premier League','soccer','sgp.1'),
+              ( 419,1,'Thai League 1','soccer','tha.1'),
+              ( 420,1,'Bangabandhu Cup','soccer','bangabandhu.cup'),
+              ( 421,1,'COSAFA Cup','soccer','caf.cosafa'),
+              ( 422,1,'CAF Champions League','soccer','caf.champions'),
+              ( 423,1,'South African Premiership Promotion/Relegation Playoffs','soccer','rsa.1.promotion.relegation'),
+              ( 424,1,'CAF Confederations Cup','soccer','caf.confed'),
+              ( 425,1,'South African Premiership','soccer','rsa.1'),
+              ( 426,1,'South African First Division','soccer','rsa.2'),
+              ( 427,1,'South African Telkom Knockout','soccer','rsa.telkom_knockout'),
+              ( 428,1,'South African Nedbank Cup','soccer','rsa.nedbank'),
+              ( 429,1,'MTN 8 Cup','soccer','rsa.mtn8'),
+              ( 430,1,'Nigerian Professional League','soccer','nga.1'),
+              ( 431,1,'Ghanaian Premier League','soccer','gha.1'),
+              ( 432,1,'Zambian Super League','soccer','zam.1'),
+              ( 433,1,'Kenyan Premier League','soccer','ken.1'),
+              ( 434,1,'Zimbabwean Premier Soccer League','soccer','zim.1'),
+              ( 435,1,'Ugandan Premier League','soccer','uga.1'),
+              ( 436,1,'Misc. U.S. Soccer Games','soccer','generic.ussf');)",
+
+            R"(INSERT INTO sportsapi
+            VALUES
+              (1000,2,'Major League Baseball','baseball','mlb');)",
+
+            R"(CREATE TABLE sportslisting (
+              id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+              api INT UNSIGNED NOT NULL,
+              title VARCHAR(128) NOT NULL
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;)",
+
+            R"(INSERT INTO sportslisting (api,title)
+            VALUES
+              (   1, '\\A(?:MLB Baseball)\\z'),
+              (   1, '\\A(?:Béisbol MLB)\\z'),
+              (   1, '\\A(?:MLB All-Star Game)\\z'),
+              (   1, '\\A(?:World Series)\\z'),
+              (   2, '\\A(?:College Baseball)\\z'),
+              (   2, '\\A(?:College World Series)\\z'),
+              (   3, '\\A(?:College Softball)\\z'),
+              (   4, '\\A(?:Women''s College World Series)\\z'),
+              (  10, '\\A(?:Béisbol Liga Mexicana)\\z'),
+
+              (  20, '\\A(?:N\\w+ Football)\\z'),
+              (  20, '\\A(?:Super Bowl( [CLXVI]+)?)\\z'),
+              (  20, '\\A(?:Fútbol Americano NFL)\\z'),
+              (  21, '\\A(?:College Football)\\z'),
+              (  21, '\\A(?:\\w+ Bowl)\\z'),
+              (  21, '\\A(?:Fútbol Americano de Universitario)\\z'),
+
+              (  40, '\\A(?:NBA Basketball)\\z'),
+              (  40, '\\A(?:NBA Finals)\\z'),
+              (  41, '\\A(?:WNBA Basketball)\\z'),
+              (  41, '\\A(?:WNBA Finals)\\z'),
+              (  42, '\\A(?:College Basketball)\\z'),
+              (  42, '\\A(?:NCAA Basketball Tournament)\\z'),
+              (  43, '\\A(?:Women''s College Basketball)\\z'),
+              (  43, '\\A(?:NCAA Women''s Basketball Tournament)\\z'),
+
+              (  60, '\\A(?:NHL Hockey)\\z'),
+              (  60, '\\A(?:NHL Winter Classic)\\z'),
+              (  60, '\\A(?:NHL \\w+ Conference Final)\\z'),
+              (  60, '\\A(?:Stanley Cup Finals)\\z'),
+              (  61, '\\A(?:College Hockey)\\z'),
+              (  61, '\\A(?:Frozen Four)\\z'),
+              (  62, '\\A(?:Women''s College Hockey)\\z'),
+              (  66, '\\A(?:College Field Hockey)\\z'),
+
+              (  80, '\\A(?:College Volleyball)\\z'),
+              (  81, '\\A(?:Women''s College Volleyball)\\z'),
+
+              ( 100, '\\A(?:College Lacrosse)\\z'),
+              ( 101, '\\A(?:Women''s College Lacrosse)\\z'),
+
+              ( 120, '\\A(?:College Water Polo)\\z'),
+              ( 121, '\\A(?:Women''s College Water Polo)\\z'),
+
+              ( 200, '\\A(?:College Soccer)\\z'),
+              ( 201, '\\A(?:Women''s College Soccer)\\z'),
+              ( 202, '\\A(?:MLS Soccer|Fútbol MLS)\\z'),
+              ( 203, '\\A(?:(Premier League|EPL) Soccer)\\z'),
+              ( 203, '\\A(?:English Premier League)\\z'),
+              ( 203, '\\A(?:Fútbol Premier League)\\z'),
+              ( 205, '\\A(?:Italian Serie A Soccer)\\z'),
+              ( 339, '\\A(?:Italian Serie B Soccer)\\z'),
+              ( 206, '\\A(?:French Ligue 1 Soccer|Fútbol Ligue 1|Fútbol Liga 1)\\z'),
+              ( 207, '\\A(?:French Ligue 2 Soccer|Fútbol Ligue 2|Fútbol Liga 2)\\z'),
+              ( 208, '\\A(?:Fútbol LaLiga)\\z'),
+              ( 208, '\\A(?:Fútbol Español Primera Division)\\z'),
+              ( 208, '\\A(?:Spanish Primera Division Soccer)\\z'),
+              ( 209, '\\A(?:(German )?Bundesliga Soccer)\\z'),
+              ( 209, '\\A(?:Fútbol Bundesliga)\\z'),
+              ( 209, '\\A(?:Fútbol Copa de Alemania)\\z'),
+              ( 210, '\\A(?:German 2. Bundesliga Soccer)\\z'),
+              ( 211, '\\A(?:Fútbol Mexicano Primera División|Fútbol Mexicano Liga Premier|Fútbol Mexicano)\\z'),
+              ( 211, '\\A(?:Mexico Primera Division Soccer)\\z'),
+              ( 212, '\\A(?:Copa do Brazil Soccer)\\z'),
+              ( 214, '\\A(?:CONCACAF League Soccer)\\z'),
+              ( 215, '\\A(?:CONCACAF Champions League Soccer)\\z'),
+              ( 216, '\\A(?:CONCACAF Nations League Soccer)\\z'),
+              ( 217, '\\A(?:CONCACAF Gold Cup Soccer)\\z'),
+              ( 218, '\\A(?:FIFA World Cup Soccer)\\z'),
+              ( 219, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 220, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 221, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 222, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 223, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 224, '\\A(?:FIFA World Cup Qualifying( Soccer)?|FIFA Eliminatorias Copa Mundial)\\z'),
+              ( 225, '\\A(?:Fútbol UEFA Champions League)\\z'),
+              ( 225, '\\A(?:UEFA Champions League Soccer)\\z'),
+              ( 226, '\\A(?:Fútbol UEFA Europa League)\\z'),
+              ( 229, '\\A(?:Fútbol USL Championship)\\z'),
+              ( 229, '\\A(?:USL Championship Soccer)\\z'),
+              ( 230, '\\A(?:NWSL Soccer)\\z'),
+              ( 231, '\\A(?:FA Women''s Super League)\\z'),
+              ( 242, '\\A(?:Fútbol Mexicano Liga Expansión)\\z'),
+              ( 258, '\\A(?:UEFA Nations League Soccer)\\z'),
+              ( 258, '\\A(?:Fútbol UEFA Nations League)\\z'),
+              ( 271, '\\A(?:Fútbol Español Segunda Division)\\z'),
+              ( 277, '\\A(?:Fútbol Turco Superliga)\\z'),
+              ( 277, '\\A(?:Turkish Super Lig Soccer)\\z'),
+              ( 279, '\\A(?:Superleague Greek Soccer)\\z'),
+              ( 356, '\\A(?:Fútbol CONMEBOL Libertadores)\\z'),
+              ( 357, '\\A(?:Fútbol CONMEBOL Sudamericana)\\z'),
+              ( 359, '\\A(?:Fútbol Argentino Primera División)\\z'),
+              ( 360, '\\A(?:Fútbol Copa Argentina)\\z'),
+              ( 365, '\\A(?:Fútbol Argentino Primera Nacional( B)?)\\z'),
+              ( 366, '\\A(?:Fútbol Argentino Primera B)\\z'),
+              ( 367, '\\A(?:Fútbol Argentino Primera C)\\z'),
+              ( 368, '\\A(?:Fútbol Argentino Primera D)\\z'),
+              ( 386, '\\A(?:Fútbol Columbiano Primera División)\\z'),
+              ( 403, '\\A(?:Fútbol Hondureño Primera División)\\z'),
+              ( 404, '\\A(?:Fútbol Costarricense Primera División)\\z'),
+
+              (1000, '\\A(?:MLB Baseball)\\z'),
+              (1000, '\\A(?:Béisbol MLB)\\z');
+              )",
+
+            R"(CREATE TABLE sportscleanup (
+              id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+              provider TINYINT UNSIGNED DEFAULT 0,
+              weight INT UNSIGNED NOT NULL,
+              key1 VARCHAR(256) NOT NULL,
+              name VARCHAR(256) NOT NULL,
+              pattern VARCHAR(256) NOT NULL,
+              nth TINYINT UNSIGNED NOT NULL,
+              replacement VARCHAR(128) NOT NULL
+            ) ENGINE=MyISAM DEFAULT CHARSET=utf8;)",
+
+            // Sigh. It would be nice if these patterns could use the
+            // '\b' boundary matching sequence in the first part of
+            // the match, but the period is not part of the set of
+            // characters that make up a word, so trying to optionally
+            // match the final period in the string 'F.C. Foo' with
+            // the pattern '\.?\b' always fails because period and
+            // space are both non-word characters and therefore there
+            // is no word boundary between them. This will always
+            // match on 'F.C' and never on 'F.C.'.
+            //
+            // I have also seen a TV listing where the team name was
+            // 'F.C.Something' without a space, so the first part of
+            // these patterns doesn't require a following space in
+            // order to match. These patterns are case sensitive, so
+            // the first part shouldn't match part of an ordinary team
+            // name unless the team name is in all caps.
+            R"A(INSERT INTO sportscleanup (provider,weight,key1,name,pattern,nth,replacement)
+            VALUES
+              (1,1000,'soccer', '(SE)',     '\\(\\w+\\)', 0, ''),
+              (1,1000,'soccer', 'AFC',      '\\AA\\.?F\\.?C\\.?|\\bA\\.?F\\.?C\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'AC etc.',  '\\AA\\.?[AC]\\.?|\\bA\\.?[AC]\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'BK',       '\\AB\\.?K\\.?|\\bB\\.?K\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'BSC',      '\\AB\\.?S\\.?C\\.?|\\bB\\.?S\\.?C\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'CSyD',     '\\AC\\.?S\\.?( y )?D\\.?|\\bC\\.?S\\.?( y )?D\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'CD etc.',  '\\AC\\.?[ADFRS]\\.?|\\bC\\.?[ADFRS]\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'FC',       '\\AF\\.?C\\.?|\\bF\\.?C\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'HSC',      '\\AH\\.?S\\.?C\\.?|\\bH\\.?S\\.?C\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'RC etc.',  '\\AR\\.?[BC]\\.?|\\bR\\.?[BC]\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'SC etc.',  '\\AS\\.?[ACV]\\.?|\\bS\\.?[ACV]\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'TSG',      '\\AT\\.?S\\.?G\\.?|\\bT\\.?S\\.?G\\.?\\Z', 0, ''),
+              (1,1000,'soccer', 'VFB etc.', '\\AV\\.?F\\.?[BL]\\.?|\\bV\\.?F\\.?[BL]\\.?\\Z', 0, ''),
+              (1,2000,'all',    '',         'Inglaterra', 0, 'England'),
+              (1,2000,'all',    '',         'Munchen', 0, 'Munich');
+              )A",
+        };
+      case 2:
+        return {
+            // More TV listing name to API name mappings for college
+            // basketball.  Using a weight of 1000 for specific
+            // changes and 1100 for general changes.
+            R"A(INSERT INTO sportscleanup (provider,weight,key1,name,pattern,nth,replacement)
+            VALUES
+              (1,1100,'basketball', 'Cal State',    'Cal State', 0, 'CSU'),
+              (1,1000,'basketball', 'Grambling',    'Grambling State', 0, 'Grambling'),
+              (1,1000,'basketball', 'Hawaii',       'Hawaii', 0, 'Hawai''i'),
+              (1,1000,'basketball', 'LIU',          'LIU', 0, 'Long Island University'),
+              (1,1100,'basketball', 'Loyola',       'Loyola-', 0, 'Loyola '),
+              (1,1000,'basketball', 'Loyola (Md.)', 'Loyola \(Md.\)', 0, 'Loyola (MD)'),
+              (1,1000,'basketball', 'McNeese',      'McNeese State', 0, 'McNeese'),
+              (1,1000,'basketball', 'Miami (OH)',   'Miami \(Ohio\)', 0, 'Miami (OH)'),
+              (1,1000,'basketball', 'UAB',          'Alabama-Birmingham', 0, 'UAB'),
+              (1,1000,'basketball', 'UConn',        'Connecticut', 0, 'UConn'),
+              (1,1000,'basketball', 'UMass',        'Massachusetts', 0, 'UMass'),
+              (1,1100,'basketball', 'UNC',          'UNC-', 0, 'UNC '),
+              (1,1000,'basketball', 'UTEP',         'Texas-El Paso', 0, 'UTEP'),
+              (1,1100,'basketball', 'Texas',        'Texas-', 0, 'UT '),
+              (1,1000,'basketball', 'Chattanooga',  'UT-Chattanooga', 0, 'Chattanooga'),
+              (1,1100,'basketball', 'UT',           'UT-', 0, 'UT ');
+              )A",
+        };
+
+      default:
+        return {};
+    }
 }
 
 /* vim: set expandtab tabstop=4 shiftwidth=4: */

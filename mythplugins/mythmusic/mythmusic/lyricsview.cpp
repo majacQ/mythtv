@@ -1,35 +1,35 @@
-#include <iostream>
+// C++
 #include <cstdlib>
+#include <iostream>
 #include <unistd.h>
 
 // qt
+#include <QDomDocument>
 #include <QKeyEvent>
 #include <QThread>
-#include <QDomDocument>
 
-// myth
-#include <mythcontext.h>
-#include <mythversion.h>
-#include <mythdbcon.h>
-#include <mythmainwindow.h>
-#include <mythuibuttonlist.h>
-#include <mythuicheckbox.h>
-#include <mythuitext.h>
-#include <mythuibutton.h>
-#include <mythuitextedit.h>
-#include <mythuiutils.h>
-#include <mythdialogbox.h>
-#include <mythuistatetype.h>
-#include <mythuiprogressbar.h>
-#include <mythdownloadmanager.h>
-#include <mythuihelper.h>
-#include <mythdirs.h>
-#include <audiooutput.h>
-
+// MythTV
+#include <libmyth/audio/audiooutput.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/mythdownloadmanager.h>
+#include <libmythbase/mythversion.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuicheckbox.h>
+#include <libmythui/mythuihelper.h>
+#include <libmythui/mythuiprogressbar.h>
+#include <libmythui/mythuistatetype.h>
+#include <libmythui/mythuitext.h>
+#include <libmythui/mythuitextedit.h>
+#include <libmythui/mythuiutils.h>
 
 // mythmusic
-#include "musiccommon.h"
 #include "lyricsview.h"
+#include "musiccommon.h"
 #include "musicplayer.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -95,12 +95,12 @@ void LyricsView::customEvent(QEvent *event)
 {
     bool handled = false;
 
-    if ((event->type() == MusicPlayerEvent::TrackChangeEvent) ||
-        (event->type() == MusicPlayerEvent::PlayedTracksChangedEvent))
+    if ((event->type() == MusicPlayerEvent::kTrackChangeEvent) ||
+        (event->type() == MusicPlayerEvent::kPlayedTracksChangedEvent))
     {
         findLyrics();
     }
-    else if (event->type() == OutputEvent::Info)
+    else if (event->type() == OutputEvent::kInfo)
     {
         if (m_autoScroll)
         {
@@ -117,7 +117,9 @@ void LyricsView::customEvent(QEvent *event)
                 rs = gPlayer->getCurrentTrackTime();
             }
             else
+            {
                 rs = oe->elapsedSeconds();
+            }
 
             int pos = 0;
             for (int x = 0; x < m_lyricsList->GetCount(); x++)
@@ -174,7 +176,7 @@ void LyricsView::customEvent(QEvent *event)
             handled = true;
         }
     }
-    else if (event->type() == DecoderHandlerEvent::OperationStart)
+    else if (event->type() == DecoderHandlerEvent::kOperationStart)
     {
         auto *dhe = dynamic_cast<DecoderHandlerEvent*>(event);
         if (!dhe)
@@ -184,7 +186,7 @@ void LyricsView::customEvent(QEvent *event)
             m_bufferStatus->SetText(*dhe->getMessage());
         }
     }
-    else if (event->type() == DecoderHandlerEvent::BufferStatus)
+    else if (event->type() == DecoderHandlerEvent::kBufferStatus)
     {
         auto *dhe = dynamic_cast<DecoderHandlerEvent*>(event);
         if (!dhe)
@@ -206,7 +208,7 @@ void LyricsView::customEvent(QEvent *event)
             m_bufferProgress->SetUsed(available);
         }
     }
-    else if (event->type() == DecoderHandlerEvent::OperationStop)
+    else if (event->type() == DecoderHandlerEvent::kOperationStop)
     {
         if (m_bufferStatus)
             m_bufferStatus->Reset();
@@ -294,7 +296,7 @@ bool LyricsView::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "EDIT")
@@ -316,7 +318,9 @@ bool LyricsView::keyPressEvent(QKeyEvent *event)
             setLyricTime();
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled && MusicCommon::keyPressEvent(event))
@@ -366,7 +370,9 @@ void LyricsView::findLyrics(const QString &grabber)
             mdata = gPlayer->getPlayedTracksList().last();
     }
     else
+    {
         mdata = gPlayer->getCurrentMetadata();
+    }
 
     if (!mdata)
         return;
@@ -448,7 +454,7 @@ void LyricsView::showLyrics(void)
     new MythUIButtonListItem(m_lyricsList, tr("** Lyrics from %1 (%2) **")
                              .arg(m_lyricData->grabber(), syncronized));
 
-    for (auto * line : qAsConst(*m_lyricData->lyrics()))
+    for (auto * line : std::as_const(*m_lyricData->lyrics()))
     {
         if (line)
             new MythUIButtonListItem(m_lyricsList, line->m_lyric, QVariant::fromValue(line));
@@ -546,7 +552,7 @@ bool EditLyricsDialog::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
 
         if (action == "ESCAPE" && somethingChanged())
         {
@@ -576,10 +582,8 @@ void EditLyricsDialog::loadLyrics(void)
     m_lyricsEdit->SetText(lyrics);
 }
 
-void EditLyricsDialog::syncronizedChanged(bool syncronized)
+void EditLyricsDialog::syncronizedChanged([[maybe_unused]] bool syncronized)
 {
-    (void) syncronized;
-
     loadLyrics();
 }
 
@@ -599,7 +603,7 @@ bool EditLyricsDialog::somethingChanged(void)
         return true;
 
     int x = 0;
-    for (auto * line : qAsConst(*m_sourceData->lyrics()))
+    for (auto * line : std::as_const(*m_sourceData->lyrics()))
     {
         if (line->toString(m_sourceData->syncronized()) != lines.at(x))
             changed = true;

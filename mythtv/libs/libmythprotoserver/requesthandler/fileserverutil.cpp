@@ -1,8 +1,8 @@
 #include <unistd.h>
 #include <cstdlib> // for llabs
 
-#include "mythconfig.h"
-#if CONFIG_DARWIN || defined(__FreeBSD__)
+#include <QtGlobal>
+#if defined(Q_OS_DARWIN) || defined(__FreeBSD__)
 #include <sys/param.h>
 #include <sys/mount.h>
 #elif __linux__
@@ -13,8 +13,9 @@
 #include <QFile>
 #include <QMap>
 
+#include "libmythbase/programinfo.h"
+
 #include "requesthandler/fileserverutil.h"
-#include "programinfo.h"
 
 DeleteHandler::DeleteHandler(void) :
     ReferenceCounter("DeleteHandler")

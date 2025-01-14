@@ -17,19 +17,23 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
+#include "io/mythavformatwriter.h"
+
+#include <limits> // workaround QTBUG-90395
+
+#include <QtGlobal>
+#include <QtEndian>
 
 // MythTV
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "audiooutpututil.h"
+#include "libmyth/audio/audiooutpututil.h"
+#include "libmyth/mythaverror.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 #include "mythavutil.h"
-#include "io/mythavformatwriter.h"
+
 
 // FFmpeg
 extern "C" {
-#if HAVE_BIGENDIAN
-#include "bswap.h"
-#endif
 #include "libavutil/opt.h"
 #include "libavutil/samplefmt.h"
 #include "libavutil/imgutils.h"
@@ -41,17 +45,10 @@ extern "C" {
 
 MythAVFormatWriter::~MythAVFormatWriter()
 {
-    if (m_ctx)
-    {
-        av_write_trailer(m_ctx);
-        avio_closep(&m_ctx->pb);
-        for(uint i = 0; i < m_ctx->nb_streams; i++)
-            av_freep(&m_ctx->streams[i]);
-        av_freep(&m_ctx);
-    }
+    MythAVFormatWriter::CloseFile();
 
-    av_freep(&m_audioInBuf);
-    av_freep(&m_audioInPBuf);
+    av_freep(reinterpret_cast<void*>(&m_audioInBuf));
+    av_freep(reinterpret_cast<void*>(&m_audioInPBuf));
     if (m_audPicture)
         av_frame_free(&m_audPicture);
     Cleanup();
@@ -60,7 +57,7 @@ MythAVFormatWriter::~MythAVFormatWriter()
 
 bool MythAVFormatWriter::Init(void)
 {
-    AVOutputFormat *fmt = av_guess_format(m_container.toLatin1().constData(), nullptr, nullptr);
+    const AVOutputFormat *fmt = av_guess_format(m_container.toLatin1().constData(), nullptr, nullptr);
     if (!fmt)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + QString("Init(): Unable to guess AVOutputFormat from container %1")
@@ -135,33 +132,42 @@ bool MythAVFormatWriter::Init(void)
 
 bool MythAVFormatWriter::OpenFile(void)
 {
-    if (!(m_fmt.flags & AVFMT_NOFILE))
+    bool success = openFileHelper();
+    if (!success)
     {
-        if (avio_open(&m_ctx->pb, m_filename.toLatin1().constData(), AVIO_FLAG_WRITE) < 0)
-        {
-            LOG(VB_RECORD, LOG_ERR, LOC + "OpenFile(): avio_open() failed");
-            return false;
-        }
+        Cleanup();
     }
+    return success;
+}
 
+bool MythAVFormatWriter::openFileHelper()
+{
+    delete m_buffer;
     m_buffer = MythMediaBuffer::Create(m_filename, true);
 
     if (!m_buffer || !m_buffer->GetLastError().isEmpty())
     {
         LOG(VB_RECORD, LOG_ERR, LOC + QString("OpenFile(): RingBuffer::Create() failed: '%1'")
             .arg(m_buffer ? m_buffer->GetLastError() : ""));
-        Cleanup();
         return false;
     }
 
-    m_avfBuffer    = new MythAVFormatBuffer(m_buffer);
-    auto *url      = reinterpret_cast<URLContext*>(m_ctx->pb->opaque);
-    url->prot      = MythAVFormatBuffer::GetURLProtocol();
-    url->priv_data = static_cast<void*>(m_avfBuffer);
+    delete m_avfBuffer;
+    m_avfBuffer = nullptr;
+    m_ctx->pb = nullptr;
+    if (!(m_fmt.flags & AVFMT_NOFILE))
+    {
+        m_avfBuffer = new MythAVFormatBuffer(m_buffer, true, true);
+        m_ctx->pb = m_avfBuffer->getAVIOContext();
+        if (m_ctx->pb == nullptr)
+        {
+            LOG(VB_RECORD, LOG_ERR, LOC + "OpenFile(): failed to allocate AVIOContext");
+            return false;
+        }
+    }
 
     if (avformat_write_header(m_ctx, nullptr) < 0)
     {
-        Cleanup();
         return false;
     }
 
@@ -170,8 +176,6 @@ bool MythAVFormatWriter::OpenFile(void)
 
 void MythAVFormatWriter::Cleanup(void)
 {
-    if (m_ctx && m_ctx->pb)
-        avio_closep(&m_ctx->pb);
     delete m_avfBuffer;
     m_avfBuffer = nullptr;
     delete m_buffer;
@@ -183,10 +187,12 @@ bool MythAVFormatWriter::CloseFile(void)
     if (m_ctx)
     {
         av_write_trailer(m_ctx);
-        avio_close(m_ctx->pb);
+        delete m_avfBuffer;
+        m_avfBuffer = nullptr;
+        m_ctx->pb = nullptr;
         for(uint i = 0; i < m_ctx->nb_streams; i++)
-            av_freep(&m_ctx->streams[i]);
-        av_freep(&m_ctx);
+            av_freep(reinterpret_cast<void*>(&m_ctx->streams[i]));
+        av_freep(reinterpret_cast<void*>(&m_ctx));
     }
     return true;
 }
@@ -209,22 +215,45 @@ int MythAVFormatWriter::WriteVideoFrame(MythVideoFrame *Frame)
     m_bufferedVideoFrameTimes.push_back(Frame->m_timecode);
     m_bufferedVideoFrameTypes.push_back(m_picture->pict_type);
 
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = nullptr;
-    pkt.size = 0;
-    int got_pkt = 0;
+    AVPacket *pkt = av_packet_alloc();
+    if (pkt == nullptr)
+    {
+        LOG(VB_RECORD, LOG_ERR, "packet allocation failed");
+        return AVERROR(ENOMEM);
+    }
+
     AVCodecContext *avctx = m_codecMap.GetCodecContext(m_videoStream);
-    int ret = avcodec_encode_video2(avctx, &pkt, m_picture, &got_pkt);
+
+    //  SUGGESTION
+    //  Now that avcodec_encode_video2 is removed and replaced
+    //  by 2 calls, this could be optimized
+    //  into separate routines or separate threads.
+    bool got_packet = false;
+    int ret = avcodec_receive_packet(avctx, pkt);
+    if (ret == 0)
+        got_packet = true;
+    if (ret == AVERROR(EAGAIN))
+        ret = 0;
+    if (ret == 0)
+        ret = avcodec_send_frame(avctx, m_picture);
+    // if ret from avcodec_send_frame is AVERROR(EAGAIN) then
+    // there are 2 packets to be received while only 1 frame to be
+    // sent. The code does not cater for this. Hopefully it will not happen.
 
     if (ret < 0)
     {
-        LOG(VB_RECORD, LOG_ERR, "avcodec_encode_video2() failed");
+        std::string error;
+        LOG(VB_GENERAL, LOG_ERR, LOC + QString("video encode error: %1 (%2)")
+            .arg(av_make_error_stdstring(error, ret)).arg(got_packet));
+        av_packet_free(&pkt);
         return ret;
     }
 
-    if (!got_pkt)
+    if (!got_packet)
+    {
+        av_packet_free(&pkt);
         return ret;
+    }
 
     std::chrono::milliseconds tc = Frame->m_timecode;
 
@@ -235,42 +264,34 @@ int MythAVFormatWriter::WriteVideoFrame(MythVideoFrame *Frame)
     {
         int pict_type = m_bufferedVideoFrameTypes.takeFirst();
         if (pict_type == AV_PICTURE_TYPE_I)
-            pkt.flags |= AV_PKT_FLAG_KEY;
+            pkt->flags |= AV_PKT_FLAG_KEY;
     }
 
     if (m_startingTimecodeOffset == -1ms)
         m_startingTimecodeOffset = tc - 1ms;
     tc -= m_startingTimecodeOffset;
 
-    pkt.pts = tc.count() * m_videoStream->time_base.den / m_videoStream->time_base.num / 1000;
-    pkt.dts = AV_NOPTS_VALUE;
-    pkt.stream_index= m_videoStream->index;
+    pkt->pts = tc.count() * m_videoStream->time_base.den / m_videoStream->time_base.num / 1000;
+    pkt->dts = AV_NOPTS_VALUE;
+    pkt->stream_index= m_videoStream->index;
 
-    ret = av_interleaved_write_frame(m_ctx, &pkt);
+    ret = av_interleaved_write_frame(m_ctx, pkt);
     if (ret != 0)
         LOG(VB_RECORD, LOG_ERR, LOC + "WriteVideoFrame(): av_interleaved_write_frame couldn't write Video");
 
     Frame->m_timecode = tc + m_startingTimecodeOffset;
     m_framesWritten++;
-    av_packet_unref(&pkt);
+    av_packet_unref(pkt);
+    av_packet_free(&pkt);
     return 1;
 }
 
-#if HAVE_BIGENDIAN
-static void bswap_16_buf(short int *buf, int buf_cnt, int audio_channels)
-    __attribute__ ((unused)); /* <- suppress compiler warning */
-
-static void bswap_16_buf(short int *buf, int buf_cnt, int audio_channels)
-{
-    for (int i = 0; i < audio_channels * buf_cnt; i++)
-        buf[i] = bswap_16(buf[i]);
-}
-#endif
-
 int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber*/, std::chrono::milliseconds &Timecode)
 {
-#if HAVE_BIGENDIAN
-    bswap_16_buf((short int*) buf, m_audioFrameSize, m_audioChannels);
+#if (Q_BYTE_ORDER == Q_BIG_ENDIAN)
+    auto buf16 = reinterpret_cast<uint16_t *>(Buffer);
+    for (int i = 0; i < m_audioChannels * m_audioFrameSize; i++)
+        buf16[i] = qFromLittleEndian<quint16>(buf16[i]);
 #endif
 
     AVCodecContext *avctx   = m_codecMap.GetCodecContext(m_audioStream);
@@ -279,10 +300,12 @@ int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber
     AudioFormat format      = AudioOutputSettings::AVSampleFormatToFormat(avctx->sample_fmt);
     int sampleSizeOut       = AudioOutputSettings::SampleSize(format);
 
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = nullptr;
-    pkt.size = 0;
+    AVPacket *pkt = av_packet_alloc();
+    if (pkt == nullptr)
+    {
+        LOG(VB_RECORD, LOG_ERR, "packet allocation failed");
+        return AVERROR(ENOMEM);
+    }
 
     if (av_get_packed_sample_fmt(avctx->sample_fmt) == AV_SAMPLE_FMT_FLT)
     {
@@ -298,7 +321,7 @@ int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber
 
         // init AVFrame for planar data (input is interleaved)
         for (int j = 0, jj = 0; j < m_audioChannels; j++, jj += m_audioFrameSize)
-            m_audPicture->data[j] = m_audioInPBuf + jj * sampleSizeOut;
+            m_audPicture->data[j] = m_audioInPBuf + static_cast<ptrdiff_t>(jj) * sampleSizeOut;
     }
     else
     {
@@ -316,7 +339,7 @@ int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber
     //  by 2 calls, this could be optimized
     //  into separate routines or separate threads.
     bool got_packet = false;
-    int ret = avcodec_receive_packet(avctx, &pkt);
+    int ret = avcodec_receive_packet(avctx, pkt);
     if (ret == 0)
         got_packet = true;
     if (ret == AVERROR(EAGAIN))
@@ -332,11 +355,15 @@ int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber
         std::string error;
         LOG(VB_GENERAL, LOG_ERR, LOC + QString("audio encode error: %1 (%2)")
             .arg(av_make_error_stdstring(error, ret)).arg(got_packet));
+        av_packet_free(&pkt);
         return ret;
     }
 
     if (!got_packet)
+    {
+        av_packet_free(&pkt);
         return ret;
+    }
 
     std::chrono::milliseconds tc = Timecode;
 
@@ -348,20 +375,21 @@ int MythAVFormatWriter::WriteAudioFrame(unsigned char *Buffer, int /*FrameNumber
     tc -= m_startingTimecodeOffset;
 
     if (m_avVideoCodec)
-        pkt.pts = tc.count() * m_videoStream->time_base.den / m_videoStream->time_base.num / 1000;
+        pkt->pts = tc.count() * m_videoStream->time_base.den / m_videoStream->time_base.num / 1000;
     else
-        pkt.pts = tc.count() * m_audioStream->time_base.den / m_audioStream->time_base.num / 1000;
+        pkt->pts = tc.count() * m_audioStream->time_base.den / m_audioStream->time_base.num / 1000;
 
-    pkt.dts = AV_NOPTS_VALUE;
-    pkt.flags |= AV_PKT_FLAG_KEY;
-    pkt.stream_index = m_audioStream->index;
+    pkt->dts = AV_NOPTS_VALUE;
+    pkt->flags |= AV_PKT_FLAG_KEY;
+    pkt->stream_index = m_audioStream->index;
 
-    ret = av_interleaved_write_frame(m_ctx, &pkt);
+    ret = av_interleaved_write_frame(m_ctx, pkt);
     if (ret != 0)
         LOG(VB_RECORD, LOG_ERR, LOC + "WriteAudioFrame(): av_interleaved_write_frame couldn't write Audio");
 
     Timecode = tc + m_startingTimecodeOffset;
-    av_packet_unref(&pkt);
+    av_packet_unref(pkt);
+    av_packet_free(&pkt);
     return 1;
 }
 
@@ -404,7 +432,7 @@ AVStream* MythAVFormatWriter::AddVideoStream(void)
     stream->r_frame_rate.num = 0;
     stream->r_frame_rate.den = 0;
 
-    AVCodec *codec = avcodec_find_encoder(m_ctx->oformat->video_codec);
+    const AVCodec *codec = avcodec_find_encoder(m_ctx->oformat->video_codec);
     if (!codec)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + "AddVideoStream(): avcodec_find_encoder() failed");
@@ -444,7 +472,7 @@ AVStream* MythAVFormatWriter::AddVideoStream(void)
         // the Baseline profile where the given bitrate and resolution permits
 
         if ((context->height > 720) || // Approximate highest resolution supported by Baseline 3.1
-            (context->bit_rate > 1000000)) // 14,000 Kbps aka 14Mbps maximum permissable rate for Baseline 3.1
+            (context->bit_rate > 1400000)) // 14,000 Kbps aka 14Mbps maximum permissable rate for Baseline 3.1
         {
             context->level = 40;
             // AVCodecContext AVOptions:
@@ -465,8 +493,6 @@ AVStream* MythAVFormatWriter::AddVideoStream(void)
         }
 
         // AVCodecContext AVOptions:
-        // c->coder_type            = 0;
-        av_opt_set_int(context, "coder", FF_CODER_TYPE_VLC, 0);
         context->max_b_frames          = 0;
         context->slices                = 8;
         context->flags                |= AV_CODEC_FLAG_LOOP_FILTER;
@@ -554,8 +580,7 @@ AVStream* MythAVFormatWriter::AddAudioStream(void)
     context->codec_type   = AVMEDIA_TYPE_AUDIO;
     context->bit_rate     = m_audioBitrate;
     context->sample_rate  = m_audioFrameRate;
-    context->channels     = m_audioChannels;
-    context->channel_layout = static_cast<uint64_t>(av_get_default_channel_layout(m_audioChannels));
+    av_channel_layout_default(&(context->ch_layout), m_audioChannels);
 
     // c->flags |= CODEC_FLAG_QSCALE; // VBR
     // c->global_quality = blah;
@@ -573,15 +598,22 @@ AVStream* MythAVFormatWriter::AddAudioStream(void)
     return stream;
 }
 
-bool MythAVFormatWriter::FindAudioFormat(AVCodecContext *Ctx, AVCodec *Codec, AVSampleFormat Format)
+bool MythAVFormatWriter::FindAudioFormat(AVCodecContext *Ctx, const AVCodec *Codec, AVSampleFormat Format)
 {
-    if (Codec->sample_fmts)
+    const AVSampleFormat *sample_fmts = nullptr;
+    int out_num_configs = 0;
+    int ret = avcodec_get_supported_config(nullptr, Codec, AV_CODEC_CONFIG_SAMPLE_FORMAT,
+                                           0, (const void **) &sample_fmts, &out_num_configs);
+    if (ret < 0)
+        return false;
+
+    if (sample_fmts)
     {
-        for (int i = 0; Codec->sample_fmts[i] != AV_SAMPLE_FMT_NONE; i++)
+        for (int i = 0; i < out_num_configs; i++)
         {
-            if (av_get_packed_sample_fmt(Codec->sample_fmts[i]) == Format)
+            if (av_get_packed_sample_fmt(sample_fmts[i]) == Format)
             {
-                Ctx->sample_fmt = Codec->sample_fmts[i];
+                Ctx->sample_fmt = sample_fmts[i];
                 return true;
             }
         }
@@ -594,7 +626,7 @@ bool MythAVFormatWriter::OpenAudio(void)
     AVCodecContext *context = m_codecMap.GetCodecContext(m_audioStream);
     context->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
 
-    AVCodec *codec = avcodec_find_encoder(context->codec_id);
+    const AVCodec *codec = avcodec_find_encoder(context->codec_id);
     if (!codec)
     {
         LOG(VB_RECORD, LOG_ERR, LOC + "OpenAudio(): avcodec_find_encoder() failed");
@@ -622,19 +654,21 @@ bool MythAVFormatWriter::OpenAudio(void)
         return false;
     }
 
-    auto size = static_cast<size_t>(m_audioFrameSize * m_audioChannels *
-                                    av_get_bytes_per_sample(context->sample_fmt));
+    auto size = static_cast<size_t>(m_audioFrameSize) * m_audioChannels *
+                av_get_bytes_per_sample(context->sample_fmt);
     if (av_get_packed_sample_fmt(context->sample_fmt) == AV_SAMPLE_FMT_FLT)
     {
         // allocate buffer to convert from S16 to float
-        if (!(m_audioInBuf = static_cast<unsigned char*>(av_malloc(size))))
+        m_audioInBuf = static_cast<unsigned char*>(av_malloc(size));
+        if (m_audioInBuf == nullptr)
             return false;
     }
 
     if (av_sample_fmt_is_planar(context->sample_fmt))
     {
         // allocate buffer to convert interleaved to planar audio
-        if (!(m_audioInPBuf = static_cast<unsigned char*>(av_malloc(size))))
+        m_audioInPBuf = static_cast<unsigned char*>(av_malloc(size));
+        if (m_audioInPBuf == nullptr)
             return false;
     }
     return true;
@@ -668,28 +702,33 @@ AVRational MythAVFormatWriter::GetCodecTimeBase(void)
     result.den = static_cast<int>(floor(m_frameRate * 100));
     result.num = 100;
 
-    if (m_avVideoCodec && m_avVideoCodec->supported_framerates)
+    if (m_avVideoCodec)
     {
-        const AVRational *rates = m_avVideoCodec->supported_framerates;
-        AVRational req = { result.den, result.num };
-        const AVRational *best = nullptr;
-        AVRational best_error= { INT_MAX, 1 };
-        for (; rates->den != 0; rates++)
+        const AVRational *supported_framerates = nullptr;
+        int out_num_configs = 0;
+        int ret = avcodec_get_supported_config(nullptr, m_avVideoCodec, AV_CODEC_CONFIG_FRAME_RATE,
+                                               0, (const void **) &supported_framerates, &out_num_configs);
+        if (ret >= 0)
         {
-            AVRational error = av_sub_q(req, *rates);
-            if (error.num < 0)
-                error.num *= -1;
-            if (av_cmp_q(error, best_error) < 0)
+            const AVRational *best = nullptr;
+            AVRational best_error = { INT_MAX, 1 };
+            for (int i = 0; i < out_num_configs; i++)
             {
-                best_error = error;
-                best = rates;
+                AVRational error = av_sub_q(result, supported_framerates[i]);
+                if (error.num < 0)
+                    error.num *= -1;
+                if (av_cmp_q(error, best_error) < 0)
+                {
+                    best_error = error;
+                    best = supported_framerates + i;
+                }
             }
-        }
 
-        if (best && best->num && best->den)
-        {
-            result.den = best->num;
-            result.num = best->den;
+            if (best && best->num && best->den)
+            {
+                result.den = best->num;
+                result.num = best->den;
+            }
         }
     }
 

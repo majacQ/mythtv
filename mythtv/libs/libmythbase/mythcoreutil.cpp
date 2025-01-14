@@ -1,4 +1,3 @@
-
 #include "mythcoreutil.h"
 
 // POSIX
@@ -7,13 +6,14 @@
 
 // System specific C headers
 #include "compat.h"
+#include <QtGlobal>
 
-#ifdef linux
+#ifdef __linux__
 #include <sys/vfs.h>
 #include <sys/sysinfo.h>
 #endif
 
-#if CONFIG_DARWIN
+#ifdef Q_OS_DARWIN
 #include <mach/mach.h>
 #endif
 
@@ -24,16 +24,6 @@
 
 // Qt headers
 #include <QByteArray>
-#include <QStringList>
-#include <QFile>
-
-// libmythbase headers
-#include "mythcorecontext.h"
-#include "mythlogging.h"
-#include "unzip.h"
-
-#include "version.h"
-#include "mythversion.h"
 
 /** \fn getDiskSpace(const QString&,long long&,long long&)
  *  \brief Returns free space on disk containing file in KiB,
@@ -71,254 +61,5 @@ int64_t getDiskSpace(const QString &file_on_disk,
     return freespace;
 }
 
-bool extractZIP(const QString &zipFile, const QString &outDir)
-{
-    UnZip uz;
-    UnZip::ErrorCode ec = uz.openArchive(zipFile);
-
-    if (ec != UnZip::Ok)
-    {
-        LOG(VB_GENERAL, LOG_ERR,
-                QString("extractZIP(): Unable to open ZIP file %1")
-                        .arg(zipFile));
-        return false;
-    }
-
-    ec = uz.extractAll(outDir);
-
-    if (ec != UnZip::Ok)
-    {
-        LOG(VB_GENERAL, LOG_ERR,
-                QString("extractZIP(): Error extracting ZIP file %1")
-                        .arg(zipFile));
-        return false;
-    }
-
-    uz.closeArchive();
-
-    return true;
-}
-
-bool gzipFile(const QString &inFilename, const QString &gzipFilename)
-{
-    QFile infile(inFilename);
-    QFile outfile(gzipFilename);
-
-    if (!infile.open(QIODevice::ReadOnly))
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gzipFile(): Error opening file for reading '%1'").arg(inFilename));
-        return false;
-    }
-
-    if (!outfile.open(QIODevice::WriteOnly))
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gzipFile(): Error opening file for writing '%1'").arg(gzipFilename));
-        infile.close();
-        return false;
-    }
-
-    QByteArray uncompressedData = infile.readAll();
-    QByteArray compressedData = gzipCompress(uncompressedData);
-
-    if (!outfile.write(compressedData))
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gzipFile(): Error while writing to '%1'").arg(gzipFilename));
-        infile.close();
-        outfile.close();
-        return false;
-    }
-
-    infile.close();
-    outfile.close();
-
-    return true;
-}
-
-bool gunzipFile(const QString &gzipFilename, const QString &outFilename)
-{
-    QFile infile(gzipFilename);
-    QFile outfile(outFilename);
-
-    if (!infile.open(QIODevice::ReadOnly))
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gunzipFile(): Error opening file for reading '%1'").arg(gzipFilename));
-        return false;
-    }
-
-    if (!outfile.open(QIODevice::WriteOnly))
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gunzipFile(): Error opening file for writing '%1'").arg(outFilename));
-        infile.close();
-        return false;
-    }
-
-    QByteArray compressedData = infile.readAll();
-    QByteArray uncompressedData = gzipUncompress(compressedData);
-
-    if (outfile.write(uncompressedData) < uncompressedData.size())
-    {
-        LOG(VB_GENERAL, LOG_ERR, QString("gunzipFile(): Error while writing to '%1'").arg(outFilename));
-        infile.close();
-        outfile.close();
-        return false;
-    }
-
-    infile.close();
-    outfile.close();
-
-    return true;
-}
-
-QByteArray gzipCompress(const QByteArray& data)
-{
-    if (data.length() == 0)
-        return QByteArray();
-
-    std::array <char,1024> out {};
-
-    // allocate inflate state
-    z_stream strm;
-
-    strm.zalloc   = Z_NULL;
-    strm.zfree    = Z_NULL;
-    strm.opaque   = Z_NULL;
-    strm.avail_in = data.length();
-    strm.next_in  = (Bytef*)(data.data());
-
-    int ret = deflateInit2(&strm,
-                           Z_DEFAULT_COMPRESSION,
-                           Z_DEFLATED,
-                           15 + 16,
-                           8,
-                           Z_DEFAULT_STRATEGY ); // gzip encoding
-    if (ret != Z_OK)
-        return QByteArray();
-
-    QByteArray result;
-
-    // run deflate()
-    do
-    {
-        strm.avail_out = out.size();
-        strm.next_out  = (Bytef*)(out.data());
-
-        ret = deflate(&strm, Z_FINISH);
-
-        Q_ASSERT(ret != Z_STREAM_ERROR);  // state not clobbered
-
-        switch (ret)
-        {
-            case Z_NEED_DICT:
-            case Z_DATA_ERROR:
-            case Z_MEM_ERROR:
-                (void)deflateEnd(&strm);
-                return QByteArray();
-        }
-
-        result.append(out.data(), out.size() - strm.avail_out);
-    }
-    while (strm.avail_out == 0);
-
-    // clean up and return
-
-    deflateEnd(&strm);
-
-    return result;
-}
-
-QByteArray gzipUncompress(const QByteArray &data)
-{
-    if (data.length() == 0)
-        return QByteArray();
-
-    std::array<char,1024> out {};
-
-    // allocate inflate state
-    z_stream strm;
-    strm.total_in = 0;
-    strm.total_out = 0;
-    strm.zalloc   = Z_NULL;
-    strm.zfree    = Z_NULL;
-    strm.opaque   = Z_NULL;
-    strm.avail_in = data.length();
-    strm.next_in  = (Bytef*)(data.data());
-
-    int ret = inflateInit2(&strm, 15 + 16);
-
-    if (ret != Z_OK)
-        return QByteArray();
-
-    QByteArray result;
-
-    do
-    {
-        strm.avail_out = out.size();
-        strm.next_out = (Bytef*)out.data();
-        ret = inflate(&strm, Z_NO_FLUSH);
-
-        Q_ASSERT(ret != Z_STREAM_ERROR);  // state not clobbered
-
-        switch (ret)
-        {
-            case Z_NEED_DICT:
-            case Z_DATA_ERROR:
-            case Z_MEM_ERROR:
-                (void) deflateEnd(&strm);
-                return QByteArray();
-        }
-
-        result.append(out.data(), out.size() - strm.avail_out);
-    }
-    while (strm.avail_out == 0);
-
-    (void) inflateEnd(& strm);
-
-    return result;
-}
-
-static QString downloadRemoteFile(const QString &cmd, const QString &url,
-                                  const QString &storageGroup,
-                                  const QString &filename)
-{
-    QStringList strlist(cmd);
-    strlist << url;
-    strlist << storageGroup;
-    strlist << filename;
-
-    bool ok = gCoreContext->SendReceiveStringList(strlist);
-
-    if (!ok || strlist.size() < 2 || strlist[0] != "OK")
-    {
-        LOG(VB_GENERAL, LOG_ERR,
-            "downloadRemoteFile(): " + cmd + " returned ERROR!");
-        return QString();
-    }
-
-    return strlist[1];
-}
-
-QString RemoteDownloadFile(const QString &url,
-                           const QString &storageGroup,
-                           const QString &filename)
-{
-    return downloadRemoteFile("DOWNLOAD_FILE", url, storageGroup, filename);
-}
-
-QString RemoteDownloadFileNow(const QString &url,
-                              const QString &storageGroup,
-                              const QString &filename)
-{
-    return downloadRemoteFile("DOWNLOAD_FILE_NOW", url, storageGroup, filename);
-}
-
-const char *GetMythSourceVersion()
-{
-    return MYTH_SOURCE_VERSION;
-}
-
-const char *GetMythSourcePath()
-{
-    return MYTH_SOURCE_PATH;
-}
-
 /* vim: set expandtab tabstop=4 shiftwidth=4: */
+

@@ -27,6 +27,7 @@
 #include "mythdate.h"
 #include "portchecker.h"
 #include "mythmiscutil.h"
+#include "mythrandom.h"
 
 #define DEBUG_RECONNECT 0
 #if DEBUG_RECONNECT
@@ -35,12 +36,19 @@
 
 static constexpr std::chrono::seconds kPurgeTimeout { 1h };
 
+static QMutex sMutex;
+
 bool TestDatabase(const QString& dbHostName,
                   const QString& dbUserName,
                   QString dbPassword,
                   QString dbName,
                   int dbPort)
 {
+    // ensure only one of these runs at a time, otherwise
+    // a segfault may happen as a connection is destroyed while
+    // being used. QSqlDatabase will remove a connection
+    // if another is created with the same name.
+    QMutexLocker locker(&sMutex);
     bool ret = false;
 
     if (dbHostName.isEmpty() || dbUserName.isEmpty())
@@ -73,17 +81,19 @@ bool TestDatabase(const QString& dbHostName,
     return ret;
 }
 
-MSqlDatabase::MSqlDatabase(QString name)
-    : m_name(std::move(name))
+MSqlDatabase::MSqlDatabase(QString name, QString driver)
+    : m_name(std::move(name)), m_driver(std::move(driver))
 {
-    if (!QSqlDatabase::isDriverAvailable("QMYSQL"))
+    if (!QSqlDatabase::isDriverAvailable(m_driver))
     {
-        LOG(VB_FLUSH, LOG_CRIT, "FATAL: Unable to load the QT mysql driver, is it installed?");
+        LOG(VB_FLUSH, LOG_CRIT,
+            QString("FATAL: Unable to load the QT %1 driver, is it installed?")
+            .arg(m_driver));
         exit(GENERIC_EXIT_DB_ERROR); // Exits before we can process the log queue
         //return;
     }
 
-    m_db = QSqlDatabase::addDatabase("QMYSQL", m_name);
+    m_db = QSqlDatabase::addDatabase(m_driver, m_name);
     LOG(VB_DATABASE, LOG_INFO, "Database object created: " + m_name);
 
     if (!m_db.isValid() || m_db.isOpenError())
@@ -121,6 +131,8 @@ bool MSqlDatabase::isOpen()
 
 bool MSqlDatabase::OpenDatabase(bool skipdb)
 {
+    if (gCoreContext->GetDB()->IsDatabaseIgnored() && m_name != "dbtest")
+        return false;
     if (!m_db.isValid())
     {
         LOG(VB_GENERAL, LOG_ERR,
@@ -220,7 +232,7 @@ bool MSqlDatabase::OpenDatabase(bool skipdb)
                 // We can't use MSqlQuery to determine if we have a schema,
                 // since it will open a new connection, which will try to check
                 // if we have a schema
-                QSqlQuery query = m_db.exec(sql); // don't convert to MSqlQuery
+                QSqlQuery query(sql, m_db); // don't convert to MSqlQuery
                 if (query.next())
                     have_schema = query.value(0).toInt() > 1;
                 GetMythDB()->SetHaveSchema(have_schema);
@@ -266,10 +278,12 @@ bool MSqlDatabase::Reconnect()
 
 void MSqlDatabase::InitSessionVars()
 {
+    QSqlQuery query(m_db);
+
     // Make sure NOW() returns time in UTC...
-    m_db.exec("SET @@session.time_zone='+00:00'");
+    query.exec("SET @@session.time_zone='+00:00'");
     // Disable strict mode
-    m_db.exec("SET @@session.sql_mode=''");
+    query.exec("SET @@session.sql_mode=''");
 }
 
 // -----------------------------------------------------------------------
@@ -316,7 +330,9 @@ MSqlDatabase *MDBManager::popConnection(bool reuse)
     DBList &list = m_pool[QThread::currentThread()];
     if (list.isEmpty())
     {
-        db = new MSqlDatabase("DBManager" + QString::number(m_nextConnID++));
+        DatabaseParams params = GetMythDB()->GetDatabaseParams();
+        db = new MSqlDatabase("DBManager" + QString::number(m_nextConnID++),
+            params.m_dbType);
         ++m_connCount;
         LOG(VB_DATABASE, LOG_INFO,
                 QString("New DB connection, total: %1").arg(m_connCount));
@@ -472,7 +488,7 @@ void MDBManager::CloseDatabases()
     m_pool[QThread::currentThread()].clear();
     m_lock.unlock();
 
-    for (auto *conn : qAsConst(list))
+    for (auto *conn : std::as_const(list))
     {
         LOG(VB_DATABASE, LOG_INFO,
             "Closing DB connection named '" + conn->m_name + "'");
@@ -511,12 +527,11 @@ static void InitMSqlQueryInfo(MSqlQueryInfo &qi)
 
 
 MSqlQuery::MSqlQuery(const MSqlQueryInfo &qi)
-         : QSqlQuery(QString(), qi.qsqldb)
+         : QSqlQuery(QString(), qi.qsqldb),
+           m_db(qi.db),
+           m_isConnected(m_db && m_db->isOpen()),
+           m_returnConnection(qi.returnConnection)
 {
-    m_db = qi.db;
-    m_returnConnection = qi.returnConnection;
-
-    m_isConnected = m_db && m_db->isOpen();
 }
 
 MSqlQuery::~MSqlQuery()
@@ -616,7 +631,7 @@ bool MSqlQuery::exec()
     }
 
 #if DEBUG_RECONNECT
-    if (random() < RAND_MAX / 50)
+    if (rand_bool(50))
     {
         LOG(VB_GENERAL, LOG_INFO,
             "MSqlQuery disconnecting DB to test reconnection logic");
@@ -691,43 +706,38 @@ bool MSqlQuery::exec()
     {
         QString str = lastQuery();
 
-        // Database logging will cause an infinite loop here if not filtered
-        // out
-        if (!str.startsWith("INSERT INTO logging "))
-        {
-            // Sadly, neither executedQuery() nor lastQuery() display
-            // the values in bound queries against a MySQL5 database.
-            // So, replace the named placeholders with their values.
+        // Sadly, neither executedQuery() nor lastQuery() display
+        // the values in bound queries against a MySQL5 database.
+        // So, replace the named placeholders with their values.
 
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-            QMapIterator<QString, QVariant> b = boundValues();
-            while (b.hasNext())
-            {
-                b.next();
-                str.replace(b.key(), '\'' + b.value().toString() + '\'');
-            }
+        QMapIterator<QString, QVariant> b = boundValues();
+        while (b.hasNext())
+        {
+            b.next();
+            str.replace(b.key(), '\'' + b.value().toString() + '\'');
+        }
 #else
-            QVariantList b = boundValues();
-            static const QRegularExpression placeholders { "(:\\w+)" };
-            auto match = placeholders.match(str);
-            while (match.hasMatch())
-            {
-                str.replace(match.capturedStart(), match.capturedLength(),
-                            b.isEmpty()
-                            ? "\'INVALID\'"
-                            : '\'' + b.takeFirst().toString() + '\'');
-                match = placeholders.match(str);
-            }
+        QVariantList b = boundValues();
+        static const QRegularExpression placeholders { "(:\\w+)" };
+        auto match = placeholders.match(str);
+        while (match.hasMatch())
+        {
+            str.replace(match.capturedStart(), match.capturedLength(),
+                        b.isEmpty()
+                        ? "\'INVALID\'"
+                        : '\'' + b.takeFirst().toString() + '\'');
+            match = placeholders.match(str);
+        }
 #endif
 
-            LOG(VB_DATABASE, LOG_INFO,
-                QString("MSqlQuery::exec(%1) %2%3%4")
-                        .arg(m_db->MSqlDatabase::GetConnectionName(), str,
-                             QString(" <<<< Took %1ms").arg(QString::number(elapsed)),
-                             isSelect()
-                             ? QString(", Returned %1 row(s)").arg(size())
-                             : QString()));
-        }
+        LOG(VB_DATABASE, LOG_INFO,
+            QString("MSqlQuery::exec(%1) %2%3%4")
+                    .arg(m_db->MSqlDatabase::GetConnectionName(), str,
+                         QString(" <<<< Took %1ms").arg(QString::number(elapsed)),
+                         isSelect()
+                         ? QString(", Returned %1 row(s)").arg(size())
+                         : QString()));
     }
 
     return result;
@@ -877,6 +887,15 @@ bool MSqlQuery::testDBConnection()
 
 void MSqlQuery::bindValue(const QString &placeholder, const QVariant &val)
 {
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+    if (static_cast<QMetaType::Type>(val.type()) == QMetaType::QDateTime)
+    {
+        QSqlQuery::bindValue(placeholder,
+                             MythDate::toString(val.toDateTime(), MythDate::kDatabase),
+                             QSql::In);
+        return;
+    }
+#endif
     QSqlQuery::bindValue(placeholder, val, QSql::In);
 }
 
@@ -892,6 +911,15 @@ void MSqlQuery::bindValueNoNull(const QString &placeholder, const QVariant &val)
         QSqlQuery::bindValue(placeholder, QString(""), QSql::In);
         return;
     }
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+    if (type == QMetaType::QDateTime)
+    {
+        QSqlQuery::bindValue(placeholder,
+                             MythDate::toString(val.toDateTime(), MythDate::kDatabase),
+                             QSql::In);
+        return;
+    }
+#endif
     QSqlQuery::bindValue(placeholder, val, QSql::In);
 }
 
@@ -977,7 +1005,7 @@ void MSqlEscapeAsAQuery(QString &query, const MSqlBindings &bindings)
 {
     MSqlQuery result(MSqlQuery::InitCon());
 
-    QRegularExpression rx { "('[^']+'|:\\w+)",
+    static const QRegularExpression rx { "('[^']+'|:\\w+)",
         QRegularExpression::UseUnicodePropertiesOption};
 
     QVector<Holder> holders;

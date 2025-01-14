@@ -3,7 +3,7 @@
  # pxsup2dast.c version YYYY-MM-DD (take from most recent change below).
  #
  # Project X sup to dvdauthor subtitle xml file.
- # too ‰t iki piste fi
+ # too √§t iki piste fi
  #
  # -------------------------------------------------
  #
@@ -16,7 +16,7 @@
  # it anymore...
  #
  # Change 2009-08-09: Renamed getline() as getpixelline() (to avoid function
- # name collision. Fixed GPL version to 2 (only). Thanks Ville Skytt‰.
+ # name collision. Fixed GPL version to 2 (only). Thanks Ville Skytt√§.
  #
  # Change 2009-01-10: Added subtitle indexing change (fix) from patch
  # sent by Ian Stewart.
@@ -35,6 +35,7 @@ typedef unsigned char			bool8;
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -43,6 +44,9 @@ typedef unsigned char			bool8;
 #include <ctype.h>
 #include <setjmp.h>
 #include <zlib.h>
+#ifdef _WIN32
+#include <dirent.h>
+#endif
 
 #if 1
 /* this is all speed, not so much portability -- using C99 features... */
@@ -62,17 +66,10 @@ typedef int_fast32_t fi32;	typedef uint_fast32_t fu32;
 #endif
 
 
-#if (__GNUC__ >= 3)
 #define GCCATTR_PRINTF(m, n) __attribute__ ((format (printf, m, n)))
 #define GCCATTR_UNUSED	 __attribute ((unused))
 #define GCCATTR_NORETURN __attribute ((noreturn))
 #define GCCATTR_CONST	 __attribute ((const))
-#else
-#define GCCATTR_PRINTF(m, n)
-#define GCCATTR_UNUSED
-#define GCCATTR_NORETURN
-#define GCCATTR_CONST
-#endif
 
 /* use this only to cast quoted strings in function calls */
 #define CUS (const unsigned char *)
@@ -101,11 +98,17 @@ struct
 // level of recursion, preventing the compiler from complaining about
 // shadowed variables.
 #define exc_try(x) do { struct exc__state exc_s##x; int exc_type##x GCCATTR_UNUSED; \
-    exc_s##x.m_prev = EXC.m_last; EXC.m_last = &exc_s##x; if ((exc_type##x = setjmp(exc_s##x.m_env)) == 0)
+    exc_s##x.m_prev = EXC.m_last; \
+    EXC.m_last = &exc_s##x; \
+    exc_type##x = setjmp(exc_s##x.m_env); \
+    if (exc_type##x == 0)
 
 #define exc_ftry(x) do { struct exc__state exc_s##x, *exc_p##x = EXC.m_last;    \
-    int exc_type##x GCCATTR_UNUSED; exc_s##x.prev = EXC.m_last; \
-    EXC.m_last = &exc_s##x; if ((exc_type##x = setjmp(exc_s##x.env)) == 0)
+    int exc_type##x GCCATTR_UNUSED; \
+    exc_s##x.prev = EXC.m_last; \
+    EXC.m_last = &exc_s##x; \
+    exc_type##x = setjmp(exc_s##x.env); \
+    if (exc_type##x == 0)
 
 #define exc_catch(x,t) else if ((t) == exc_type##x)
 
@@ -120,15 +123,14 @@ struct
 
 #define exc_cleanup() EXC.m_last = NULL;
 
-static void __exc_throw(int type) /* protoadd GCCATTR_NORETURN */ 
+GCCATTR_NORETURN static void __exc_throw(int type)
 {
     struct exc__state * exc_s = EXC.m_last;
     EXC.m_last = EXC.m_last->m_prev;
     longjmp(exc_s->m_env, type);
 }
 
-static void exc_throw(int type, const char * format, ...)
-    /* protoadd GCCATTR_NORETURN */ 
+GCCATTR_NORETURN static void exc_throw(int type, const char * format, ...)
 {
     if (format != NULL) 
     {
@@ -156,7 +158,9 @@ static void exc_throw(int type, const char * format, ...)
                     EXC.m_msgbuf[len] = '\0';
                 }
                 else
+                {
                     len += l; 
+                }
             }
         }
         EXC.m_buflen = len;
@@ -197,6 +201,15 @@ static void xxfwrite(FILE * stream, const eu8 * ptr, size_t size)
 
 #define xxfwriteCS(f, s) xxfwrite(f, CUS s, sizeof (s) - 1)
 
+static inline eu8 clamp (eu8 value, eu8 low, eu8 high)
+{
+    if (value < low)
+        return low;
+    if (value > high)
+        return high;
+    return value;
+}
+
 static void yuv2rgb(int y,   int cr,  int cb,
             eu8 * r, eu8 * g, eu8 * b)  
 {
@@ -205,9 +218,9 @@ static void yuv2rgb(int y,   int cr,  int cb,
     int lg = (500 + 1164 * (y - 16) -  813 * (cr - 128) - 391 * (cb - 128)) / 1000;
     int lb = (500 + 1164 * (y - 16)                    + 2018 * (cb - 128)) / 1000;
 
-    *r = (lr < 0)? 0: (lr > 255)? 255: (eu8)lr;
-    *g = (lg < 0)? 0: (lg > 255)? 255: (eu8)lg;
-    *b = (lb < 0)? 0: (lb > 255)? 255: (eu8)lb;  
+    *r = clamp(lr, 0, 255);
+    *g = clamp(lg, 0, 255);
+    *b = clamp(lb, 0, 255);
 }
 
 static void rgb2yuv(eu8 r,   eu8   g,  eu8 b,
@@ -254,8 +267,14 @@ static void xfseek0(FILE * stream, long offset)
 
 static void xmkdir(const char * path, int mode) 
 {
+#ifdef _WIN32
+    (void)mode;
+    if (mkdir(path) < 0)
+        exc_throw(MiscError, "mkdir(%s%o) failure:", path);
+#else
     if (mkdir(path, mode) < 0)
         exc_throw(MiscError, "mkdir(%s, 0%o) failure:", path, mode);
+#endif
 }
 
 
@@ -280,22 +299,30 @@ static bool dexists(const char * filename)
 
 static fu32 get_uint32_be(const eu8 * bytes)  
 {
-    return (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3]; 
+    return ((fu32)(bytes[0]) << 24) +
+           ((fu32)(bytes[1]) << 16) +
+           ((fu32)(bytes[2]) << 8) +
+            (fu32)(bytes[3]);
 }
 
 static fu16 get_uint16_be(const eu8 * bytes)
 {
-    return (bytes[0] << 8) + bytes[1]; 
+    return ((fu16)(bytes[0]) << 8) +
+            (fu16)(bytes[1]);
 }
 
 static fu32 get_uint32_le(const eu8 * bytes)  
 {
-    return (bytes[3] << 24) + (bytes[2] << 16) + (bytes[1] << 8) + bytes[0]; 
+    return ((fu32)(bytes[3]) << 24) +
+           ((fu32)(bytes[2]) << 16) +
+           ((fu32)(bytes[1]) << 8) +
+            (fu32)(bytes[0]);
 }
 
 #if 0  /* protoline */
 static fu32 get_uint16_le(const eu8 * bytes)  {
-    return (bytes[1] << 8) + bytes[0]; }
+    return ((fu16)(bytes[1]) << 8) +
+            (fu16)(bytes[0]); }
 #endif  /* protoline */
 
 
@@ -336,18 +363,18 @@ static void ifopalette(const char * filename,
 
     xfseek0(fh, 0xcc);
     fu32 offset = get_uint32_be(xxfread(fh, buf, 4));
-    xfseek0(fh, offset * 0x800 + 12);
-    fu32 pgc = offset * 0x800 + get_uint32_be(xxfread(fh, buf, 4));
+    xfseek0(fh, (offset * 0x800) + 12);
+    fu32 pgc = (offset * 0x800) + get_uint32_be(xxfread(fh, buf, 4));
     /* seek to palette */
     xfseek0(fh, pgc + 0xa4);
-    xxfread(fh, buf, 16 * 4);
+    xxfread(fh, buf, (size_t)(16 * 4));
     fclose(fh);
     for (int i = 0; i < 16; i++)
     {
         eu8 r = 0;
         eu8 g = 0;
         eu8 b = 0;
-        eu8 * p = buf + i * 4 + 1;
+        eu8 * p = buf + ((ptrdiff_t)(i) * 4) + 1;
         yuvpalette[i][0] =p[0]; yuvpalette[i][1] =p[1]; yuvpalette[i][2] =p[2];
         yuv2rgb(p[0], p[1], p[2], &r, &g, &b);
         rgbpalette[i][0] = r; rgbpalette[i][1] = g; rgbpalette[i][2] = b; 
@@ -601,10 +628,10 @@ static void makebitmap(eu8 * data, int w, int h, int top, int bot,
 
 static char * pts2ts(fu32 pts, char * rvbuf, bool is_png_filename) 
 {
-    int h = pts / (3600 * 90000);
-    int m = pts / (60 * 90000) % 60;
-    int s = pts / 90000 % 60;
-    int hs = (pts + 450) / 900 % 100;
+    uint32_t h = pts / (3600 * 90000UL);
+    uint32_t m = pts / (60 * 90000UL) % 60;
+    uint32_t s = pts / 90000 % 60;
+    uint32_t hs = (pts + 450) / 900 % 100;
 
     if (is_png_filename)
         sprintf(rvbuf, "%02d+%02d+%02d.%02d.png", h, m, s, hs);
@@ -766,7 +793,7 @@ static void pxsubtitle(const char * supfile, FILE * ofh, eu8 palette[16][3],
                 if (end > 500)
                     end = 500;
 
-                eu32 endpts = tmppts + end * 1000; /* ProjectX ! (other: 900, 1024) */
+                eu32 endpts = tmppts + (end * 1000); /* ProjectX ! (other: 900, 1024) */
 
                 if (tmppts <= lastendpts)
                 {
@@ -819,13 +846,14 @@ static void pxsubtitle(const char * supfile, FILE * ofh, eu8 palette[16][3],
         if (len != strlen(sptsstr))
             printf("ERROR: write failed");
         exc_cleanup();
+        fclose(sfh);
         return;
     }
     exc_end(1);
 }
 
 #if 0
-static void usage(const char * pn) /* protoadd GCCATTR_NORETURN */
+GCCATTR_NORETURN static void usage(const char * pn)
 {
     exc_throw(MiscError, "\n"
               "Usage: %s [--delay ms] <supfile> <ifofile>|<palette>" "\n"
@@ -894,7 +922,8 @@ int sup2dast(const char *supfile, const char *ifofile ,int delay_ms)
         if (sizeof (char) != 1 || sizeof (int) < 2) /* very unlikely */
             exc_throw(MiscError, "Incompatible variable sizes.");
 
-        if ((p = strrchr(supfile, '.')) != NULL)
+        p = strrchr(supfile, '.');
+        if (p != NULL)
             i = p - supfile;
         else
             i = strlen(supfile);

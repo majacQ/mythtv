@@ -1,8 +1,8 @@
 #include <QDir>
 
-#include <mythdirs.h>
-#include <mythcontext.h>
-#include <remotefile.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythbase/remotefile.h>
 
 #include "netcommon.h"
 
@@ -46,5 +46,5 @@ QUrl GetMythXMLSearch(const QString& url, const QString& query, const QString& g
 {
     QString tmp = QString("%1GetInternetSearch?Query=%2&Grabber=%3&Page=%4")
         .arg(url, query, grabber, pagenum);
-    return QUrl(tmp);
+    return {tmp};
 }

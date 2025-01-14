@@ -9,9 +9,9 @@
 #include <QTimer>
 #include <QUrl>
 
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 
-#include "mythcorecontext.h"
 #include "mythdialogbox.h"
 #include "mythfontproperties.h"
 #include "mythmainwindow.h"
@@ -22,10 +22,6 @@
 #include "mythuistatetype.h"
 #include "mythuitext.h"
 #include "mythuiutils.h"
-
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-#define qEnvironmentVariable getenv
-#endif
 
 /////////////////////////////////////////////////////////////////////
 MFileInfo::MFileInfo(const QString& fileName, QString sgDir, bool isDir, qint64 size)
@@ -154,14 +150,14 @@ qint64 MFileInfo::size(void) const
 
 MythUIFileBrowser::MythUIFileBrowser(MythScreenStack *parent,
                                      const QString &startPath)
-    : MythScreenType(parent, "mythuifilebrowser")
+    : MythScreenType(parent, "mythuifilebrowser"),
+      m_previewTimer(new QTimer(this))
 {
     SetPath(startPath);
 
     m_nameFilter.clear();
     m_nameFilter << "*";
 
-    m_previewTimer = new QTimer(this);
     m_previewTimer->setSingleShot(true);
     connect(m_previewTimer, &QTimer::timeout, this, &MythUIFileBrowser::LoadPreview);
 }
@@ -525,7 +521,7 @@ void MythUIFileBrowser::updateRemoteFileList()
             m_backButton->SetEnabled(false);
     }
 
-    for (const auto & line : qAsConst(slist))
+    for (const auto & line : std::as_const(slist))
     {
         QStringList tokens = line.split("::");
 
@@ -627,7 +623,7 @@ void MythUIFileBrowser::updateLocalFileList()
     }
     else
     {
-        for (const auto & fi : qAsConst(list))
+        for (const auto & fi : std::as_const(list))
         {
             MFileInfo finfo(fi.filePath());
 

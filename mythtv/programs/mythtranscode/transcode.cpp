@@ -1,48 +1,51 @@
+// C++
 #include <cmath>
 #include <fcntl.h>
 #include <iostream>
 #include <memory>
+#include <unistd.h> // for unlink()
 
-#include <QStringList>
-#include <QMap>
+// Qt
 #include <QList>
-#include <QWaitCondition>
+#include <QMap>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QRegularExpression>
+#include <QStringList>
+#include <QWaitCondition>
 #include <QtAlgorithms>
 
-#include "mythconfig.h"
+// MythTV
+#include "libmythbase/mythconfig.h"
 
-#include "transcode.h"
-#include "audiooutput.h"
-#include "recordingprofile.h"
-#include "mythcorecontext.h"
-#include "jobqueue.h"
-#include "exitcodes.h"
-#include "mthreadpool.h"
-#include "deletemap.h"
-#include "tvremoteutil.h"
-
+#include "libmyth/audio/audiooutput.h"
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/programinfo.h"
+#include "libmythtv/HLS/httplivestream.h"
+#include "libmythtv/deletemap.h"
+#include "libmythtv/io/mythavformatwriter.h"
+#include "libmythtv/jobqueue.h"
+#include "libmythtv/mythavutil.h"
+#include "libmythtv/recordingprofile.h"
+#include "libmythtv/tvremoteutil.h"
 #if CONFIG_LIBMP3LAME
-#include "NuppelVideoRecorder.h"
+#include "libmythtv/recorders/NuppelVideoRecorder.h"
 #endif
-#include "mythtranscodeplayer.h"
-#include "programinfo.h"
-#include "mythdbcon.h"
-#include "io/mythavformatwriter.h"
-#include "HLS/httplivestream.h"
 
-#include "videodecodebuffer.h"
-#include "cutter.h"
+// MythTranscode
 #include "audioreencodebuffer.h"
+#include "cutter.h"
+#include "mythtranscodeplayer.h"
+#include "transcode.h"
+#include "videodecodebuffer.h"
 
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswscale/swscale.h"
 }
-#include "mythavutil.h"
-
-#include <unistd.h> // for unlink()
 
 #define LOC QString("Transcode: ")
 
@@ -155,7 +158,7 @@ static QString get_str_option(RecordingProfile *profile, const QString &name)
     LOG(VB_GENERAL, LOG_ERR, LOC +
         QString("get_str_option(...%1): Option not in profile.").arg(name));
 
-    return QString();
+    return {};
 }
 
 static int get_int_option(RecordingProfile *profile, const QString &name)
@@ -191,7 +194,7 @@ static void TranscodeWriteText(void *ptr, unsigned char *buf, int len,
 
 int Transcode::TranscodeFile(const QString &inputname,
                              const QString &outputname,
-                             const QString &profileName,
+                             [[maybe_unused]] const QString &profileName,
                              bool honorCutList, bool framecontrol,
                              int jobID, const QString& fifodir,
                              bool fifo_info, bool cleanCut,
@@ -208,10 +211,6 @@ int Transcode::TranscodeFile(const QString &inputname,
     std::unique_ptr<HTTPLiveStream> hls = nullptr;
     int hlsSegmentSize = 0;
     int hlsSegmentFrames = 0;
-
-#if !CONFIG_LIBMP3LAME
-    (void)profileName;
-#endif
 
     if (jobID >= 0)
         JobQueue::ChangeJobComment(jobID, "0% " + QObject::tr("Completed"));
@@ -596,13 +595,8 @@ int Transcode::TranscodeFile(const QString &inputname,
         QMap<QString, QString> recorderOptionsMap;
         if (!m_recorderOptions.isEmpty())
         {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-            QStringList options = m_recorderOptions
-                .split(",", QString::SkipEmptyParts);
-#else
             QStringList options = m_recorderOptions
                 .split(",", Qt::SkipEmptyParts);
-#endif
             int loop = 0;
             while (loop < options.size())
             {
@@ -775,7 +769,8 @@ int Transcode::TranscodeFile(const QString &inputname,
                     QString("Forcing Recorder option '%1' to '%2'")
                         .arg(key, value));
 
-                if (value.contains(QRegularExpression("\\D")))
+                static const QRegularExpression kNonDigitRE { "\\D" };
+                if (value.contains(kNonDigitRE))
                     m_nvr->SetOption(key, value);
                 else
                     m_nvr->SetOption(key, value.toInt());
@@ -879,7 +874,7 @@ int Transcode::TranscodeFile(const QString &inputname,
     if (!fifodir.isEmpty())
     {
         AudioPlayer *aplayer = player->GetAudio();
-        const char  *audio_codec_name = "unknown";
+        const char  *audio_codec_name {nullptr};
 
         switch(aplayer->GetCodec())
         {
@@ -1123,7 +1118,9 @@ int Transcode::TranscodeFile(const QString &inputname,
                     wait_recover = 0;
                 }
                 else
+                {
                     wait_recover--;
+                }
             }
             else
             {
@@ -1214,8 +1211,7 @@ int Transcode::TranscodeFile(const QString &inputname,
 
                     //need to correct the frame# and timecode here
                     // Question:  Is it necessary to change the timecodes?
-                    long sync_offset =
-                        player->UpdateStoredFrameNum(curFrameNum);
+                    long sync_offset = 0;
                     m_nvr->UpdateSeekTable(num_keyframes, sync_offset);
                     ReencoderAddKFA(curFrameNum, lastKeyFrame, num_keyframes);
                     num_keyframes++;
@@ -1234,7 +1230,7 @@ int Transcode::TranscodeFile(const QString &inputname,
 // from here on the timecode is on the output time base
             frame.m_timecode -= timecodeOffset;
 
-            if (!player->WriteStoredData(m_outBuffer, (did_ff == 0), timecodeOffset))
+            if ((did_ff != 0) || !copyvideo)
             {
                 if (video_aspect != new_aspect)
                 {

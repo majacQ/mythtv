@@ -3,8 +3,9 @@
 #include <QRegularExpression>
 
 // MythTV
-#include "mythcorecontext.h"
-#include "mythlogging.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
+
 #include "mythuihelper.h"
 #include "mythdisplay.h"
 #include "mythuiscreenbounds.h"
@@ -38,8 +39,8 @@ QRect MythUIScreenBounds::GetGeometryOverride()
  */
 void MythUIScreenBounds::ParseGeometryOverride(const QString& Geometry)
 {
-    QRegularExpression sre("^(\\d+)x(\\d+)$");
-    QRegularExpression lre(R"(^(\d+)x(\d+)([+-]\d+)([+-]\d+)$)");
+    static const QRegularExpression sre("^(\\d+)x(\\d+)$");
+    static const QRegularExpression lre(R"(^(\d+)x(\d+)([+-]\d+)([+-]\d+)$)");
     QStringList geometry;
     bool longform = false;
 
@@ -128,11 +129,13 @@ MythUIScreenBounds::MythUIScreenBounds()
 
 void MythUIScreenBounds::InitScreenBounds()
 {
-    m_wantFullScreen = (gCoreContext->GetNumSetting("GuiOffsetX") == 0 &&
+    m_forceFullScreen = gCoreContext->GetBoolSetting("ForceFullScreen", false);
+    m_wantFullScreen = m_forceFullScreen ||
+                       (gCoreContext->GetNumSetting("GuiOffsetX") == 0 &&
                         gCoreContext->GetNumSetting("GuiWidth")   == 0 &&
                         gCoreContext->GetNumSetting("GuiOffsetY") == 0 &&
                         gCoreContext->GetNumSetting("GuiHeight")  == 0);
-    m_wantWindow   = gCoreContext->GetBoolSetting("RunFrontendInWindow", false);
+    m_wantWindow   = gCoreContext->GetBoolSetting("RunFrontendInWindow", false) && !m_forceFullScreen;
     m_qtFullScreen = WindowIsAlwaysFullscreen();
     m_alwaysOnTop  = gCoreContext->GetBoolSetting("AlwaysOnTop", false);
     m_themeSize    = GetMythUI()->GetBaseSize();
@@ -161,7 +164,7 @@ void MythUIScreenBounds::UpdateScreenSettings(MythDisplay *mDisplay)
     QRect screenbounds = mDisplay->GetScreenBounds();
 
     // As per MythMainWindow::Init, fullscreen is indicated by all zero's in settings
-    if (x == 0 && y == 0 && width == 0 && height == 0)
+    if (m_forceFullScreen || (x == 0 && y == 0 && width == 0 && height == 0))
         m_screenRect = screenbounds;
     else
         m_screenRect = QRect(x, y, width, height);

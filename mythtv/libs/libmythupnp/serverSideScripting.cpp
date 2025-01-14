@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2011 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -16,10 +16,11 @@
 #include <QVariant>
 #include <QVariantMap>
 
-#include "serverSideScripting.h"
-#include "mythlogging.h"
-#include <mythsession.h>
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythsession.h"
+
 #include "httpserver.h"
+#include "serverSideScripting.h"
 
 QScriptValue formatStr(QScriptContext *context, QScriptEngine *interpreter);
 
@@ -32,16 +33,16 @@ QScriptValue formatStr(QScriptContext *context, QScriptEngine *interpreter)
     unsigned int count = context->argumentCount();
 
     if (count == 0)
-        return QScriptValue(interpreter, QString());
+        return {interpreter, QString()};
  
     if (count == 1)
-        return QScriptValue(interpreter, context->argument(0).toString());
+        return {interpreter, context->argument(0).toString()};
 
     QString result = context->argument(0).toString();
     for (unsigned int i = 1; i < count; i++)
         result.replace(QString("%%1").arg(i), context->argument(i).toString());
 
-    return QScriptValue(interpreter, result);
+    return {interpreter, result};
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -87,7 +88,7 @@ ServerSideScripting::~ServerSideScripting()
 {
     Lock();
 
-    for (const auto *script : qAsConst(m_mapScripts))
+    for (const auto *script : std::as_const(m_mapScripts))
         delete script;
 
     m_mapScripts.clear();
@@ -595,7 +596,9 @@ bool ServerSideScripting::ProcessLine( QTextStream &sCode,
             bMatchFound = false;
         }
         else
+        {
             bMatchFound = true;
+        }
         
         // ------------------------------------------------------------------
         // Add Code or Text to Line
@@ -626,12 +629,7 @@ bool ServerSideScripting::ProcessLine( QTextStream &sCode,
 
                     // Extract filename (remove quotes)
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                    QStringList sParts = sSegment.split( ' ', QString::SkipEmptyParts );
-#else
                     QStringList sParts = sSegment.split( ' ', Qt::SkipEmptyParts );
-#endif
-
                     if (sParts.length() > 1 )
                     {
                         QString sFileName = sParts[1].mid( 1, sParts[1].length() - 2 );
@@ -659,7 +657,9 @@ bool ServerSideScripting::ProcessLine( QTextStream &sCode,
 
                 }
                 else
+                {
                     sCode << sSegment << "\n";
+                }
 
                 if (bMatchFound)
                     bInCode = false;

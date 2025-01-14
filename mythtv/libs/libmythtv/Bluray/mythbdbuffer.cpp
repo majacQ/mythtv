@@ -1,41 +1,44 @@
+// Std
+#include <thread>
+#include <fcntl.h>
+
 // Qt
 #include <QDir>
 #include <QCoreApplication>
 
 // MythTV
-#include "config.h"
-#include "mythcdrom.h"
-#include "mythmainwindow.h"
-#include "mythevent.h"
-#include "iso639.h"
-#include "mythlogging.h"
-#include "mythcorecontext.h"
-#include "mythlocale.h"
-#include "mythmiscutil.h"
-#include "mythdirs.h"
-#include "libbluray/bluray.h"
+#include "libmythbase/iso639.h"
+#include "libmythbase/mythcdrom.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlocale.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/stringutil.h"
+#include "libmythbase/sizetliteral.h"
+#include "libmythui/mythmainwindow.h"
+#include "libmythui/mythuiactions.h"
+
 #include "io/mythiowrapper.h"
-#include "mythuiactions.h"
+#include "libbluray/bluray.h"
 #include "tv_actions.h"
 #include "Bluray/mythbdiowrapper.h"
 #include "Bluray/mythbdinfo.h"
 #include "Bluray/mythbdbuffer.h"
 
-// Std
-#include <thread>
-#include <fcntl.h>
-
 // BluRay
-#if CONFIG_LIBBLURAY_EXTERNAL
-#include "libbluray/log_control.h"
-#include "libbluray/meta_data.h"
-#include "libbluray/overlay.h"
+#ifdef HAVE_LIBBLURAY
+#include <libbluray/log_control.h>
+#include <libbluray/meta_data.h>
+#include <libbluray/overlay.h>
+#include <libbluray/keys.h>
 #else
 #include "util/log_control.h"
 #include "libbluray/bdnav/meta_data.h"
 #include "libbluray/decoders/overlay.h"
-#endif
 #include "libbluray/keys.h"
+#endif
 
 #define LOC QString("BDBuffer: ")
 
@@ -69,16 +72,16 @@ static int BDRead(void *Handle, void *Buf, int LBA, int NumBlocks)
 {
     if (MythFileSeek(*(static_cast<int*>(Handle)), LBA * 2048LL, SEEK_SET) != -1)
         return static_cast<int>(MythFileRead(*(static_cast<int*>(Handle)), Buf,
-                                              static_cast<size_t>(NumBlocks * 2048)) / 2048);
+                                              static_cast<size_t>(NumBlocks) * 2048) / 2048);
     return -1;
 }
 
 MythBDBuffer::MythBDBuffer(const QString &Filename)
   : MythOpticalBuffer(kMythBufferBD),
-    m_overlayPlanes(2, nullptr)
+    m_tryHDMVNavigation(qEnvironmentVariableIsSet("MYTHTV_HDMV")),
+    m_overlayPlanes(2, nullptr),
+    m_mainThread(QThread::currentThread())
 {
-    m_tryHDMVNavigation = qEnvironmentVariableIsSet("MYTHTV_HDMV");
-    m_mainThread = QThread::currentThread();
     MythBDBuffer::OpenFile(Filename);
 }
 
@@ -157,8 +160,7 @@ long long MythBDBuffer::SeekInternal(long long Position, int Whence)
     else
     {
         QString cmd = QString("Seek(%1, %2)").arg(Position)
-            .arg((Whence == SEEK_SET) ? "SEEK_SET" :
-                 ((Whence == SEEK_CUR) ?"SEEK_CUR" : "SEEK_END"));
+            .arg(seek2string(Whence));
         LOG(VB_GENERAL, LOG_ERR, LOC + cmd + " Failed" + ENO);
     }
 
@@ -607,7 +609,7 @@ std::chrono::seconds MythBDBuffer::GetTitleDuration(int Title)
 {
     QMutexLocker locker(&m_infoLock);
     auto numTitles = GetNumTitles();
-    if (!(numTitles > 0 && Title >= 0 && Title < static_cast<int>(numTitles)))
+    if (numTitles <= 0 || Title < 0 || Title >= static_cast<int>(numTitles))
         return 0s;
 
     BLURAY_TITLE_INFO *info = GetTitleInfo(static_cast<uint32_t>(Title));
@@ -718,8 +720,7 @@ bool MythBDBuffer::UpdateTitleInfo(void)
     m_titlesize = bd_get_title_size(m_bdnav);
     uint32_t chapter_count = GetNumChapters();
     auto total_msecs = duration_cast<std::chrono::milliseconds>(m_currentTitleLength);
-    auto duration = MythFormatTime(total_msecs, "HH:mm:ss.zzz");
-    duration.chop(2); // Chop 2 to show tenths
+    auto duration = MythDate::formatTime(total_msecs, "HH:mm:ss.z");
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("New title info: Index %1 Playlist: %2 Duration: %3 ""Chapters: %5")
             .arg(m_currentTitle).arg(m_currentTitleInfo->playlist).arg(duration).arg(chapter_count));
     LOG(VB_GENERAL, LOG_INFO, LOC + QString("New title info: Clips: %1 Angles: %2 Title Size: %3 Frame Rate %4")
@@ -730,9 +731,9 @@ bool MythBDBuffer::UpdateTitleInfo(void)
     {
         uint64_t framenum   = GetChapterStartFrame(i);
         LOG(VB_PLAYBACK, LOG_INFO, LOC + QString("Chapter %1 found @ [%2]->%3")
-            .arg(i + 1,   2, 10, QChar('0'))
-            .arg(MythFormatTime(GetChapterStartTimeMs(i), "HH:mm:ss.zzz"))
-            .arg(framenum));
+            .arg(StringUtil::intToPaddedString(i + 1),
+                 MythDate::formatTime(GetChapterStartTimeMs(i), "HH:mm:ss.zzz"),
+                 QString::number(framenum)));
     }
 
     int still = BLURAY_STILL_NONE;
@@ -1279,20 +1280,12 @@ bool MythBDBuffer::GetBDStateSnapshot(QString& State)
  */
 bool MythBDBuffer::RestoreBDStateSnapshot(const QString& State)
 {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QStringList states = State.split(",", QString::SkipEmptyParts);
-#else
     QStringList states = State.split(",", Qt::SkipEmptyParts);
-#endif
     QHash<QString, uint64_t> settings;
 
-    for (const QString& state : states)
+    for (const QString& state : std::as_const(states))
     {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-        QStringList keyvalue = state.split(":", QString::SkipEmptyParts);
-#else
         QStringList keyvalue = state.split(":", Qt::SkipEmptyParts);
-#endif
         if (keyvalue.length() != 2)
         {
             LOG(VB_PLAYBACK, LOG_ERR, LOC + QString("Invalid BD state: %1 (%2)")
@@ -1482,7 +1475,7 @@ void MythBDBuffer::SubmitARGBOverlay(const bd_argb_overlay_s * const Overlay)
                 int32_t dstOffset = (Overlay->y * osd->m_image.bytesPerLine()) + (Overlay->x * 4);
                 for (uint16_t y = 0; y < Overlay->h; y++)
                 {
-                    memcpy(&data[dstOffset], &Overlay->argb[srcOffset], Overlay->w * 4);
+                    memcpy(&data[dstOffset], &Overlay->argb[srcOffset], Overlay->w * 4_UZ);
                     dstOffset += osd->m_image.bytesPerLine();
                     srcOffset += Overlay->stride;
                 }

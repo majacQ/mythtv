@@ -13,7 +13,7 @@
 #include "mythbaseexp.h"
 #include "mythdbparams.h"
 
-#define REUSE_CONNECTION 1
+#define REUSE_CONNECTION 1 // NOLINT(cppcoreguidelines-macro-usage)
 
 MBASE_PUBLIC bool TestDatabase(const QString& dbHostName,
                                const QString& dbUserName,
@@ -27,13 +27,14 @@ class MSqlDatabase
   friend class MDBManager;
   friend class MSqlQuery;
   public:
-    explicit MSqlDatabase(QString name);
+    explicit MSqlDatabase(QString name, QString driver = "QMYSQL");
    ~MSqlDatabase(void);
 
     bool OpenDatabase(bool skipdb = false);
     void SetDBParams(const DatabaseParams &params) { m_dbparms = params; };
 
   private:
+    Q_DISABLE_COPY_MOVE(MSqlDatabase)
     bool isOpen(void);
     bool KickDatabase(void);
     QString GetConnectionName(void) const { return m_name; }
@@ -43,6 +44,7 @@ class MSqlDatabase
 
   private:
     QString m_name;
+    QString m_driver;
     QSqlDatabase m_db;
     QDateTime m_lastDBKick;
     DatabaseParams m_dbparms;
@@ -67,6 +69,7 @@ class MBASE_PUBLIC MDBManager
     MSqlDatabase *getChannelCon(void);
 
   private:
+    Q_DISABLE_COPY_MOVE(MDBManager)
     MSqlDatabase *getStaticCon(MSqlDatabase **dbcon, const QString& name);
 
     QMutex m_lock;
@@ -220,7 +223,7 @@ class MBASE_PUBLIC MSqlQuery : private QSqlQuery
     /// \brief Checks DB connection + login (login info via Mythcontext)
     static bool testDBConnection();
 
-    enum ConnectionReuse
+    enum ConnectionReuse : std::uint8_t
     {
         kDedicatedConnection,
         kNormalConnection,
@@ -235,6 +238,8 @@ class MBASE_PUBLIC MSqlQuery : private QSqlQuery
     static MSqlQueryInfo ChannelCon();
 
   private:
+    Q_DISABLE_COPY_MOVE(MSqlQuery)
+
     // Only QSql::In is supported as a param type and only named params...
     void bindValue(const QString&, const QVariant&, QSql::ParamType);
     void bindValue(int, const QVariant&, QSql::ParamType);

@@ -7,6 +7,9 @@
 // Make keynum in QKeyEvent be equivalent to what's in QKeySequence
 int MythMainWindowPrivate::TranslateKeyNum(QKeyEvent* Event)
 {
+    if (Event == nullptr)
+        return Qt::Key_unknown;
+
     int keynum = Event->key();
 
     if ((keynum != Qt::Key_Shift  ) && (keynum !=Qt::Key_Control   ) &&
@@ -16,9 +19,9 @@ int MythMainWindowPrivate::TranslateKeyNum(QKeyEvent* Event)
         (keynum != Qt::Key_AltGr  ) && (keynum !=Qt::Key_CapsLock  ) &&
         (keynum != Qt::Key_NumLock) && (keynum !=Qt::Key_ScrollLock ))
     {
-        Qt::KeyboardModifiers modifiers;
         // if modifiers have been pressed, rebuild keynum
-        if ((modifiers = Event->modifiers()) != Qt::NoModifier)
+        Qt::KeyboardModifiers modifiers = Event->modifiers();
+        if (modifiers != Qt::NoModifier)
         {
             int modnum = Qt::NoModifier;
             if (((modifiers & Qt::ShiftModifier) != 0U) &&

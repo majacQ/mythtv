@@ -1,14 +1,17 @@
 #include <climits>
 
-#include "mythconfig.h"
+// MythTV
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythtv/mythframe.h"
+
+// Commercial Flagging headers
+#include "pgm.h"
 
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavutil/imgutils.h"
 }
-#include "mythframe.h"
-#include "mythlogging.h"
-#include "pgm.h"
 
 // TODO: verify this
 /*
@@ -59,9 +62,9 @@ int pgm_read(unsigned char *buf, int width, int height, const char *filename)
         goto error;
     }
 
-    for (int rr = 0; rr < height; rr++)
+    for (ptrdiff_t rr = 0; rr < height; rr++)
     {
-        if (fread(buf + rr * width, 1, width, fp) != (size_t)width)
+        if (fread(buf + (rr * width), 1, width, fp) != (size_t)width)
         {
             LOG(VB_COMMFLAG, LOG_ERR, QString("pgm_read fread %1 failed: %2")
                     .arg(filename, strerror(errno)));
@@ -91,9 +94,9 @@ int pgm_write(const unsigned char *buf, int width, int height,
     }
 
     (void)fprintf(fp, "P5\n%d %d\n%d\n", width, height, UCHAR_MAX);
-    for (int rr = 0; rr < height; rr++)
+    for (ptrdiff_t rr = 0; rr < height; rr++)
     {
-        if (fwrite(buf + rr * width, 1, width, fp) != (size_t)width)
+        if (fwrite(buf + (rr * width), 1, width, fp) != (size_t)width)
         {
             LOG(VB_COMMFLAG, LOG_ERR, QString("pgm_write fwrite %1 failed: %2")
                     .arg(filename, strerror(errno)));
@@ -119,36 +122,36 @@ static int pgm_expand(AVFrame *dst, const AVFrame *src, int srcheight,
     const int           newheight = srcheight + extratop + extrabottom;
 
     /* Copy the image. */
-    for (int rr = 0; rr < srcheight; rr++)
+    for (ptrdiff_t rr = 0; rr < srcheight; rr++)
     {
-        memcpy(dst->data[0] + (rr + extratop) * newwidth + extraleft,
-                src->data[0] + rr * srcwidth,
+        memcpy(dst->data[0] + ((rr + extratop) * newwidth) + extraleft,
+                src->data[0] + (rr * srcwidth),
                 srcwidth);
     }
 
     /* Pad the top. */
     const uchar *srcdata = src->data[0];
-    for (int rr = 0; rr < extratop; rr++)
-        memcpy(dst->data[0] + rr * newwidth + extraleft, srcdata, srcwidth);
+    for (ptrdiff_t rr = 0; rr < extratop; rr++)
+        memcpy(dst->data[0] + (rr * newwidth) + extraleft, srcdata, srcwidth);
 
     /* Pad the bottom. */
-    srcdata = src->data[0] + (srcheight - 1) * srcwidth;
-    for (int rr = extratop + srcheight; rr < newheight; rr++)
-        memcpy(dst->data[0] + rr * newwidth + extraleft, srcdata, srcwidth);
+    srcdata = src->data[0] + static_cast<ptrdiff_t>(srcheight - 1) * srcwidth;
+    for (ptrdiff_t rr = extratop + srcheight; rr < newheight; rr++)
+        memcpy(dst->data[0] + (rr * newwidth) + extraleft, srcdata, srcwidth);
 
     /* Pad the left. */
-    for (int rr = 0; rr < newheight; rr++)
+    for (ptrdiff_t rr = 0; rr < newheight; rr++)
     {
-        memset(dst->data[0] + rr * newwidth,
-                dst->data[0][rr * newwidth + extraleft],
+        memset(dst->data[0] + (rr * newwidth),
+                dst->data[0][(rr * newwidth) + extraleft],
                 extraleft);
     }
 
     /* Pad the right. */
-    for (int rr = 0; rr < newheight; rr++)
+    for (ptrdiff_t rr = 0; rr < newheight; rr++)
     {
-        memset(dst->data[0] + rr * newwidth + extraleft + srcwidth,
-                dst->data[0][rr * newwidth + extraleft + srcwidth - 1],
+        memset(dst->data[0] + (rr * newwidth) + extraleft + srcwidth,
+                dst->data[0][(rr * newwidth) + extraleft + srcwidth - 1],
                 extraright);
     }
 
@@ -162,7 +165,8 @@ static int pgm_expand_uniform(AVFrame *dst, const AVFrame *src,
             extramargin, extramargin, extramargin, extramargin);
 }
 
-int pgm_crop(AVFrame *dst, const AVFrame *src, int srcheight,
+int pgm_crop(AVFrame *dst, const AVFrame *src,
+             [[maybe_unused]] int srcheight,
              int srcrow, int srccol, int cropwidth, int cropheight)
 {
     const int   srcwidth = src->linesize[0];
@@ -174,14 +178,13 @@ int pgm_crop(AVFrame *dst, const AVFrame *src, int srcheight,
         return -1;
     }
 
-    for (int rr = 0; rr < cropheight; rr++)
+    for (ptrdiff_t rr = 0; rr < cropheight; rr++)
     {
-        memcpy(dst->data[0] + rr * cropwidth,
-                src->data[0] + (srcrow + rr) * srcwidth + srccol,
+        memcpy(dst->data[0] + (rr * cropwidth),
+                src->data[0] + ((srcrow + rr) * srcwidth) + srccol,
                 cropwidth);
     }
 
-    (void)srcheight;    /* gcc */
     return 0;
 }
 
@@ -208,10 +211,10 @@ int pgm_overlay(AVFrame *dst, const AVFrame *s1, int s1height,
         AV_PIX_FMT_GRAY8, s1width, s1height);
 
     /* Overwrite overlay area of "dst" with "s2". */
-    for (int rr = 0; rr < s2height; rr++)
+    for (ptrdiff_t rr = 0; rr < s2height; rr++)
     {
-        memcpy(dst->data[0] + (s1row + rr) * s1width + s1col,
-                s2->data[0] + rr * s2width,
+        memcpy(dst->data[0] + ((s1row + rr) * s1width) + s1col,
+                s2->data[0] + (rr * s2width),
                 s2width);
     }
 
@@ -236,8 +239,8 @@ int pgm_convolve_radial(AVFrame *dst, AVFrame *s1, AVFrame *s2,
      * convolutions.
      */
     const int       srcwidth = src->linesize[0];
-    const int       newwidth = srcwidth + 2 * mask_radius;
-    const int       newheight = srcheight + 2 * mask_radius;
+    const int       newwidth = srcwidth + (2 * mask_radius);
+    const int       newheight = srcheight + (2 * mask_radius);
 
     /* Get a padded copy of the src image for use by the convolutions. */
     if (pgm_expand_uniform(s1, src, srcheight, mask_radius))
@@ -266,9 +269,9 @@ int pgm_convolve_radial(AVFrame *dst, AVFrame *s1, AVFrame *s2,
             for (int ii = -mask_radius; ii <= mask_radius; ii++)
             {
                 sum += mask[ii + mask_radius] *
-                    s1->data[0][(rr + ii) * newwidth + cc];
+                    s1->data[0][((rr + ii) * newwidth) + cc];
             }
-            s2->data[0][rr * newwidth + cc] = lround(sum);
+            s2->data[0][(rr * newwidth) + cc] = lround(sum);
         }
     }
 
@@ -281,9 +284,9 @@ int pgm_convolve_radial(AVFrame *dst, AVFrame *s1, AVFrame *s2,
             for (int ii = -mask_radius; ii <= mask_radius; ii++)
             {
                 sum += mask[ii + mask_radius] *
-                    s2->data[0][rr * newwidth + cc + ii];
+                    s2->data[0][(rr * newwidth) + cc + ii];
             }
-            dst->data[0][rr * newwidth + cc] = lround(sum);
+            dst->data[0][(rr * newwidth) + cc] = lround(sum);
         }
     }
 

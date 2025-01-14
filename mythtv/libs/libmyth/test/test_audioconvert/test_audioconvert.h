@@ -18,10 +18,10 @@
  *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <QtTest/QtTest>
+#include <QTest>
 
-#include "mythcorecontext.h"
-#include "audioconvert.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmyth/audio/audioconvert.h"
 
 #define ISIZEOF(type) ((int)sizeof(type))
 

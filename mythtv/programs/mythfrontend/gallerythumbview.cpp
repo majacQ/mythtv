@@ -1,24 +1,34 @@
-#include "gallerythumbview.h"
-
+// C++
+#include <algorithm>
 #include <chrono> // for milliseconds
 #include <thread> // for sleep_for
-
-#include <QApplication>
 #include <utility>
 
-#include "compat.h"
+// Qt
+#include <QApplication>
 
-#include "mythuitext.h"
-#include "mythprogressdialog.h"
-#include "mythuiprogressbar.h"
-#include "remotefile.h"
-#include "mythsystemlegacy.h"
-#include "mythdialogbox.h"
+// MythTV
+#include "libmythbase/compat.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/remotefile.h"
+#include "libmythui/mythdialogbox.h"
+#include "libmythui/mythprogressdialog.h"
+#include "libmythui/mythuiprogressbar.h"
+#include "libmythui/mythuitext.h"
 
+// MythFrontend
 #include "galleryconfig.h"
+#include "gallerythumbview.h"
 
 #define LOC QString("Thumbview: ")
 
+// EXIF tag 0x9286 UserComment can contain garbage
+static QString clean_comment(const QString &comment)
+{
+    QString result;
+    std::copy_if(comment.cbegin(), comment.cend(), std::back_inserter(result), [](QChar x) { return x.isPrint(); } );
+    return result;
+}
 
 //! Worker thread for running import
 class ShellThread: public MThread
@@ -76,23 +86,11 @@ public:
         int total = std::accumulate(keys.cbegin(), keys.cend(), 0, add_size);
 
         int progressSize = 0;
-#if QT_VERSION < QT_VERSION_CHECK(5,10,0)
-        for (const ImagePtrK & im : m_files.keys())
-        {
-            QString newPath = m_files.value(im);
-#elif QT_VERSION < QT_VERSION_CHECK(5,15,0)
-        for (auto it = m_files.constKeyValueBegin();
-             it != m_files.constKeyValueEnd(); it++)
-        {
-            const ImagePtrK & im = (*it).first;
-            QString newPath = (*it).second;
-#else
         for (auto it = m_files.constKeyValueBegin();
              it != m_files.constKeyValueEnd(); it++)
         {
             const ImagePtrK & im = it->first;
             QString newPath = it->second;
-#endif
             // Update progress dialog
             if (m_dialog)
             {
@@ -284,7 +282,7 @@ bool GalleryThumbView::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -321,7 +319,9 @@ bool GalleryThumbView::keyPressEvent(QKeyEvent *event)
             }
         }
         else if (action == "PLAY")
+        {
             Slideshow();
+        }
         else if (action == "RECURSIVESHOW")
         {
             ImagePtrK im = m_view->GetSelected();
@@ -350,7 +350,9 @@ bool GalleryThumbView::keyPressEvent(QKeyEvent *event)
             }
         }
         else
+        {
             handled = false;
+        }
     }
 
     if (!handled)
@@ -367,7 +369,7 @@ bool GalleryThumbView::keyPressEvent(QKeyEvent *event)
 void GalleryThumbView::customEvent(QEvent *event)
 {
 
-    if (event->type() == MythEvent::MythEventMessage)
+    if (event->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent *>(event);
         if (me == nullptr)
@@ -410,7 +412,7 @@ void GalleryThumbView::customEvent(QEvent *event)
             QString url = m_view->GetCachedThumbUrl(id);
 
             // Set thumbnail for each button now it exists
-            for (const ThumbLocation & location : qAsConst(affected))
+            for (const ThumbLocation & location : std::as_const(affected))
             {
                 MythUIButtonListItem *button = location.first;
                 int                   index  = location.second;
@@ -431,25 +433,14 @@ void GalleryThumbView::customEvent(QEvent *event)
 
             if (!extra.isEmpty())
             {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                QStringList idDeleted =
-                        extra[0].split(",", QString::SkipEmptyParts);
-#else
                 QStringList idDeleted =
                         extra[0].split(",", Qt::SkipEmptyParts);
-#endif
-
                 RemoveImages(idDeleted);
             }
             if (extra.size() >= 2)
             {
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-                QStringList idChanged =
-                        extra[1].split(",", QString::SkipEmptyParts);
-#else
                 QStringList idChanged =
                         extra[1].split(",", Qt::SkipEmptyParts);
-#endif
                 RemoveImages(idChanged, false);
             }
 
@@ -467,7 +458,7 @@ void GalleryThumbView::customEvent(QEvent *event)
             m_thumbExists.clear();
 
             // Remove thumbs & images from image cache using supplied prefixes
-            for (const QString & url : qAsConst(extra))
+            for (const QString & url : std::as_const(extra))
                 GetMythUI()->RemoveFromCacheByFile(url);
 
             // Refresh display
@@ -572,7 +563,9 @@ void GalleryThumbView::customEvent(QEvent *event)
                 err = m_mgr.DeleteFiles(m_menuState.m_markedId);
             }
             else
+            {
                 return;
+            }
 
             if (!err.isEmpty())
                 ShowOkPopup(err);
@@ -588,7 +581,7 @@ void GalleryThumbView::customEvent(QEvent *event)
 */
 void GalleryThumbView::RemoveImages(const QStringList &ids, bool deleted)
 {
-    for (const QString & id : qAsConst(ids))
+    for (const QString & id : std::as_const(ids))
     {
         // Remove image from view
         QStringList urls = m_view->RemoveImage(id.toInt(), deleted);
@@ -596,7 +589,7 @@ void GalleryThumbView::RemoveImages(const QStringList &ids, bool deleted)
         m_thumbExists.remove(id.toInt());
 
         // Remove thumbs & images from image cache
-        for (const QString & url : qAsConst(urls))
+        for (const QString & url : std::as_const(urls))
         {
             LOG(VB_FILE, LOG_DEBUG, LOC +
                 QString("Clearing image cache of '%1'").arg(url));
@@ -679,7 +672,7 @@ void GalleryThumbView::BuildImageList()
     ImagePtrK  selected = m_view->GetSelected();
 
     // go through the entire list and update
-    for (const ImagePtrK & im : qAsConst(nodes))
+    for (const ImagePtrK & im : std::as_const(nodes))
     {
         if (im)
         {
@@ -704,8 +697,10 @@ void GalleryThumbView::BuildImageList()
                     item->DisplayState("upfolder", "parenttype");
             }
             else if (im == selected)
+            {
                 // Reinstate the active button item. Note this would fail for parent
                 m_imageList->SetItemCurrent(item);
+            }
         }
     }
 }
@@ -766,7 +761,7 @@ void GalleryThumbView::UpdateImageItem(MythUIButtonListItem *item)
     {
     case kNameCaption: text = m_mgr.CrumbName(*im); break;
     case kDateCaption: text = m_mgr.ShortDateOf(im); break;
-    case kUserCaption: text = im->m_comment; break;
+    case kUserCaption: text = clean_comment(im->m_comment); break;
     default:
     case kNoCaption:   text = ""; break;
     }
@@ -864,8 +859,10 @@ void GalleryThumbView::UpdateThumbnail(MythUIButtonListItem *button,
         }
     }
     else
+    {
         // Dir with 4 thumbnails
         button->SetImage(url, QString("thumbimage%1").arg(index));
+    }
 }
 
 
@@ -938,7 +935,7 @@ void GalleryThumbView::UpdateScanProgress(const QString &scanner,
     // Aggregate all running scans
     int currentAgg = 0;
     int totalAgg = 0;
-    for (IntPair scan : qAsConst(m_scanProgress))
+    for (IntPair scan : std::as_const(m_scanProgress))
     {
         currentAgg += scan.first;
         totalAgg   += scan.second;
@@ -1001,8 +998,9 @@ void GalleryThumbView::SetUiSelection(MythUIButtonListItem *item)
                 if (im->IsFile() || im->IsDevice())
                     text << ImageManagerFe::LongDateOf(im);
 
-                if (!im->m_comment.isEmpty())
-                    text << im->m_comment;
+                QString comment = clean_comment(im->m_comment);
+                if (!comment.isEmpty())
+                    text << comment;
             }
             m_captionText->SetText(text.join(" - "));
         }
@@ -1236,7 +1234,9 @@ void GalleryThumbView::MenuAction(MythMenu *mainMenu)
             menu->AddItem(tr("Rename"),       &GalleryThumbView::ShowRenameInput);
         }
         else if (selected->m_userThumbnail)
+        {
             menu->AddItem(tr("Reset Cover"), &GalleryThumbView::ResetCover);
+        }
     }
 
     // Can only mkdir in a non-root dir
@@ -1291,7 +1291,9 @@ void GalleryThumbView::MenuSlideshow(MythMenu *mainMenu)
             menu->AddItem(tr("Recursive"), &GalleryThumbView::RecursiveSlideshow);
     }
     else
+    {
         menu->AddItem(tr("Current Directory"), &GalleryThumbView::Slideshow);
+    }
 
     auto *orderMenu = new MythMenu(tr("Slideshow Order"), this, "SlideOrderMenu");
 
@@ -1326,8 +1328,10 @@ void GalleryThumbView::MenuShow(MythMenu *mainMenu)
         menu->AddItem(tr("Hide Videos"), &GalleryThumbView::HideVideos);
     }
     else
+    {
         menu->AddItem(type == kPicOnly ? tr("Show Videos") : tr("Show Pictures"),
                       &GalleryThumbView::ShowType);
+    }
 
     int show = gCoreContext->GetNumSetting("GalleryImageCaption");
     auto *captionMenu = new MythMenu(tr("Image Captions"), this,
@@ -1459,7 +1463,9 @@ void GalleryThumbView::StartSlideshow(ImageSlideShowType mode)
         }
     }
     else
+    {
         delete slide;
+    }
 }
 
 
@@ -1616,7 +1622,7 @@ void GalleryThumbView::DoHideMarked(bool hide)
     else if (hide && !m_mgr.GetVisibility())
     {
         // Unmark invisible files
-        for (int id : qAsConst(m_menuState.m_markedId))
+        for (int id : std::as_const(m_menuState.m_markedId))
             m_view->Mark(id, false);
     }
 }
@@ -1728,7 +1734,9 @@ void GalleryThumbView::ShowDialog(const QString& msg, const QString& event)
         m_popupStack.AddScreen(popup);
     }
     else
+    {
         delete popup;
+    }
 }
 
 
@@ -1749,7 +1757,9 @@ void GalleryThumbView::ShowRenameInput()
             m_popupStack.AddScreen(popup);
         }
         else
+        {
             delete popup;
+        }
     }
 }
 
@@ -1776,7 +1786,9 @@ void GalleryThumbView::ShowPassword()
         m_popupStack.AddScreen(popup);
     }
     else
+    {
         delete popup;
+    }
 }
 
 
@@ -1843,8 +1855,7 @@ void GalleryThumbView::SelectZoomWidget(int change)
     m_zoomLevel += change;
 
     // constrain to zoom levels supported by theme
-    if (m_zoomLevel < 0)
-        m_zoomLevel = 0;
+    m_zoomLevel = std::max(m_zoomLevel, 0);
     if (m_zoomLevel >= m_zoomWidgets.size())
         m_zoomLevel = m_zoomWidgets.size() - 1;
 
@@ -1889,7 +1900,9 @@ void GalleryThumbView::MakeDir()
         m_popupStack.AddScreen(popup);
     }
     else
+    {
         delete popup;
+    }
 }
 
 
@@ -1953,7 +1966,7 @@ void GalleryThumbView::Copy(bool deleteAfter)
     // Update filepaths for Db & generate URLs for filesystem copy
     // Only copy files, destination dirs will be created automatically
     TransferThread::TransferMap transfers;
-    for (const ImagePtr & im : qAsConst(files))
+    for (const ImagePtr & im : std::as_const(files))
     {
         // Replace base path with destination path
         im->m_filePath = ImageManagerFe::ConstructPath(destDir->m_filePath,
@@ -1988,14 +2001,14 @@ void GalleryThumbView::Copy(bool deleteAfter)
                     .arg(failed.size()));
 
     // Don't update Db for files that failed
-    for (const ImagePtrK & im : qAsConst(failed))
+    for (const ImagePtrK & im : std::as_const(failed))
         transfers.remove(im);
 
     ImageListK newImages = transfers.keys();
 
     // Include dirs
     QStringList dirPaths;
-    for (const ImagePtr & im : qAsConst(dirs))
+    for (const ImagePtr & im : std::as_const(dirs))
     {
         QString relPath = im->m_filePath.mid(basePathSize);
 
@@ -2023,7 +2036,7 @@ void GalleryThumbView::Copy(bool deleteAfter)
             // Delete files/dirs that have been successfully copied
             // Will fail for dirs containing images that failed to copy
             ImageIdList ids;
-            for (const ImagePtrK & im : qAsConst(newImages))
+            for (const ImagePtrK & im : std::as_const(newImages))
                 ids << im->m_id;
 
             m_mgr.DeleteFiles(ids);
@@ -2077,7 +2090,11 @@ void GalleryThumbView::Move()
         // Nothing to clean up
         return;
     }
-    ImageList images = dirs + files;
+    ImageList images;
+    if (!dirs.isEmpty())
+        images += dirs;
+    if (!files.isEmpty())
+        images += files;
 
     // Determine parent from first dir or pic
     ImagePtr aChild = images[0];
@@ -2089,7 +2106,7 @@ void GalleryThumbView::Move()
 
     // Determine destination URLs
     TransferThread::TransferMap transfers;
-    for (const QSharedPointer<ImageItem> & im : qAsConst(images))
+    for (const QSharedPointer<ImageItem> & im : std::as_const(images))
     {
         // Replace base path with destination path
         QString newPath = ImageManagerFe::ConstructPath(destDir->m_filePath,
@@ -2124,7 +2141,7 @@ void GalleryThumbView::Move()
                     .arg(failed.size()));
 
     // Don't update Db for files that failed
-    for (const ImagePtrK & im : qAsConst(failed))
+    for (const ImagePtrK & im : std::as_const(failed))
         transfers.remove(im);
 
     if (!transfers.isEmpty())
@@ -2132,7 +2149,7 @@ void GalleryThumbView::Move()
         ImageListK moved = transfers.keys();
 
         // Unmark moved files
-        for (const ImagePtrK & im : qAsConst(moved))
+        for (const ImagePtrK & im : std::as_const(moved))
             m_view->Mark(im->m_id, false);
 
         // Update Db

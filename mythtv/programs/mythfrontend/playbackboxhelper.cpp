@@ -1,26 +1,31 @@
+// C++
 #include <algorithm>
 
+// Qt
 #include <QCoreApplication>
-#include <QStringList>
 #include <QDateTime>
-#include <QFileInfo>
 #include <QDir>
-#include <QMap>
+#include <QFileInfo>
 #include <QHash>
+#include <QMap>
+#include <QStringList>
 
-#include "previewgeneratorqueue.h"
-#include "metadataimagehelper.h"
+// MythTV
+#include "libmythbase/filesysteminfo.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythevent.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythrandom.h"
+#include "libmythbase/programinfo.h"
+#include "libmythbase/remoteutil.h"
+#include "libmythbase/storagegroup.h"
+#include "libmythtv/metadataimagehelper.h"
+#include "libmythtv/previewgeneratorqueue.h"
+#include "libmythtv/tvremoteutil.h"
+
+//  MythFrontend
 #include "playbackboxhelper.h"
-#include "mythcorecontext.h"
-#include "filesysteminfo.h"
-#include "tvremoteutil.h"
-#include "storagegroup.h"
-#include "mythlogging.h"
-#include "programinfo.h"
-#include "remoteutil.h"
-#include "mythevent.h"
-#include "mythdirs.h"
-#include "mythmiscutil.h"
 
 #define LOC      QString("PlaybackBoxHelper: ")
 #define LOC_WARN QString("PlaybackBoxHelper Warning: ")
@@ -30,7 +35,7 @@ class PBHEventHandler : public QObject
 {
   public:
     explicit PBHEventHandler(PlaybackBoxHelper &pbh) :
-        m_pbh(pbh), m_freeSpaceTimerId(0), m_checkAvailabilityTimerId(0)
+        m_pbh(pbh)
     {
         StorageGroup::ClearGroupToUseCache();
     }
@@ -46,8 +51,8 @@ class PBHEventHandler : public QObject
     void UpdateFreeSpaceEvent(void);
     AvailableStatusType CheckAvailability(const QStringList &slist);
     PlaybackBoxHelper &m_pbh;
-    int m_freeSpaceTimerId;
-    int m_checkAvailabilityTimerId;
+    int m_freeSpaceTimerId         { 0 };
+    int m_checkAvailabilityTimerId { 0 };
     static constexpr std::chrono::milliseconds kUpdateFreeSpaceInterval { 15s };
     QMap<QString, QStringList> m_fileListCache;
     QHash<uint, QStringList> m_checkAvailability;
@@ -59,9 +64,19 @@ AvailableStatusType PBHEventHandler::CheckAvailability(const QStringList &slist)
 
     QStringList::const_iterator it2 = slist.begin();
     ProgramInfo evinfo(it2, slist.end());
+    bool first {true};
+    CheckAvailabilityType firstType {};
     QSet<CheckAvailabilityType> cats;
     for (; it2 != slist.end(); ++it2)
-        cats.insert((CheckAvailabilityType)(*it2).toUInt());
+    {
+        auto type = (CheckAvailabilityType)(*it2).toUInt();
+        if (first)
+        {
+            firstType = type;
+            first = false;
+        }
+        cats.insert(type);
+    }
 
     {
         QMutexLocker locker(&m_pbh.m_lock);
@@ -114,7 +129,7 @@ AvailableStatusType PBHEventHandler::CheckAvailability(const QStringList &slist)
 
     list.clear();
     list.push_back(QString::number(evinfo.GetRecordingID()));
-    list.push_back(QString::number((int)*cats.begin()));
+    list.push_back(QString::number((int)firstType));
     list.push_back(QString::number((int)availableStatus));
     list.push_back(QString::number(evinfo.GetFilesize()));
     list.push_back(QString::number(tm.hour()));
@@ -122,7 +137,7 @@ AvailableStatusType PBHEventHandler::CheckAvailability(const QStringList &slist)
     list.push_back(QString::number(tm.second()));
     list.push_back(QString::number(tm.msec()));
 
-    for (auto type : qAsConst(cats))
+    for (auto type : std::as_const(cats))
     {
         if (type == kCheckForCache && cats.size() > 1)
             continue;
@@ -158,7 +173,7 @@ bool PBHEventHandler::event(QEvent *e)
         }
         return true;
     }
-    if (e->type() == MythEvent::MythEventMessage)
+    if (e->type() == MythEvent::kMythEventMessage)
     {
         auto *me = dynamic_cast<MythEvent*>(e);
         if (me == nullptr)
@@ -271,7 +286,9 @@ bool PBHEventHandler::event(QEvent *e)
                 m_checkAvailabilityTimerId = startTimer(0ms);
             }
             else if (!m_checkAvailabilityTimerId)
+            {
                 m_checkAvailabilityTimerId = startTimer(50ms);
+            }
         }
         else if (me->Message() == "LOCATE_ARTWORK")
         {
@@ -386,7 +403,7 @@ void PlaybackBoxHelper::UpdateFreeSpace(void)
     QList<FileSystemInfo> fsInfos = FileSystemInfo::RemoteGetInfo();
 
     QMutexLocker locker(&m_lock);
-    for (const auto& fsInfo : qAsConst(fsInfos))
+    for (const auto& fsInfo : std::as_const(fsInfos))
     {
         if (fsInfo.getPath() == "TotalDiskSpace")
         {
@@ -457,17 +474,17 @@ QString PlaybackBoxHelper::LocateArtwork(
     auto *e = new MythEvent("LOCATE_ARTWORK", list);
     QCoreApplication::postEvent(m_eventHandler, e);
 
-    return QString();
+    return {};
 }
 
 QString PlaybackBoxHelper::GetPreviewImage(
     const ProgramInfo &pginfo, bool check_availability)
 {
     if (!check_availability && pginfo.GetAvailableStatus() != asAvailable)
-        return QString();
+        return {};
 
     if (pginfo.GetAvailableStatus() == asPendingDelete)
-        return QString();
+        return {};
 
     QString token = QString("%1:%2")
         .arg(pginfo.MakeUniqueKey()).arg(MythRandom());

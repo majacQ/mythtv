@@ -1,18 +1,21 @@
-// qt
+// C++
+#include <algorithm>
+
+// Qt
 #include <QString>
 #include <QVariant>
 
-// myth
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdirs.h>
-#include <mythprogressdialog.h>
+// MythTV
+#include "libmyth/audio/audiooutpututil.h"
+#include "libmyth/mythcontext.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythui/mythprogressdialog.h"
 
-#include <audiooutpututil.h>
-
+// MythFrontend
 #include "audiogeneralsettings.h"
-#include "setupwizard_general.h"
 #include "setupwizard_audio.h"
+#include "setupwizard_general.h"
 #include "setupwizard_video.h"
 
 bool AudioSetupWizard::Create()
@@ -157,7 +160,7 @@ void AudioSetupWizard::Init(void)
             delete adc;
         }
     }
-    for (const auto & ao : qAsConst(*m_outputlist))
+    for (const auto & ao : std::as_const(*m_outputlist))
     {
         QString name = ao.m_name;
         auto *output = new MythUIButtonListItem(m_audioDeviceButtonList, name);
@@ -230,10 +233,7 @@ AudioOutputSettings AudioSetupWizard::UpdateCapabilities(bool restore, bool AC3)
         cur_speakers = m_speakerNumberButtonList->GetItemCurrent()->GetData()
                                       .value<int>();
     }
-    if (cur_speakers > m_maxspeakers)
-    {
-        m_maxspeakers = cur_speakers;
-    }
+    m_maxspeakers = std::max(cur_speakers, m_maxspeakers);
     if (restore)
     {
         cur_speakers = m_maxspeakers;
@@ -330,7 +330,9 @@ void AudioSetupWizard::slotNext(void)
         mainStack->AddScreen(sw);
     }
     else
+    {
         delete sw;
+    }
 }
 
 void AudioSetupWizard::save(void)

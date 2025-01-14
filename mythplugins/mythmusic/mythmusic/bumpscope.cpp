@@ -1,20 +1,26 @@
-#include "mainvisual.h"
-#include "bumpscope.h"
-
-#include <compat.h>
-#include <mythlogging.h>
-
 // This was:
 // Bump Scope - Visualization Plugin for XMMS
 // Copyright (C) 1999-2001 Zinx Verituse
 
+// C++ headers
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
-
 #include <iostream>
 
+// QT headers
 #include <QCoreApplication>
 #include <QPainter>
+
+// MythTV headers
+#include <libmythbase/compat.h>
+#include <libmythbase/mythlogging.h>
+#include <libmythbase/mythrandom.h>
+#include <libmythbase/sizetliteral.h>
+
+// Mythmusic Headers
+#include "bumpscope.h"
+#include "mainvisual.h"
 
 BumpScope::BumpScope()
 {
@@ -63,18 +69,16 @@ void BumpScope::resize(const QSize &newsize)
     m_x = m_width / 2;
     m_y = m_height;
 
-    m_phongDat.resize(m_phongRad * 2);
+    m_phongDat.resize(m_phongRad * 2_UZ);
     for (auto & dat : m_phongDat)
-        dat.resize(m_phongRad * 2);
+        dat.resize(m_phongRad * 2_UZ);
 
     generate_phongdat();
     generate_cmap(m_color);
 }
 
-void BumpScope::blur_8(unsigned char *ptr, int w, int h, int bpl)
+void BumpScope::blur_8(unsigned char *ptr, [[maybe_unused]] int w, int h, ptrdiff_t bpl)
 {
-    (void)w;
-
     uchar *iptr = ptr + bpl + 1;
     uint i = bpl * h;
 
@@ -97,18 +101,15 @@ void BumpScope::generate_cmap(unsigned int color)
 
         for (uint i = 255; i > 0; i--)
         {
-             uint r = (unsigned int)((100 * static_cast<double>(red) / 255)
-                                * m_intense1[i] + m_intense2[i]);
-             if (r > 255)
-                 r = 255;
-             uint g = (unsigned int)((100 * static_cast<double>(green) / 255)
-                                * m_intense1[i] + m_intense2[i]);
-             if (g > 255)
-                 g = 255;
-             uint b = (unsigned int)((100 * static_cast<double>(blue) / 255)
-                                * m_intense1[i] + m_intense2[i]);
-             if (b > 255)
-                 b = 255;
+             uint r = (unsigned int)(((100 * static_cast<double>(red) / 255)
+                                * m_intense1[i]) + m_intense2[i]);
+             r = std::min<uint>(r, 255);
+             uint g = (unsigned int)(((100 * static_cast<double>(green) / 255)
+                                * m_intense1[i]) + m_intense2[i]);
+             g = std::min<uint>(g, 255);
+             uint b = (unsigned int)(((100 * static_cast<double>(blue) / 255)
+                                * m_intense1[i]) + m_intense2[i]);
+             b = std::min<uint>(b, 255);
 
              m_image->setColor(i, qRgba(r, g, b, 255));
          }
@@ -125,8 +126,8 @@ void BumpScope::generate_phongdat(void)
     {
         for (uint x = 0; x < m_phongRad; x++)
         {
-            double i = (double)x / ((double)m_phongRad) - 1;
-            double i2 = (double)y / ((double)m_phongRad) - 1;
+            double i = ((double)x / ((double)m_phongRad)) - 1;
+            double i2 = ((double)y / ((double)m_phongRad)) - 1;
 
             //if (m_diamond)
                i = 1 - pow(i*i2,.75) - i*i - i2*i2;
@@ -140,8 +141,7 @@ void BumpScope::generate_phongdat(void)
                 //else
                 //    i = i*i*i * 255.0;
 
-                if (i > 255)
-                    i = 255;
+                i = std::min<double>(i, 255);
                 auto uci = (unsigned char)i;
 
                 m_phongDat[y][x] = uci;
@@ -233,15 +233,15 @@ inline void BumpScope::draw_vert_line(unsigned char *buffer, int x, int y1,
         }
     }
     else
+    {
         buffer[((y1 + 1) * m_bpl) + x + 1] = 0xff;
+    }
 }
 
 void BumpScope::render_light(int lx, int ly)
 {
-    int dx = 0;
     int dy = 0;
     unsigned int PHONGRES = m_phongRad * 2;
-    unsigned int i = 0;
     unsigned int j = 0;
 
     int prev_y = m_bpl + 1;
@@ -251,6 +251,8 @@ void BumpScope::render_light(int lx, int ly)
     for (dy = (-ly) + (PHONGRES / 2), j = 0; j < m_height; j++, dy++,
          prev_y += m_bpl - m_width)
     {
+        int dx = 0;
+        unsigned int i = 0;
         for (dx = (-lx) + (PHONGRES / 2), i = 0; i < m_width; i++, dx++,
              prev_y++, out_y++)
         {
@@ -276,12 +278,12 @@ void BumpScope::rgb_to_hsv(unsigned int color, double *h, double *s, double *v)
   double b = (double)(color&0xff) / 255.0;
 
   double max = r;
-  if (g > max) max = g;
-  if (b > max) max = b;
+  max = std::max(g, max);
+  max = std::max(b, max);
 
   double min = r;
-  if (g < min) min = g;
-  if (b < min) min = b;
+  min = std::min(g, min);
+  min = std::min(b, min);
 
   *v = max;
 
@@ -305,9 +307,9 @@ void BumpScope::rgb_to_hsv(unsigned int color, double *h, double *s, double *v)
 
 void BumpScope::hsv_to_rgb(double h, double s, double v, unsigned int *color)
 {
-  double r = NAN;
-  double g = NAN;
-  double b = NAN;
+  double r = __builtin_nan("");
+  double g = __builtin_nan("");
+  double b = __builtin_nan("");
 
   if (s == 0.0)
     s = 0.000001;
@@ -350,11 +352,10 @@ bool BumpScope::process(VisualNode *node)
     if (node->m_length < 512)
         numSamps = node->m_length;
 
-    int prev_y = (int)m_height / 2 +
-        ((int)node->m_left[0] * (int)m_height) / 0x10000;
+    int prev_y = ((int)m_height / 2) +
+        (((int)node->m_left[0] * (int)m_height) / 0x10000);
 
-    if (prev_y < 0)
-        prev_y = 0;
+    prev_y = std::max(prev_y, 0);
     if (prev_y >= (int)m_height) prev_y = m_height - 1;
 
     for (uint i = 0; i < m_width; i++)
@@ -363,8 +364,7 @@ bool BumpScope::process(VisualNode *node)
         y = (int)m_height / 2 +
             ((int)node->m_left[y] * (int)m_height) / 0x10000;
 
-        if (y < 0)
-            y = 0;
+        y = std::max(y, 0);
         if (y >= (int)m_height)
             y = m_height - 1;
 
@@ -377,15 +377,13 @@ bool BumpScope::process(VisualNode *node)
     return false;
 }
 
-bool BumpScope::draw(QPainter *p, const QColor &back)
+bool BumpScope::draw(QPainter *p, [[maybe_unused]] const QColor &back)
 {
     if (!m_image || m_image->isNull())
     {
         LOG(VB_GENERAL, LOG_ERR, "BumpScope::draw: Bad image");
         return false;
     }
-
-    (void)back;
 
     m_ilx = m_x;
     m_ily = m_y;
@@ -398,8 +396,8 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
             m_wasMoving = 1;
         }
 
-        m_ilx = (int)(m_width / 2.0F + cosf(m_iangle * (M_PI / 180.0)) * m_ixo);
-        m_ily = (int)(m_height / 2.0F + sinf(m_iangle * (M_PI / 180.0)) * m_iyo);
+        m_ilx = (int)((m_width / 2.0F) + (cosf(m_iangle * (M_PI / 180.0)) * m_ixo));
+        m_ily = (int)((m_height / 2.0F) + (sinf(m_iangle * (M_PI / 180.0)) * m_iyo));
 
         m_iangle += 2;
         if (m_iangle >= 360)
@@ -409,7 +407,7 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
         if (m_ixo > ((int)m_width / 2) || m_ixo < -((int)m_width / 2))
         {
             m_ixo = (m_ixo > 0) ? (m_width / 2) : -(m_width / 2);
-            if (random() & 1)
+            if (rand_bool())
             {
                 m_ixd = (m_ixd > 0) ? -1 : 1;
                 m_iyd = 0;
@@ -425,7 +423,7 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
         if (m_iyo > ((int)m_height / 2) || m_iyo < -((int)m_height / 2))
         {
             m_iyo = (m_iyo > 0) ? (m_height / 2) : -(m_height / 2);
-            if (random() & 1)
+            if (rand_bool())
             {
                 m_ixd = (m_ixd > 0) ? -1 : 1;
                 m_iyd = 0;
@@ -445,14 +443,14 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
             rgb_to_hsv(m_color, &m_ih, &m_is, &m_iv);
             m_wasColor = 1;
 
-            if (random() & 1)
+            if (rand_bool())
             {
-                m_ihd = (random() & 1) * 2 - 1;
+                m_ihd = rand_bool() ? -1 : 1;
                 m_isd = 0;
             }
             else
             {
-                m_isd = 0.01 * ((random() & 1) * 2 - 1);
+                m_isd = rand_bool() ? -0.01 : 0.01;
                 m_ihd = 0;
             }
         }
@@ -468,16 +466,16 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
                 m_ih = 0;
             if (m_ih < 0)
                 m_ih = 359;
-            if ((random() % 150) == 0)
+            if (rand_bool(150))
             {
-                if (random() & 1)
+                if (rand_bool())
                 {
-                    m_ihd = (random() & 1) * 2 - 1;
+                    m_ihd = rand_bool() ? -1 : 1;
                     m_isd = 0;
                 }
                 else
                 {
-                    m_isd = 0.01 * ((random() & 1) * 2 - 1);
+                    m_isd = rand_bool() ? -0.01 : 0.01;
                     m_ihd = 0;
                 }
             }
@@ -488,25 +486,24 @@ bool BumpScope::draw(QPainter *p, const QColor &back)
 
             if (m_is <= 0 || m_is >= 0.5)
             {
-                if (m_is < 0)
-                    m_is = 0;
+                m_is = std::max<double>(m_is, 0);
                 if (m_is > 0.52)
                     m_isd = -0.01;
                 else if (m_is == 0)
                 {
-                    m_ihd = random() % 360;
+                    m_ihd = MythRandom(0, 360 - 1);
                     m_isd = 0.01;
                 }
                 else
                 {
-                    if (random() & 1)
+                    if (rand_bool())
                     {
-                        m_ihd = (random() & 1) * 2 - 1;
+                        m_ihd = rand_bool() ? -1 : 1;
                         m_isd = 0;
                     }
                     else
                     {
-                        m_isd = 0.01 * ((random() & 1) * 2 - 1);
+                        m_isd = rand_bool() ? -0.01 : 0.01;
                         m_ihd = 0;
                     }
                 }
@@ -537,10 +534,9 @@ static class BumpScopeFactory : public VisFactory
         return 1;
     }
 
-    VisualBase *create(MainVisual *parent, const QString &pluginName) const override // VisFactory
+    VisualBase *create([[maybe_unused]] MainVisual *parent,
+                       [[maybe_unused]] const QString &pluginName) const override // VisFactory
     {
-        (void)parent;
-        (void)pluginName;
         return new BumpScope();
     }
 }BumpScopeFactory;

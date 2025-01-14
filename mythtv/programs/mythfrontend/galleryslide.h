@@ -12,8 +12,8 @@
 
 #include <QQueue>
 
-#include "mythuiimage.h"
-#include "imagetypes.h"
+#include "libmythmetadata/imagetypes.h"
+#include "libmythui/mythuiimage.h"
 
 // Min/max zoom extents available in slideshow
 #define MIN_ZOOM (0.1F)
@@ -55,7 +55,7 @@ class Animation : public AbstractAnimation, public QVariantAnimation
 {
 public:
     //! Supported effects
-    enum Type {None, Alpha, Position, Zoom, HorizontalZoom, VerticalZoom, Angle};
+    enum Type : std::uint8_t {None, Alpha, Position, Zoom, HorizontalZoom, VerticalZoom, Angle};
 
     /*!
       \brief Create simple animation
@@ -185,7 +185,7 @@ signals:
     void      ImageLoaded(Slide*);
 
 private:
-    enum SlideState { kEmpty, kLoading, kLoaded, kFailed }; // Order is significant
+    enum SlideState : std::uint8_t { kEmpty, kLoading, kLoaded, kFailed }; // Order is significant
 
     SlideState    m_state         {kEmpty};  //!< Slide validity
     ImagePtrK     m_data          {nullptr}; //!< The image currently loading/loaded
@@ -248,11 +248,7 @@ protected:
     QString BufferState();
 
     // Must be recursive to enable Flush->signal->Get whilst retaining lock
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    QMutex         m_mutexQ   {QMutex::Recursive}; //!< Queue protection
-#else
     QRecursiveMutex m_mutexQ;      //!< Queue protection
-#endif
     QQueue<Slide*> m_queue;        //!< Queue of slides
     int            m_nextLoad {0}; //!< Index of first spare slide, (or last slide if none spare)
 };

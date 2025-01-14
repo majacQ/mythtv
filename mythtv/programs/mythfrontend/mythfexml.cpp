@@ -5,26 +5,25 @@
 //
 //////////////////////////////////////////////////////////////////////////////
 
-#include "mythfexml.h"
-
-#include "mythcorecontext.h"
-#include "mythdate.h"
-#include "mythdbcon.h"
-
-#include "mythmainwindow.h"
-
-#include <QTextStream>
+// Qt
+#include <QBuffer>
 #include <QCoreApplication>
-#include <QTextStream>
 #include <QDir>
 #include <QFile>
-#include <QBuffer>
 #include <QKeyEvent>
+#include <QTextStream>
 
-#include "../../config.h"
+// MythTV
+#include "libmythbase/mythconfig.h"
+#include "libmythbase/configuration.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdate.h"
+#include "libmythbase/mythdbcon.h"
+#include "libmythui/mythmainwindow.h"
 
+// MythFrontend
 #include "keybindings.h"
-
+#include "mythfexml.h"
 #include "services/frontend.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -32,14 +31,13 @@
 /////////////////////////////////////////////////////////////////////////////
 
 MythFEXML::MythFEXML( UPnpDevice *pDevice , const QString &sSharePath)
-  : Eventing( "MythFEXML", "MYTHTV_Event", sSharePath)
+  : Eventing( "MythFEXML", "MYTHTV_Event", sSharePath),
+    m_sControlUrl("/MythFE")
 {
 
-    QString sUPnpDescPath =
-        UPnp::GetConfiguration()->GetValue( "UPnP/DescXmlPath", m_sSharePath );
+    QString sUPnpDescPath = XmlConfiguration().GetValue("UPnP/DescXmlPath", m_sSharePath);
 
     m_sServiceDescFileName = sUPnpDescPath + "MFEXML_scpd.xml";
-    m_sControlUrl          = "/MythFE";
 
     // Add our Service Definition to the device.
 
@@ -182,7 +180,7 @@ void MythFEXML::GetActionListTest(HTTPRequest *pRequest)
     {
         contexts.next();
         QStringList actions = contexts.value();
-        for (const QString & action : qAsConst(actions))
+        for (const QString & action : std::as_const(actions))
         {
             QStringList split = action.split(",");
             if (split.size() == 2)
@@ -200,8 +198,10 @@ void MythFEXML::GetActionListTest(HTTPRequest *pRequest)
 
 }
 
-#define BUTTON(action,desc) \
-  QString("      <input class=\"bigb\" type=\"button\" value=\"%1\" onClick=\"postaction('%2');\"></input>\r\n").arg(action, desc)
+static inline QString BUTTON(const char *action, const char *desc)
+{
+    return QString("      <input class=\"bigb\" type=\"button\" value=\"%1\" onClick=\"postaction('%2');\"></input>\r\n").arg(action, desc);
+};
 
 void MythFEXML::GetRemote(HTTPRequest *pRequest)
 {

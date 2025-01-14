@@ -4,23 +4,18 @@
 // C++ headers
 #include <vector>
 
-// MythTV headers
-#include <QObject>
-#include <mythmiscutil.h>
-
 // QT headers
-#include <QDomDocument>
 #include <QByteArray>
 #include <QDateTime>
-#include <QVariant>
+#include <QDomDocument>
 #include <QObject>
 #include <QString>
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-#include <QMutex>
-#else
-#include <QRecursiveMutex>
-#endif
 #include <QUrl>
+#include <QVariant>
+#include <QRecursiveMutex>
+
+// MythTV headers
+#include <libmythbase/stringutil.h>
 
 // MythNews headers
 #include "newsarticle.h"
@@ -58,7 +53,7 @@ class NewsSite : public QObject
 
   public:
 
-    enum State {
+    enum State : std::uint8_t {
         Retrieving = 0,
         RetrieveFailed,
         WriteFailed,
@@ -104,8 +99,8 @@ class NewsSite : public QObject
     void process(void);
     void parseRSS(const QDomDocument& domDoc);
     void parseAtom(const QDomDocument& domDoc);
-    static inline bool sortByName(NewsSite *a, NewsSite *b)
-        { return naturalCompare(a->m_sortName, b->m_sortName) < 0; }
+    static bool sortByName(NewsSite *a, NewsSite *b)
+        { return StringUtil::naturalCompare(a->m_sortName, b->m_sortName) < 0; }
 
     bool     successful(void) const;
     QString  errorMsg(void) const;
@@ -113,11 +108,7 @@ class NewsSite : public QObject
   private:
     ~NewsSite() override;
 
-#if QT_VERSION < QT_VERSION_CHECK(5,14,0)
-    mutable QMutex m_lock {QMutex::Recursive};
-#else
     mutable QRecursiveMutex m_lock;
-#endif
     QString    m_name;
     QString    m_sortName;
     QString    m_url;

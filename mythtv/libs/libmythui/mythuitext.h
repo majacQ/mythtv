@@ -5,15 +5,13 @@
 #include <QTextLayout>
 #include <QColor>
 
-// Mythbase headers
-#include "mythstorage.h"
-#include "mythtypes.h"
+// MythTV
+#include "libmythbase/mythstorage.h"
+#include "libmythbase/mythtypes.h"
+#include "libmythui/mythuitype.h"
+#include "libmythui/mythmainwindow.h" // for MythMainWindow::drawRefresh
 
-// Mythui headers
-#include "mythuitype.h"
-#include "mythmainwindow.h" // for MythMainWindow::drawRefresh
-
-#define DEFAULT_REFRESH_RATE 70 // Hz
+static constexpr uint8_t DEFAULT_REFRESH_RATE { 70 }; // Hz
 
 class MythFontProperties;
 
@@ -153,8 +151,10 @@ class MUI_PUBLIC MythUIText : public MythUIType, public StorageUser
     float  m_incB                 {0.0};
 
     // Default delay of 3 seconds before 'bouncing' the scrolling text
-    enum Constants {ScrollBounceDelay = DEFAULT_REFRESH_RATE * 3};
-    enum ScrollDir {ScrollNone, ScrollLeft, ScrollRight, ScrollUp, ScrollDown,
+    enum Constants : std::uint8_t
+                   {ScrollBounceDelay = DEFAULT_REFRESH_RATE * 3};
+    enum ScrollDir : std::uint8_t
+                   {ScrollNone, ScrollLeft, ScrollRight, ScrollUp, ScrollDown,
                     ScrollHorizontal, ScrollVertical};
 
     int       m_scrollStartDelay  {ScrollBounceDelay};
@@ -170,7 +170,8 @@ class MUI_PUBLIC MythUIText : public MythUIType, public StorageUser
     bool      m_scrolling         {false};
     int64_t   m_lastUpdate        {QDateTime::currentMSecsSinceEpoch()};
 
-    enum TextCase {CaseNormal, CaseUpper, CaseLower, CaseCapitaliseFirst,
+    enum TextCase : std::uint8_t
+                  {CaseNormal, CaseUpper, CaseLower, CaseCapitaliseFirst,
                    CaseCapitaliseAll};
 
     TextCase  m_textCase          {CaseNormal};

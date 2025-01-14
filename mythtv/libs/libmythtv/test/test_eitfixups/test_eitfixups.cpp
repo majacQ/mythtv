@@ -20,16 +20,17 @@
 
 #include <cstdio>
 #include <iostream>
+
 #include "test_eitfixups.h"
-#include "eitfixup.h"
-#include "channelutil.h"
-#include "programdata.h"
-#include "programinfo.h"
-#include "dishdescriptors.h"
+
+#include "libmythbase/programinfo.h"
+#include "libmythtv/channelutil.h"
+#include "libmythtv/eitfixup.h"
+#include "libmythtv/mpeg/dishdescriptors.h"
 
 
 // Make this non-zero to enable dumping event details to stdout
-#define DUMP_EVENTS 0
+#define DUMP_EVENTS 0 // NOLINT(cppcoreguidelines-macro-usage)
 
 #if DUMP_EVENTS
     #define PRINT_EVENT(a) printEvent(a)
@@ -165,7 +166,11 @@ void TestEITFixups::printEvent(const DBEventEIT& event)
     }
     if (!event.m_items.isEmpty())
     {
-        printf("Items        %3d\n", static_cast<int>(event.m_items.count()));
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+        printf("Items        %3d\n", event.m_items.count());
+#else
+        printf("Items        %3lld\n", event.m_items.count());
+#endif
     }
     printf("Category       %3u\n", event.m_categoryType);
     printf("\n");
@@ -230,7 +235,7 @@ void TestEITFixups::checkCast(const DBEventEIT& event,
 
 void TestEITFixups::checkRating(const DBEventEIT& event, const QString& e_system, const QString& e_rating)
 {
-    for (const auto& rating : qAsConst(event.m_ratings))
+    for (const auto& rating : std::as_const(event.m_ratings))
     {
         QCOMPARE(rating.m_system, e_system);
         QCOMPARE(rating.m_rating, e_rating);
@@ -535,28 +540,38 @@ void TestEITFixups::testUKXFiles()
 void TestEITFixups::testDEPro7Sat1()
 {
     DBEventEIT *event = SimpleDBEventEIT (EITFixUp::kFixP7S1,
-                                         "Titel",
-                                         "Folgentitel, Mystery, USA 2011",
+                                         "The Big Bang Theory",
+                                         "Eine Nacht pro Woche Sitcom, USA 2015 Altersfreigabe: Ohne Altersbeschränkung (WH vom Montag, 18.11.2024, 15:35 Uhr)",
                                          "Beschreibung");
 
     PRINT_EVENT(*event);
     EITFixUp::Fix(*event);
     PRINT_EVENT(*event);
-    QCOMPARE(event->m_title,    QString("Titel"));
-    QCOMPARE(event->m_subtitle, QString("Folgentitel"));
-    QCOMPARE(event->m_airdate,  (unsigned short) 2011);
+    QCOMPARE(event->m_title, QString("The Big Bang Theory"));
+    QCOMPARE(event->m_subtitle, QString("Eine Nacht pro Woche"));
+    QCOMPARE(event->m_description, QString("Beschreibung (USA 2015)"));
+    QCOMPARE(event->m_category, QString("Sitcom"));
+    QCOMPARE(event->m_airdate, (unsigned short) 2015);
+    QCOMPARE(event->m_originalairdate, QDate(2015, 1, 1));
+    QCOMPARE(event->m_previouslyshown, true);
+    checkRating(*event, "DE", "0");
 
     delete event;
 
     DBEventEIT *event2 = SimpleDBEventEIT (EITFixUp::kFixP7S1,
-                                           "Titel",
-                                           "Kurznachrichten, D 2015",
+                                           "taff",
+                                           "taff Infotainment, D 2024",
                                            "Beschreibung");
     PRINT_EVENT(*event2);
     EITFixUp::Fix(*event2);
     PRINT_EVENT(*event2);
+    QCOMPARE(event2->m_title, QString("taff"));
     QCOMPARE(event2->m_subtitle, QString(""));
-    QCOMPARE(event2->m_airdate,  (unsigned short) 2015);
+    QCOMPARE(event2->m_description, QString("Beschreibung (D 2024)"));
+    QCOMPARE(event2->m_category, QString("Infotainment"));
+    QCOMPARE(event2->m_airdate, (unsigned short) 2024);
+    QCOMPARE(event2->m_originalairdate, QDate(2024, 1, 1));
+    QCOMPARE(event2->m_previouslyshown, false);
 
     delete event2;
 
@@ -567,65 +582,68 @@ void TestEITFixups::testDEPro7Sat1()
     PRINT_EVENT(*event3);
     EITFixUp::Fix(*event3);
     PRINT_EVENT(*event3);
+    QCOMPARE(event3->m_title, QString("Titel"));
     QCOMPARE(event3->m_subtitle, QString("Folgentitel"));
-    QCOMPARE(event3->m_airdate,  (unsigned short) 0);
+    QCOMPARE(event3->m_description, QString("Beschreibung"));
+    QCOMPARE(event3->m_airdate, (unsigned short) 0);
+    QCOMPARE(event3->m_previouslyshown, false);
 
     delete event3;
 
+
     DBEventEIT *event4 = SimpleDBEventEIT (EITFixUp::kFixP7S1,
-                                           "Titel",
-                                           "\"Lokal\", Ort, Doku-Soap, D 2015",
+                                           "The Taste",
+                                           "The Taste Kochshow, D 2024 Altersfreigabe: ab 6 Mit Gebärdensprache (Online-Stream)",
                                            "Beschreibung");
     PRINT_EVENT(*event4);
     EITFixUp::Fix(*event4);
     PRINT_EVENT(*event4);
-    QCOMPARE(event4->m_subtitle, QString("\"Lokal\", Ort"));
-    QCOMPARE(event4->m_airdate,  (unsigned short) 2015);
+    QCOMPARE(event4->m_title, QString("The Taste"));
+    QCOMPARE(event4->m_subtitle, QString(""));
+    QCOMPARE(event4->m_description, QString("Beschreibung (D 2024)"));
+    QCOMPARE(event4->m_category, QString("Kochshow"));
+    QCOMPARE(event4->m_airdate, (unsigned short) 2024);
+    QCOMPARE(event4->m_originalairdate, QDate(2024, 1, 1));
+    QCOMPARE(event4->m_previouslyshown, false);
+    checkRating(*event4, "DE", "6");
 
     delete event4;
 
     DBEventEIT *event5 = SimpleDBEventEIT (EITFixUp::kFixP7S1,
                                            "Titel",
-                                           "In Morpheus' Armen, Science-Fiction, CDN/USA 2006",
+                                           "Event Horizon - Am Rande des Universums Science-Fiction, USA/GB 1997 Altersfreigabe: ab 16",
                                            "Beschreibung");
     PRINT_EVENT(*event5);
     EITFixUp::Fix(*event5);
     PRINT_EVENT(*event5);
-    QCOMPARE(event5->m_subtitle, QString("In Morpheus' Armen"));
-    QCOMPARE(event5->m_airdate,  (unsigned short) 2006);
+    QCOMPARE(event5->m_title, QString("Titel"));
+    QCOMPARE(event5->m_subtitle, QString("Event Horizon - Am Rande des Universums"));
+    QCOMPARE(event5->m_description, QString("Beschreibung (USA/GB 1997)"));
+    QCOMPARE(event5->m_airdate, (unsigned short) 1997);
+    QCOMPARE(event5->m_originalairdate, QDate(1997, 1, 1));
+    QCOMPARE(event5->m_category, QString("Science-Fiction"));
+    QCOMPARE(event5->m_previouslyshown, false);
+    checkRating(*event5, "DE", "16");
 
     delete event5;
 
     DBEventEIT *event6 = SimpleDBEventEIT (EITFixUp::kFixP7S1,
                                            "Titel",
-                                           "Drei Kleintiere durchschneiden (1), Zeichentrick, J 2014",
+                                           "Doku-Reihe, USA 2016 Altersfreigabe: ab 12",
                                            "Beschreibung");
     PRINT_EVENT(*event6);
     EITFixUp::Fix(*event6);
     PRINT_EVENT(*event6);
-    QCOMPARE(event6->m_subtitle, QString("Drei Kleintiere durchschneiden (1)"));
-    QCOMPARE(event6->m_airdate,  (unsigned short) 2014);
+    QCOMPARE(event6->m_title, QString("Titel"));
+    QCOMPARE(event6->m_subtitle, QString(""));
+    QCOMPARE(event6->m_description, QString("Beschreibung (USA 2016)"));
+    QCOMPARE(event6->m_category, QString("Doku-Reihe"));
+    QCOMPARE(event6->m_airdate, (unsigned short) 2016);
+    QCOMPARE(event6->m_originalairdate, QDate(2016, 1, 1));
+    QCOMPARE(event6->m_previouslyshown, false);
+    checkRating(*event6, "DE", "12");
 
     delete event6;
-
-    /* #12151 */
-    DBEventEIT *event7 = SimpleDBEventEIT (EITFixUp::kFixP7S1,
-                                           "Criminal Minds",
-                                           "<episode title>, Crime-Serie, USA 2011",
-                                           "<plot summary>\n\n"
-                                           "Regie: Frau Regisseur\n"
-                                           "Drehbuch: Lieschen Mueller, Frau Meier\n\n"
-                                           "Darsteller:\n"
-                                           "Herr Schauspieler (in einer (kleinen) Rolle)\n"
-                                           "Frau Schauspielerin (in einer Rolle)");
-    PRINT_EVENT(*event7);
-    EITFixUp::Fix(*event7);
-    PRINT_EVENT(*event7);
-    QCOMPARE(event7->m_subtitle, QString("<episode title>"));
-    QCOMPARE(event7->m_airdate,  (unsigned short) 2011);
-    QCOMPARE(event7->m_description, QString("<plot summary>"));
-
-    delete event7;
 }
 
 void TestEITFixups::testHTMLFixup()

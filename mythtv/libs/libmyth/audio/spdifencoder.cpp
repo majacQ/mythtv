@@ -1,10 +1,9 @@
-#include "config.h"
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythlogging.h"
 
-#include "mythcorecontext.h"
-
-#include "compat.h"
 #include "spdifencoder.h"
-#include "mythlogging.h"
+
 extern "C" {
 #include "libavformat/avformat.h"
 #include "libavutil/opt.h"
@@ -25,7 +24,7 @@ SPDIFEncoder::SPDIFEncoder(const QString& muxer, AVCodecID codec_id)
 {
     QByteArray dev_ba     = muxer.toLatin1();
 
-    AVOutputFormat *fmt = av_guess_format(dev_ba.constData(), nullptr, nullptr);
+    const AVOutputFormat *fmt = av_guess_format(dev_ba.constData(), nullptr, nullptr);
     if (!fmt)
     {
         LOG(VB_AUDIO, LOG_ERR, LOC + "av_guess_format");
@@ -82,7 +81,7 @@ SPDIFEncoder::SPDIFEncoder(const QString& muxer, AVCodecID codec_id)
     }
 
     LOG(VB_AUDIO, LOG_INFO, LOC + QString("Creating %1 encoder (for %2)")
-            .arg(muxer, ff_codec_id_string(codec_id)));
+            .arg(muxer, avcodec_get_name(codec_id)));
 
     m_complete = true;
 }
@@ -99,17 +98,24 @@ SPDIFEncoder::~SPDIFEncoder(void)
  */
 void SPDIFEncoder::WriteFrame(unsigned char *data, int size)
 {
-    AVPacket packet;
-    av_init_packet(&packet);
-    static int s_pts = 1; // to avoid warning "Encoder did not produce proper pts"
-    packet.pts     = s_pts++;
-    packet.data    = data;
-    packet.size    = size;
+    AVPacket *packet = av_packet_alloc();
+    if (packet == nullptr)
+    {
+        LOG(VB_GENERAL, LOG_ERR, "packet allocation failed");
+        return;
+    }
 
-    if (av_write_frame(m_oc, &packet) < 0)
+    static int s_pts = 1; // to avoid warning "Encoder did not produce proper pts"
+    packet->pts     = s_pts++;
+    packet->data    = data;
+    packet->size    = size;
+
+    if (av_write_frame(m_oc, packet) < 0)
     {
         LOG(VB_AUDIO, LOG_ERR, LOC + "av_write_frame");
     }
+
+    av_packet_free(&packet);
 }
 
 /**
@@ -177,7 +183,7 @@ bool SPDIFEncoder::SetMaxHDRate(int rate)
 /**
  * funcIO: Internal callback function that will receive encoded frames
  */
-int SPDIFEncoder::funcIO(void *opaque, unsigned char *buf, int size)
+int SPDIFEncoder::funcIO(void *opaque, const uint8_t *buf, int size)
 {
     auto *enc = static_cast<SPDIFEncoder *>(opaque);
 
@@ -209,7 +215,7 @@ void SPDIFEncoder::Destroy()
         if (m_oc->pb)
         {
             av_free(m_oc->pb->buffer);
-            av_freep(&m_oc->pb);
+            av_freep(reinterpret_cast<void*>(&m_oc->pb));
         }
         avformat_free_context(m_oc);
         m_oc = nullptr;

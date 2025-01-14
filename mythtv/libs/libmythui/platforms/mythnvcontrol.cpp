@@ -1,20 +1,22 @@
 // MythTV
 #include "mythnvcontrol.h"
-#include "mythlogging.h"
+#include "libmythbase/mythlogging.h"
 
 #define LOC QString("NVCtrl: ")
 
-#define NV_CTRL_TARGET_TYPE_X_SCREEN         0
-#define NV_CTRL_TARGET_TYPE_DISPLAY          8
-#define NV_CTRL_BINARY_DATA_DISPLAYS_ENABLED_ON_XSCREEN 17
-#define NV_CTRL_VRR_ALLOWED                  408
-#define NV_CTRL_DISPLAY_VRR_MODE             429
-#define NV_CTRL_DISPLAY_VRR_MODE_NONE        0
-#define NV_CTRL_DISPLAY_VRR_MODE_GSYNC       1
-#define NV_CTRL_DISPLAY_VRR_MODE_GSYNC_COMPATIBLE 2
-#define NV_CTRL_DISPLAY_VRR_MODE_GSYNC_COMPATIBLE_UNVALIDATED 3
-#define NV_CTRL_DISPLAY_VRR_ENABLED          431
-#define NV_CTRL_DISPLAY_VRR_MIN_REFRESH_RATE 430
+static constexpr int  NV_CTRL_TARGET_TYPE_X_SCREEN                    {   0 };
+static constexpr int  NV_CTRL_TARGET_TYPE_DISPLAY                     {   8 };
+static constexpr uint NV_CTRL_BINARY_DATA_DISPLAYS_ENABLED_ON_XSCREEN {  17 };
+static constexpr uint NV_CTRL_VRR_ALLOWED                             { 408 };
+static constexpr uint NV_CTRL_DISPLAY_VRR_MODE                        { 429 };
+enum NV_CTRL_DISPLAY_VRR_MODES : std::uint8_t {
+    NV_CTRL_DISPLAY_VRR_MODE_NONE                         = 0,
+    NV_CTRL_DISPLAY_VRR_MODE_GSYNC                        = 1,
+    NV_CTRL_DISPLAY_VRR_MODE_GSYNC_COMPATIBLE             = 2,
+    NV_CTRL_DISPLAY_VRR_MODE_GSYNC_COMPATIBLE_UNVALIDATED = 3,
+};
+static constexpr uint NV_CTRL_DISPLAY_VRR_ENABLED                     { 431 };
+static constexpr uint NV_CTRL_DISPLAY_VRR_MIN_REFRESH_RATE            { 430 };
 
 /*! \brief Enable or disable GSync *before* the main window is created.
  *
@@ -149,7 +151,8 @@ NVControl MythNVControl::Create()
             auto queryversion = reinterpret_cast<bool(*)(Display*,int,int)>(lib.resolve("XNVCTRLQueryVersion"));
             if (isnvscreen && queryversion)
             {
-                if (auto * xdisplay = MythXDisplay::OpenMythXDisplay(false); xdisplay && xdisplay->GetDisplay())
+                auto * xdisplay = MythXDisplay::OpenMythXDisplay(false);
+                if (xdisplay && xdisplay->GetDisplay())
                 {
                     int major = 0;
                     int minor = 0;
@@ -162,8 +165,8 @@ NVControl MythNVControl::Create()
                             return res;
                         }
                     }
-                    delete xdisplay;
                 }
+                delete xdisplay;
             }
             lib.unload();
         }
@@ -174,9 +177,9 @@ NVControl MythNVControl::Create()
 /*! \class MythNVControl
  * \brief A simple wrapper around libXNVCtrl - which is dynamically loaded on demand.
 */
-MythNVControl::MythNVControl(const QString &Path, MythXDisplay* _Display)
+MythNVControl::MythNVControl(const QString &Path, MythXDisplay* MDisplay)
   : m_lib(Path),
-    m_display(_Display),
+    m_display(MDisplay),
     m_queryBinary(reinterpret_cast<QueryTargetBinary>(m_lib.resolve("XNVCTRLQueryTargetBinaryData"))),
     m_queryScreen(reinterpret_cast<QueryScreenAttrib>(m_lib.resolve("XNVCTRLQueryAttribute"))),
     m_queryTarget(reinterpret_cast<QueryTargetAttrib>(m_lib.resolve("XNVCTRLQueryTargetAttribute"))),

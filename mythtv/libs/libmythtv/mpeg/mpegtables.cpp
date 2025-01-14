@@ -1,11 +1,12 @@
 // -*- Mode: c++ -*-
 // Copyright (c) 2003-2004, Daniel Thor Kristjansson
 
-#include "splicedescriptors.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/stringutil.h"
+
 #include "atscdescriptors.h"
-#include "mythmiscutil.h" // for xml_indent
-#include "mythlogging.h"
 #include "mpegtables.h"
+#include "splicedescriptors.h"
 
 const std::array<const uint8_t,8> DEFAULT_PAT_HEADER
 {
@@ -106,7 +107,7 @@ bool PSIPTable::HasCRC(void) const
             break;
 //      case TableID::TSDT
 
-        // DVB manditory
+        // DVB mandatory
         case TableID::NIT:
         case TableID::SDT:
         case TableID::PF_EIT:
@@ -327,9 +328,8 @@ bool PSIPTable::VerifyPSIP(bool verify_crc) const
     return true;
 }
 
-ProgramAssociationTable* ProgramAssociationTable::CreateBlank(bool smallPacket)
+ProgramAssociationTable* ProgramAssociationTable::CreateBlank([[maybe_unused]] bool smallPacket)
 {
-    (void) smallPacket; // currently always a small packet..
     TSPacket *tspacket = TSPacket::CreatePayloadOnlyPacket();
     auto *dst = tspacket->data() + sizeof(TSHeader) + 1; /* start of field pointer */
     std::copy(DEFAULT_PAT_HEADER.cbegin(), DEFAULT_PAT_HEADER.cend(), dst);
@@ -623,6 +623,7 @@ bool ProgramMapTable::IsStillPicture(const QString& sistandard) const
         if (IsVideo(i, sistandard))
         {
             return StreamInfoLength(i) > 2 &&
+                   (StreamInfo(i)[0] == DescriptorID::video_stream) &&
                    ((StreamInfo(i)[2] & kStillPictureFlag) != 0);
         }
     }
@@ -779,13 +780,13 @@ QString PSIPTable::toString(void) const
 
 QString PSIPTable::toStringXML(uint indent_level) const
 {
-    QString indent = xml_indent(indent_level);
+    QString indent = StringUtil::indentSpaces(indent_level);
     return indent + "<PSIPSection " + XMLValues(indent_level + 1) + " />";
 }
 
 QString PSIPTable::XMLValues(uint indent_level) const
 {
-    QString indent = xml_indent(indent_level);
+    QString indent = StringUtil::indentSpaces(indent_level);
 
     QString str = QString(
         R"(table_id="0x%1" length="%2")")
@@ -803,7 +804,7 @@ QString PSIPTable::XMLValues(uint indent_level) const
         str += QString("\n%1version=\"%2\" current=\"%3\" "
                        "protocol_version=\"%4\" extension=\"0x%5\"")
             .arg(indent)
-            .arg(Version()).arg(xml_bool_to_string(IsCurrent()))
+            .arg(Version()).arg(StringUtil::bool_to_string(IsCurrent()))
             .arg(ATSCProtocolVersion())
             .arg(TableIDExtension(), 0, 16);
     }
@@ -851,8 +852,8 @@ QString ProgramAssociationTable::toString(void) const
 
 QString ProgramAssociationTable::toStringXML(uint indent_level) const
 {
-    QString indent_0 = xml_indent(indent_level);
-    QString indent_1 = xml_indent(indent_level + 1);
+    QString indent_0 = StringUtil::indentSpaces(indent_level);
+    QString indent_1 = StringUtil::indentSpaces(indent_level + 1);
 
     QString str = QString(
         "%1<ProgramAssociationSection tsid=\"0x%2\" program_count=\"%3\""
@@ -913,8 +914,8 @@ QString ProgramMapTable::toString(void) const
 
 QString ProgramMapTable::toStringXML(uint indent_level) const
 {
-    QString indent_0 = xml_indent(indent_level);
-    QString indent_1 = xml_indent(indent_level + 1);
+    QString indent_0 = StringUtil::indentSpaces(indent_level);
+    QString indent_1 = StringUtil::indentSpaces(indent_level + 1);
 
     QString str = QString(
         "%1<ProgramMapSection pcr_pid=\"0x%2\" program_number=\"%3\"\n"
@@ -1110,12 +1111,12 @@ QString StreamID::GetDescription(uint stream_id)
         case StreamID::MPEG2IPMP2:
             return "13818-10 IPMP2";
 
-        case AnyMask:  return QString();
+        case AnyMask:  return {};
         case AnyVideo: return "video";
         case AnyAudio: return "audio";
     }
 
-    return QString();
+    return {};
 }
 
 QString ProgramMapTable::GetLanguage(uint i) const
@@ -1126,7 +1127,7 @@ QString ProgramMapTable::GetLanguage(uint i) const
         list, DescriptorID::iso_639_language);
 
     if (!lang_desc)
-        return QString();
+        return {};
 
     ISO639LanguageDescriptor iso_lang(lang_desc);
     if (!iso_lang.IsValid())
@@ -1188,7 +1189,7 @@ QString ConditionalAccessTable::toString(void) const
 
 QString ConditionalAccessTable::toStringXML(uint indent_level) const
 {
-    QString indent_0 = xml_indent(indent_level);
+    QString indent_0 = StringUtil::indentSpaces(indent_level);
 
     QString str =
         QString("%1<ConditionalAccessSection %3")
@@ -1212,7 +1213,7 @@ QString ConditionalAccessTable::toStringXML(uint indent_level) const
 QString SpliceTimeView::toString(int64_t first, int64_t last) const
 {
     if (!IsTimeSpecified())
-        return QString("splice_time(N/A)");
+        return {"splice_time(N/A)"};
 
     int64_t abs_pts_time = PTSTime();
     if ((first > 0) && (last > 0))
@@ -1237,7 +1238,7 @@ QString SpliceTimeView::toString(int64_t first, int64_t last) const
 QString SpliceTimeView::toStringXML(
     uint indent_level, int64_t first, int64_t last) const
 {
-    QString indent = xml_indent(indent_level);
+    QString indent = StringUtil::indentSpaces(indent_level);
 
     if (!IsTimeSpecified())
         return indent + "<SpliceTime />";
@@ -1464,7 +1465,7 @@ QString SpliceInsertView::toString(int64_t first, int64_t last) const
 QString SpliceInformationTable::toStringXML(
     uint indent_level, int64_t first, int64_t last) const
 {
-    QString indent = xml_indent(indent_level);
+    QString indent = StringUtil::indentSpaces(indent_level);
 
     QString cap_time = "";
     if (first >= 0)
@@ -1513,26 +1514,26 @@ QString SpliceInformationTable::toStringXML(
 QString SpliceInsertView::toStringXML(
     uint indent_level, int64_t first, int64_t last) const
 {
-    QString indent_0 = xml_indent(indent_level);
-    QString indent_1 = xml_indent(indent_level + 1);
+    QString indent_0 = StringUtil::indentSpaces(indent_level);
+    QString indent_1 = StringUtil::indentSpaces(indent_level + 1);
     QString str = QString(
         "%1<SpliceInsert eventid=\"0x%2\" cancel=\"%3\"\n")
         .arg(indent_0)
         .arg(SpliceEventID(),0,16)
-        .arg(xml_bool_to_string(IsSpliceEventCancel()));
+        .arg(StringUtil::bool_to_string(IsSpliceEventCancel()));
 
     str += QString(
         "%1out_of_network=\"%2\" program_splice=\"%3\" duration=\"%4\"\n")
         .arg(indent_1,
-             xml_bool_to_string(IsOutOfNetwork()),
-             xml_bool_to_string(IsProgramSplice()),
-             xml_bool_to_string(IsDuration()));
+             StringUtil::bool_to_string(IsOutOfNetwork()),
+             StringUtil::bool_to_string(IsProgramSplice()),
+             StringUtil::bool_to_string(IsDuration()));
 
     str += QString(
         "%1immediate=\"%2\" unique_program_id=\"%3\"\n"
         "%4avail_num=\"%5\" avails_expected=\"%6\">\n")
         .arg(indent_1,
-             xml_bool_to_string(IsSpliceImmediate()))
+             StringUtil::bool_to_string(IsSpliceImmediate()))
         .arg(UniqueProgramID())
         .arg(indent_1)
         .arg(AvailNum())

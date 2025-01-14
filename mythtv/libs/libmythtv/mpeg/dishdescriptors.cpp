@@ -6,13 +6,13 @@
 // MythTV headers
 #include "dishdescriptors.h"
 #include "atsc_huffman.h"
-#include "programinfo.h" // for subtitle types and audio and video properties
+#include "libmythbase/programinfo.h" // for subtitle types and audio and video properties
 #include "dvbtables.h"
 
 QString DishEventNameDescriptor::Name(uint compression_type) const
 {
     if (!HasName())
-        return QString();
+        return {};
 
     return atsc_huffman2_to_string(
         m_data + 3, DescriptorLength() - 1, compression_type);
@@ -45,7 +45,7 @@ QString DishEventDescriptionDescriptor::Description(
     if (raw && len)
         return atsc_huffman2_to_string(raw, len, compression_type);
 
-    return QString();
+    return {};
 }
 
 bool DishEventPropertiesDescriptor::s_decompressed = false;
@@ -89,7 +89,7 @@ QString DishEventTagsDescriptor::programid(void) const
     QString prefix = QString("");
 
     if (DescriptorLength() != 8)
-        return QString();
+        return {};
 
     QString series = seriesid();
     series.remove(0, 2);
@@ -106,8 +106,11 @@ QString DishEventTagsDescriptor::programid(void) const
             prefix = "EP";
         else
             prefix = "SH";
-    } else
+    }
+    else
+    {
         return prefix;
+    }
 
     QString id = QString("%1%2%3").arg(prefix, series).arg(episode, 4, 0);
 
@@ -119,7 +122,7 @@ QString DishEventTagsDescriptor::seriesid(void) const
     QString prefix = QString("");
 
     if (DescriptorLength() != 8)
-        return QString();
+        return {};
 
     if (m_data[2] == 0x7c)
         prefix = "MV";

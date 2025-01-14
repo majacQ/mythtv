@@ -1,8 +1,14 @@
+// C++
+#include <array>
+
+// Qt
 #include <QCoreApplication>
 
-#include <mythdb.h>
-#include <mythdirs.h>
+// MythTV
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdirs.h>
 
+// MythGame
 #include "gamesettings.h"
 
 struct GameTypes {
@@ -397,7 +403,9 @@ void GamePlayersList::NewPlayerDialog() const
                 this,       &GamePlayersList::CreateNewPlayer);
     }
     else
+    {
         delete nameDialog;
+    }
 }
 
 void GamePlayersList::CreateNewPlayer(const QString& name)
@@ -406,7 +414,7 @@ void GamePlayersList::CreateNewPlayer(const QString& name)
         return;
 
     // Database name must be unique
-    for (StandardSetting* child : qAsConst(*getSubSettings()))
+    for (StandardSetting* child : std::as_const(*getSubSettings()))
     {
         if (child->getName() == name)
         {

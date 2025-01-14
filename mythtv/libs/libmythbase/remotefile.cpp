@@ -11,16 +11,8 @@
 
 #include "mythconfig.h"
 
-#ifndef O_STREAMING
-#define O_STREAMING 0
-#endif
-
 #ifndef O_LARGEFILE
-#define O_LARGEFILE 0
-#endif
-
-#ifndef O_BINARY
-#define O_BINARY 0
+static constexpr int8_t O_LARGEFILE { 0 };
 #endif
 
 #include "mythdb.h"
@@ -61,10 +53,14 @@ static bool RemoteSendReceiveStringList(const QString &host, QStringList &strlis
             sock->DecrRef();
         }
         else
+        {
             strlist.clear();
+        }
     }
     else
+    {
         ok = gCoreContext->SendReceiveStringList(strlist);
+    }
 
     return ok;
 }
@@ -82,7 +78,9 @@ RemoteFile::RemoteFile(QString url, bool write, bool usereadahead,
         m_timeoutMs = -1ms;
     }
     else if (possibleAuxiliaryFiles)
+    {
         m_possibleAuxFiles = *possibleAuxiliaryFiles;
+    }
 
     if (!m_path.isEmpty())
         Open();
@@ -190,7 +188,7 @@ MythSocket *RemoteFile::openSocket(bool control)
         strlist << QString("%1").arg(dir);
         strlist << sgroup;
 
-        for (const auto& fname : qAsConst(m_possibleAuxFiles))
+        for (const auto& fname : std::as_const(m_possibleAuxFiles))
             strlist << fname;
 
         if (!lsock->SendReceiveStringList(strlist))
@@ -376,7 +374,8 @@ void RemoteFile::Close(bool haslock)
 {
     if (isLocal())
     {
-        ::close(m_localFile);
+        if (m_localFile >= 0)
+            ::close(m_localFile);
         m_localFile = -1;
         delete m_fileWriter;
         m_fileWriter = nullptr;
@@ -569,7 +568,7 @@ QString RemoteFile::GetFileHash(const QString &url)
         filename = filename.right(filename.length()-1);
 
     if (filename.isEmpty() || sgroup.isEmpty())
-        return QString();
+        return {};
 
     QStringList strlist("QUERY_FILE_HASH");
     strlist << filename;
@@ -791,7 +790,9 @@ long long RemoteFile::SeekInternal(long long pos, int whence, long long curpos)
             offset = ((curpos > 0) ? curpos : ::lseek64(m_localFile, 0, SEEK_CUR)) + pos;
         }
         else
+        {
             return -1;
+        }
 
         off64_t localpos = ::lseek64(m_localFile, pos, whence);
         if (localpos != pos)
@@ -1073,7 +1074,9 @@ int RemoteFile::Read(void *data, int size)
             LOG(VB_GENERAL, LOG_WARNING, "RemoteFile::Read(): Resume failed.");
         }
         else
+        {
             LOG(VB_GENERAL, LOG_NOTICE, "RemoteFile::Read(): Resume success.");
+        }
     }
     else
     {
@@ -1288,7 +1291,7 @@ QString RemoteFile::FindFile(const QString& filename, const QString& host,
     if (!files.isEmpty())
         return files[0];
 
-    return QString();
+    return {};
 }
 
 /**
@@ -1310,7 +1313,7 @@ QStringList RemoteFile::FindFileList(const QString& filename, const QString& hos
                                    .arg(useRegex).arg(allowFallback));
 
     if (filename.isEmpty() || storageGroup.isEmpty())
-        return QStringList();
+        return {};
 
     QStringList strList;
     QString hostName = host;
@@ -1341,7 +1344,7 @@ QStringList RemoteFile::FindFileList(const QString& filename, const QString& hos
             }
 
             QStringList filteredFiles = files.filter(QRegularExpression(fi.fileName()));
-            for (const QString& file : qAsConst(filteredFiles))
+            for (const QString& file : std::as_const(filteredFiles))
             {
                 strList << MythCoreContext::GenMythURL(gCoreContext->GetHostName(),
                                                        gCoreContext->GetBackendServerPort(),
@@ -1378,7 +1381,7 @@ QStringList RemoteFile::FindFileList(const QString& filename, const QString& hos
         }
     }
 
-    return QStringList();
+    return {};
 }
 
 /**

@@ -4,19 +4,18 @@
 #include <unistd.h>
 
 // qt
-#include <QKeyEvent>
-#include <QFile>
-#include <QTextStream>
 #include <QCoreApplication>
+#include <QFile>
+#include <QKeyEvent>
+#include <QTextStream>
 
 // mythtv
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythmainwindow.h>
-#include <mythdialogbox.h>
-#include <mythuibutton.h>
-#include <mythuibuttonlist.h>
-#include <mythuitext.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythui/mythdialogbox.h>
+#include <libmythui/mythmainwindow.h>
+#include <libmythui/mythuibutton.h>
+#include <libmythui/mythuibuttonlist.h>
+#include <libmythui/mythuitext.h>
 
 // mytharchive
 #include "archiveutil.h"
@@ -73,16 +72,10 @@ void showLogViewer(void)
             mainStack->AddScreen(viewer);
     }
     else
+    {
         showWarningDialog(QCoreApplication::translate("LogViewer",
             "Cannot find any logs to show!"));
-}
-
-LogViewer::LogViewer(MythScreenStack *parent) :
-    MythScreenType(parent, "logviewer")
-{
-    m_updateTime = gCoreContext->GetDurSetting<std::chrono::seconds>(
-        "LogViewerUpdateTime", DEFAULT_UPDATE_TIME);
-    m_autoUpdate = gCoreContext->GetBoolSetting("LogViewerAutoUpdate", true);
+    }
 }
 
 LogViewer::~LogViewer(void)
@@ -147,7 +140,7 @@ bool LogViewer::keyPressEvent(QKeyEvent *event)
 
     for (int i = 0; i < actions.size() && !handled; i++)
     {
-        QString action = actions[i];
+        const QString& action = actions[i];
         handled = true;
 
         if (action == "MENU")
@@ -212,7 +205,7 @@ void LogViewer::updateClicked(void)
                 (m_logList->GetCount() == m_logList->GetCurrentPos() + 1) ||
                 (m_logList->GetCurrentPos() == 0);
 
-        for (const auto & label : qAsConst(list))
+        for (const auto & label : std::as_const(list))
             new MythUIButtonListItem(m_logList, label);
 
         if (bUpdateCurrent)
@@ -260,7 +253,7 @@ QString LogViewer::getSetting(const QString &key)
                 .arg(key));
     }
 
-    return QString("");
+    return {""};
 }
 
 bool LogViewer::loadFile(const QString& filename, QStringList &list, int startline)
@@ -305,7 +298,9 @@ bool LogViewer::loadFile(const QString& filename, QStringList &list, int startli
         file.close();
     }
     else
+    {
         return false;
+    }
 
     return true;
 }

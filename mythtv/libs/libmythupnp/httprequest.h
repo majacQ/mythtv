@@ -6,7 +6,7 @@
 //
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //
-// Licensed under the GPL v2 or later, see COPYING for details
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -24,23 +24,24 @@
 #include <QTextStream>
 
 // MythTV headers
-#include "mythsession.h"
+#include "libmythbase/mythsession.h"
 
 #include "upnpexp.h"
 #include "upnputil.h"
 #include "serializers/serializer.h"
 
-#define SOAP_ENVELOPE_BEGIN  "<s:Envelope xmlns:s=\"htstp://schemas.xmlsoap.org/soap/envelope/\" " \
-                             "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"     \
-                             "<s:Body>"
-#define SOAP_ENVELOPE_END    "</s:Body>\r\n</s:Envelope>";
+static constexpr const char* SOAP_ENVELOPE_BEGIN
+{ "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" " \
+  "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"      \
+  "<s:Body>" };
+static constexpr const char* SOAP_ENVELOPE_END { "</s:Body>\r\n</s:Envelope>" };
 
 
 /////////////////////////////////////////////////////////////////////////////
 // Typedefs / Defines
 /////////////////////////////////////////////////////////////////////////////
 
-enum HttpRequestType
+enum HttpRequestType : std::uint16_t
 {
     RequestTypeUnknown      = 0x0000,
     // HTTP 1.1
@@ -62,7 +63,7 @@ enum HttpRequestType
 
 };
 
-enum HttpContentType
+enum HttpContentType : std::uint8_t
 {
     ContentType_Unknown    = 0,
     ContentType_Urlencoded = 1,
@@ -70,7 +71,7 @@ enum HttpContentType
     ContentType_JSON       = 3,
 };
 
-enum HttpResponseType
+enum HttpResponseType : std::int8_t
 {
     ResponseTypeNone     = -1,
     ResponseTypeUnknown  =  0,

@@ -15,17 +15,19 @@
 
 // Qt headers
 #include <QCoreApplication>
+#include <QRegularExpression>
 #include <QUrl>
 #include <QUrlQuery>
 
 // MythTV headers
-#include "cetonstreamhandler.h"
-#include "streamlisteners.h"
-#include "mpegstreamdata.h"
-#include "cetonchannel.h"
-#include "mythlogging.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythlogging.h"
+
 #include "cardutil.h"
-#include "mythdownloadmanager.h"
+#include "cetonchannel.h"
+#include "cetonstreamhandler.h"
+#include "mpeg/mpegstreamdata.h"
+#include "mpeg/streamlisteners.h"
 
 #define LOC QString("CetonSH[%1](%2): ").arg(m_inputId).arg(m_device)
 
@@ -315,12 +317,16 @@ bool CetonStreamHandler::TuneFrequency(
     if (frequency >= 100000000)
         frequency /= 1000;
 
-    QString modulation_id = (modulation == "qam_256") ? "2" :
-                            (modulation == "qam_64")  ? "0" :
-                            (modulation == "ntsc-m") ? "4" :
-                            (modulation == "8vsb")   ? "6" :
-                                                       "";
-    if (modulation_id == "")
+    QString modulation_id;
+    if (modulation == "qam_256")
+        modulation_id = "2";
+    else if (modulation == "qam_64")
+        modulation_id = "0";
+    else if (modulation == "ntsc-m")
+        modulation_id = "4";
+    else if (modulation == "8vsb")
+        modulation_id = "6";
+    else
         return false;
 
     m_lastFrequency = frequency;
@@ -482,7 +488,7 @@ QString CetonStreamHandler::GetVar(
     {
         LOG(VB_GENERAL, LOG_ERR, loc +
             QString("HttpRequest failed - %1").arg(response));
-        return QString();
+        return {};
     }
 
     static const QRegularExpression regex { "^\\{ \"?result\"?: \"(.*)\" \\}$"};
@@ -491,7 +497,7 @@ QString CetonStreamHandler::GetVar(
     {
         LOG(VB_GENERAL, LOG_ERR, loc +
             QString("unexpected http response: -->%1<--").arg(response));
-        return QString();
+        return {};
     }
 
     QString result = match.captured(1);
@@ -513,7 +519,7 @@ QStringList CetonStreamHandler::GetProgramList()
     {
         LOG(VB_GENERAL, LOG_ERR,
             loc + QString("HttpRequest failed - %1").arg(response));
-        return QStringList();
+        return {};
     }
 
     static const QRegularExpression regex(
@@ -525,7 +531,7 @@ QStringList CetonStreamHandler::GetProgramList()
         LOG(VB_GENERAL, LOG_ERR,
             loc + QString("returned unexpected output: -->%1<--")
             .arg(response));
-        return QStringList();
+        return {};
     }
 
     LOG(VB_RECORD, LOG_DEBUG, loc + QString("got: -->%1<--")

@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <random>
+#include <algorithm>
 
 // QT
 #include <QCoreApplication>
@@ -18,19 +20,18 @@
 #include <QRunnable>
 
 // libmythbase
-#include "mythlogging.h"
-#include "mythmiscutil.h"
-#include "mthreadpool.h"
+#include "libmythbase/mthreadpool.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythmiscutil.h"
+#ifdef _MSC_VER
+#  include "libmythbase/compat.h"   // random
+#endif
 
 // Mythui
 #include "mythpainter.h"
 #include "mythmainwindow.h"
 #include "mythuihelper.h"
 #include "mythscreentype.h"
-
-#ifdef _MSC_VER
-#  include "compat.h"   // random
-#endif
 
 class ImageLoadThread;
 
@@ -59,6 +60,9 @@ ImageProperties::~ImageProperties()
         m_maskImage->DecrRef();
 }
 
+// The m_maskImage field is assigned in the call to SetMaskImage().
+//
+// cppcheck-suppress operatorEqVarError
 void ImageProperties::Copy(const ImageProperties &other)
 {
     m_filename = other.m_filename;
@@ -348,7 +352,9 @@ class ImageLoader
                     imProps.SetMaskImage(newMaskImage);
                 }
                 else
+                {
                     imProps.SetMaskImage(nullptr);
+                }
                 newMaskImage->DecrRef();
 
                 QRect imageArea = image->rect();
@@ -458,7 +464,7 @@ class ImageLoadEvent : public QEvent
     AnimationFrames *GetAnimationFrames() const { return m_images; }
     bool GetAbortState() const        { return m_aborted; }
 
-    static Type kEventType;
+    static const Type kEventType;
 
   private:
     const MythUIImage *m_parent   {nullptr};
@@ -474,7 +480,7 @@ class ImageLoadEvent : public QEvent
     bool               m_aborted;
 };
 
-QEvent::Type ImageLoadEvent::kEventType =
+const QEvent::Type ImageLoadEvent::kEventType =
     (QEvent::Type) QEvent::registerEventType();
 
 /*!
@@ -556,44 +562,39 @@ public:
 MythUIImage::MythUIImage(const QString &filepattern,
                          int low, int high, std::chrono::milliseconds delay,
                          MythUIType *parent, const QString &name)
-    : MythUIType(parent, name)
+    : MythUIType(parent, name),
+      m_delay(delay),
+      m_lowNum(low),
+      m_highNum(high),
+      d(new MythUIImagePrivate(this))
 {
     m_imageProperties.m_filename = filepattern;
-    m_lowNum = low;
-    m_highNum = high;
 
-    m_delay = delay;
     m_enableInitiator = true;
 
-    d = new MythUIImagePrivate(this);
     emit DependChanged(false);
 }
 
 MythUIImage::MythUIImage(const QString &filename, MythUIType *parent,
                          const QString &name)
-    : MythUIType(parent, name)
+    : MythUIType(parent, name),
+      m_origFilename(filename),
+      m_delay(-1ms),
+      d(new MythUIImagePrivate(this))
 {
     m_imageProperties.m_filename = filename;
-    m_origFilename = filename;
 
-    m_lowNum = 0;
-    m_highNum = 0;
-    m_delay = -1ms;
     m_enableInitiator = true;
 
-    d = new MythUIImagePrivate(this);
     emit DependChanged(false);
 }
 
 MythUIImage::MythUIImage(MythUIType *parent, const QString &name)
-    : MythUIType(parent, name)
+    : MythUIType(parent, name),
+      m_delay(-1ms),
+      d(new MythUIImagePrivate(this))
 {
-    m_lowNum = 0;
-    m_highNum = 0;
-    m_delay = -1ms;
     m_enableInitiator = true;
-
-    d = new MythUIImagePrivate(this);
 }
 
 MythUIImage::~MythUIImage()
@@ -619,14 +620,12 @@ void MythUIImage::Clear(void)
     QWriteLocker updateLocker(&d->m_updateLock);
     QMutexLocker locker(&m_imagesLock);
 
-    while (!m_images.isEmpty())
+    for (auto it = m_images.begin();
+         it != m_images.end();
+         it = m_images.erase(it))
     {
-        QHash<int, MythImage *>::iterator it = m_images.begin();
-
         if (*it)
             (*it)->DecrRef();
-
-        m_images.remove(it.key());
     }
 
     m_delays.clear();
@@ -665,7 +664,9 @@ void MythUIImage::Reset(void)
         Load();
     }
     else
+    {
         d->m_updateLock.unlock();
+    }
 
     MythUIType::Reset();
 }
@@ -731,7 +732,7 @@ void MythUIImage::SetDelays(const QVector<std::chrono::milliseconds>& delays)
     QWriteLocker updateLocker(&d->m_updateLock);
     QMutexLocker imageLocker(&m_imagesLock);
 
-    for (std::chrono::milliseconds delay : qAsConst(delays))
+    for (std::chrono::milliseconds delay : std::as_const(delays))
         m_delays[m_delays.size()] = delay;
 
     if (m_delay == -1ms)
@@ -816,7 +817,7 @@ void MythUIImage::SetImages(QVector<MythImage *> *images)
 
     m_imageProperties.m_isThemeImage = false;
 
-    for (auto *im : qAsConst(*images))
+    for (auto *im : std::as_const(*images))
     {
         if (!im)
         {
@@ -878,7 +879,7 @@ void MythUIImage::SetAnimationFrames(const AnimationFrames& frames)
     QVector<std::chrono::milliseconds> delays;
     QVector<MythImage *> images;
 
-    for (const auto & frame : qAsConst(frames))
+    for (const auto & frame : std::as_const(frames))
     {
         images.append(frame.first);
         delays.append(frame.second);
@@ -892,7 +893,9 @@ void MythUIImage::SetAnimationFrames(const AnimationFrames& frames)
             SetDelays(delays);
     }
     else
+    {
         Reset();
+    }
 }
 
 /**
@@ -1281,7 +1284,9 @@ void MythUIImage::DrawSelf(MythPainter *p, int xoffset, int yoffset,
         d->m_updateLock.unlock();
     }
     else
+    {
         m_imagesLock.unlock();
+    }
 }
 
 /**
@@ -1330,9 +1335,13 @@ bool MythUIImage::ParseElement(
         m_imageProperties.m_forceSize = m_area.size();
     }
     else if (element.tagName() == "preserveaspect")
+    {
         m_imageProperties.m_preserveAspect = parseBool(element);
+    }
     else if (element.tagName() == "crop")
+    {
         m_imageProperties.m_cropRect = parseRect(element);
+    }
     else if (element.tagName() == "delay")
     {
         QString value = getFirstText(element);
@@ -1341,7 +1350,7 @@ bool MythUIImage::ParseElement(
         {
             QVector<std::chrono::milliseconds> delays;
             QStringList tokens = value.split(",");
-            for (const auto & token : qAsConst(tokens))
+            for (const auto & token : std::as_const(tokens))
             {
                 if (token.isEmpty())
                 {
@@ -1476,7 +1485,9 @@ void MythUIImage::CopyFrom(MythUIType *base)
         Load();
     }
     else
+    {
         d->m_updateLock.unlock();
+    }
 }
 
 /**
@@ -1502,7 +1513,9 @@ void MythUIImage::Finalize(void)
         Load();
     }
     else
+    {
         d->m_updateLock.unlock();
+    }
 
     MythUIType::Finalize();
 }
@@ -1567,7 +1580,7 @@ void MythUIImage::customEvent(QEvent *event)
 
             if (animationFrames)
             {
-                for (const auto & frame : qAsConst(*animationFrames))
+                for (const auto & frame : std::as_const(*animationFrames))
                 {
                     MythImage *im = frame.first;
                     if (im)
@@ -1634,36 +1647,65 @@ void MythUIImage::customEvent(QEvent *event)
 
 void MythUIImage::FindRandomImage(void)
 {
-    QDir imageDir(m_imageDirectory);
-
-    if (!imageDir.exists())
-    {
-        QString themeDir = GetMythUI()->GetThemeDir() + '/';
-        imageDir.setPath(themeDir + m_imageDirectory);
-    }
-
-    QStringList imageTypes;
-
-    QList< QByteArray > exts = QImageReader::supportedImageFormats();
-    for (const auto & ext : qAsConst(exts))
-    {
-        imageTypes.append(QString("*.").append(ext));
-    }
-
-    imageDir.setNameFilters(imageTypes);
-
-    QStringList imageList = imageDir.entryList();
     QString randFile;
 
-    if (!imageList.empty())
+    // find and save the list of available images
+    if (m_imageList.isEmpty())
     {
-        // try to find a different image
-        do
-        {
-            uint32_t rand = MythRandom() % static_cast<uint32_t>(imageList.size());
-            randFile = QString("%1%2").arg(m_imageDirectory, imageList.takeAt(static_cast<int>(rand)));
+        QDir imageDir(m_imageDirectory);
 
-        } while (imageList.size() > 1 && randFile == m_origFilename);
+        if (!imageDir.exists())
+        {
+            QString themeDir = GetMythUI()->GetThemeDir() + '/';
+            imageDir.setPath(themeDir + m_imageDirectory);
+        }
+
+        QStringList imageTypes;
+
+        QList< QByteArray > exts = QImageReader::supportedImageFormats();
+        for (const auto & ext : std::as_const(exts))
+        {
+            imageTypes.append(QString("*.").append(ext));
+        }
+
+        imageDir.setNameFilters(imageTypes);
+
+        m_imageList = imageDir.entryList();
+
+        if (m_imageList.empty())
+        {
+            m_origFilename = m_imageProperties.m_filename = randFile;
+            return;
+        }
+
+        // randomly shuffle the images
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(m_imageList.begin(), m_imageList.end(), g);
+        m_imageListIndex = 0;
+        randFile = QString("%1%2").arg(m_imageDirectory, m_imageList.at(m_imageListIndex));
+    }
+    else
+    {
+        if (!m_imageList.empty())
+        {
+            m_imageListIndex++;
+
+            // if we are at the last image in the list re-shuffle the list and start from the beginning
+            if (m_imageListIndex == m_imageList.size())
+            {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(m_imageList.begin(), m_imageList.end(), g);
+                m_imageListIndex = 0;
+            }
+
+            // make sure we don't show the same image again in the unlikely event the re-shuffle shows the same image again 
+            if (m_imageList.at(m_imageListIndex) == m_origFilename && m_imageList.size() > 1)
+                m_imageListIndex++;
+
+            randFile = QString("%1%2").arg(m_imageDirectory, m_imageList.at(m_imageListIndex));
+        }
     }
 
     m_origFilename = m_imageProperties.m_filename = randFile;

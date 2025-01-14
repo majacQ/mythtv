@@ -1,22 +1,22 @@
 
 // QT headers
+#include <QApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
-#include <QApplication>
 
 // MythTV headers
-#include <mythcontext.h>
-#include <mythdbcon.h>
-#include <mythdb.h>
-#include <mythprogressdialog.h>
-#include <mythdirs.h>
+#include <libmyth/mythcontext.h>
+#include <libmythbase/mythdb.h>
+#include <libmythbase/mythdbcon.h>
+#include <libmythbase/mythdirs.h>
+#include <libmythui/mythprogressdialog.h>
 
 // MythWeather headers
+#include "sourceManager.h"
 #include "weatherScreen.h"
 #include "weatherSource.h"
-#include "sourceManager.h"
 
 #define LOC QString("SourceManager: ")
 #define LOC_ERR QString("SourceManager Error: ")
@@ -196,7 +196,7 @@ void SourceManager::setupSources()
 ScriptInfo *SourceManager::getSourceByName(const QString &name)
 {
     ScriptInfo *src = nullptr;
-    for (auto *script : qAsConst(m_scripts))
+    for (auto *script : std::as_const(m_scripts))
     {
         src = script;
         if (src->name == name)
@@ -216,7 +216,7 @@ ScriptInfo *SourceManager::getSourceByName(const QString &name)
 QStringList SourceManager::getLocationList(ScriptInfo *si, const QString &str)
 {
     if (!m_scripts.contains(si))
-        return QStringList();
+        return {};
     auto *ws = new WeatherSource(si);
 
     QStringList locationList(ws->getLocationList(str));
@@ -230,7 +230,7 @@ WeatherSource *SourceManager::needSourceFor(int id, const QString &loc,
                                             units_t units)
 {
     // matching source exists?
-    for (auto *src : qAsConst(m_sources))
+    for (auto *src : std::as_const(m_sources))
     {
         if (src->getId() == id && src->getLocale() == loc &&
             src->getUnits() == units)
@@ -259,19 +259,19 @@ WeatherSource *SourceManager::needSourceFor(int id, const QString &loc,
 
 void SourceManager::startTimers()
 {
-    for (auto *src : qAsConst(m_sources))
+    for (auto *src : std::as_const(m_sources))
         src->startUpdateTimer();
 }
 
 void SourceManager::stopTimers()
 {
-    for (auto *src : qAsConst(m_sources))
+    for (auto *src : std::as_const(m_sources))
         src->stopUpdateTimer();
 }
 
 void SourceManager::doUpdate(bool forceUpdate)
 {
-    for (auto *src : qAsConst(m_sources))
+    for (auto *src : std::as_const(m_sources))
     {
         if (src->inUse())
             src->startUpdate(forceUpdate);
@@ -281,7 +281,7 @@ void SourceManager::doUpdate(bool forceUpdate)
 bool SourceManager::findPossibleSources(QStringList types,
                                         QList<ScriptInfo *> &sources)
 {
-    for (auto *si : qAsConst(m_scripts))
+    for (auto *si : std::as_const(m_scripts))
     {
         QStringList stypes = si->types;
         bool handled = true;
@@ -357,7 +357,7 @@ void SourceManager::recurseDirs( QDir dir )
                   QDir::NoDotAndDotDot);
     QFileInfoList files = dir.entryInfoList();
 
-    for (const auto & file : files)
+    for (const auto & file : std::as_const(files))
     {
         QCoreApplication::processEvents();
         if (file.isDir())

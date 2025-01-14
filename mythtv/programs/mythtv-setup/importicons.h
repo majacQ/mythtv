@@ -13,10 +13,12 @@
 #ifndef IMPORTICONS_H
 #define IMPORTICONS_H
 
-#include <QUrl>
+// Qt
 #include <QDir>
+#include <QUrl>
 
-#include "mythscreentype.h"
+// MythTV
+#include "libmythui/mythscreentype.h"
 
 class MythUIButton;
 class MythUIButtonList;
@@ -48,7 +50,7 @@ class ImportIconsWizard : public MythScreenType
 
   private:
 
-    enum dialogState
+    enum dialogState : std::uint8_t
     {
         STATE_NORMAL,
         STATE_SEARCHING,

@@ -3,114 +3,35 @@
 #include <sys/types.h>
 
 // ANSI C headers
+#include <algorithm>
 #include <cstdlib>
 
 // Qt headers
-#include <QStringList>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
+#include <QStringList>
 
 // MythTV headers
+#include "libmythbase/exitcodes.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdb.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythdownloadmanager.h"
+#include "libmythbase/mythsystemlegacy.h"
+#include "libmythbase/mythversion.h"
+#include "libmythbase/programtypes.h"
+#include "libmythbase/recordingstatus.h"
+#include "libmythbase/recordingtypes.h"
+#include "libmythbase/unziputil.h"
+#include "libmythmetadata/musicmetadata.h"
+#include "libmythtv/jobqueue.h"
+
+// MythBackend
 #include "backendhousekeeper.h"
-#include "mythdb.h"
-#include "mythdirs.h"
-#include "jobqueue.h"
-#include "exitcodes.h"
-#include "mythsystemlegacy.h"
-#include "mythversion.h"
-#include "mythcoreutil.h"
-#include "programtypes.h"
-#include "recordingtypes.h"
-#include "mythcorecontext.h"
-#include "mythdownloadmanager.h"
-#include "musicmetadata.h"
 
-#include "enums/recStatus.h"
-
-#if QT_VERSION < QT_VERSION_CHECK(5,15,2)
-#define capturedView capturedRef
-#endif
-
-bool LogCleanerTask::DoRun(void)
-{
-    int numdays = 14;
-    uint64_t maxrows = 10000 * numdays;  // likely high enough to keep numdays
-    bool res = true;
-
-    MSqlQuery query(MSqlQuery::InitCon());
-    if (query.isConnected())
-    {
-        // Remove less-important logging after 1/2 * numdays days
-        QDateTime days = MythDate::current();
-        days = days.addDays(0 - (numdays / 2));
-        QString sql = "DELETE FROM logging "
-                      " WHERE application NOT IN (:MYTHBACKEND, :MYTHFRONTEND) "
-                      "   AND msgtime < :DAYS ;";
-        query.prepare(sql);
-        query.bindValue(":MYTHBACKEND", MYTH_APPNAME_MYTHBACKEND);
-        query.bindValue(":MYTHFRONTEND", MYTH_APPNAME_MYTHFRONTEND);
-        query.bindValue(":DAYS", days);
-        LOG(VB_GENERAL, LOG_DEBUG,
-            QString("Deleting helper application database log entries "
-                    "from before %1.") .arg(days.toString(Qt::ISODate)));
-        if (!query.exec())
-        {
-            MythDB::DBError("Delete helper application log entries", query);
-            res = false;
-        }
-
-        // Remove backend/frontend logging after numdays days
-        days = MythDate::current();
-        days = days.addDays(0 - numdays);
-        sql = "DELETE FROM logging WHERE msgtime < :DAYS ;";
-        query.prepare(sql);
-        query.bindValue(":DAYS", days);
-        LOG(VB_GENERAL, LOG_DEBUG,
-            QString("Deleting database log entries from before %1.")
-            .arg(days.toString(Qt::ISODate)));
-        if (!query.exec())
-        {
-            MythDB::DBError("Delete old log entries", query);
-            res = false;
-        }
-
-        sql = "SELECT COUNT(id) FROM logging;";
-        query.prepare(sql);
-        if (query.exec())
-        {
-            uint64_t totalrows = 0;
-            while (query.next())
-            {
-                totalrows = query.value(0).toLongLong();
-                LOG(VB_GENERAL, LOG_DEBUG,
-                    QString("Database has %1 log entries.").arg(totalrows));
-            }
-            if (totalrows > maxrows)
-            {
-                sql = "DELETE FROM logging ORDER BY msgtime LIMIT :ROWS;";
-                query.prepare(sql);
-                quint64 extrarows = totalrows - maxrows;
-                query.bindValue(":ROWS", extrarows);
-                LOG(VB_GENERAL, LOG_DEBUG,
-                    QString("Deleting oldest %1 database log entries.")
-                        .arg(extrarows));
-                if (!query.exec())
-                {
-                    MythDB::DBError("Delete excess log entries", query);
-                    res = false;
-                }
-            }
-        }
-        else
-        {
-            MythDB::DBError("Query logging table size", query);
-            res = false;
-        }
-    }
-
-    return res;
-}
+static constexpr int64_t kFourHours {4LL * 60 * 60};
 
 bool CleanupTask::DoRun(void)
 {
@@ -138,7 +59,7 @@ void CleanupTask::CleanupOldRecordings(void)
 
 void CleanupTask::CleanupInUsePrograms(void)
 {
-    QDateTime fourHoursAgo = MythDate::current().addSecs(-4 * 60 * 60);
+    QDateTime fourHoursAgo = MythDate::current().addSecs(-kFourHours);
     MSqlQuery query(MSqlQuery::InitCon());
 
     query.prepare("DELETE FROM inuseprograms "
@@ -150,7 +71,7 @@ void CleanupTask::CleanupInUsePrograms(void)
 
 void CleanupTask::CleanupOrphanedLiveTV(void)
 {
-    QDateTime fourHoursAgo = MythDate::current().addSecs(-4 * 60 * 60);
+    QDateTime fourHoursAgo = MythDate::current().addSecs(-kFourHours);
     MSqlQuery query(MSqlQuery::InitCon());
     MSqlQuery deleteQuery(MSqlQuery::InitCon());
 
@@ -283,6 +204,9 @@ void CleanupTask::CleanupChannelTables(void)
     MSqlQuery query(MSqlQuery::InitCon());
     MSqlQuery deleteQuery(MSqlQuery::InitCon());
 
+    // Delete all channels from the database that have already
+    // been deleted for at least one day and that are not referenced
+    // anymore by a recording.
     query.prepare(QString("DELETE channel "
                           "FROM channel "
                           "LEFT JOIN recorded r "
@@ -298,6 +222,8 @@ void CleanupTask::CleanupChannelTables(void)
         MythDB::DBError("CleanupTask::CleanupChannelTables "
                         "(channel table)", query);
 
+    // Delete all multiplexes from the database that are not
+    // referenced anymore by a channel.
     query.prepare(QString("DELETE dtv_multiplex "
                           "FROM dtv_multiplex "
                           "LEFT JOIN channel c "
@@ -306,6 +232,17 @@ void CleanupTask::CleanupChannelTables(void)
     if (!query.exec())
         MythDB::DBError("CleanupTask::CleanupChannelTables "
                         "(dtv_multiplex table)", query);
+
+    // Delete all IPTV channel data extension records from the database
+    // when the channel it refers to does not exist anymore.
+    query.prepare(QString("DELETE iptv_channel "
+                          "FROM iptv_channel "
+                          "LEFT JOIN channel c "
+                          "    ON c.chanid = iptv_channel.chanid "
+                          "WHERE c.chanid IS NULL"));
+    if (!query.exec())
+        MythDB::DBError("CleanupTask::CleanupChannelTables "
+                        "(iptv_channel table)", query);
 }
 
 void CleanupTask::CleanupProgramListings(void)
@@ -317,8 +254,7 @@ void CleanupTask::CleanupProgramListings(void)
     // Also make sure to keep enough data so that we can flag the original
     // airdate, for when that isn't included in guide data
     int newEpiWindow = gCoreContext->GetNumSetting( "NewEpisodeWindow", 14);
-    if (newEpiWindow > offset)
-        offset = newEpiWindow;
+    offset = std::max(newEpiWindow, offset);
 
     query.prepare("DELETE FROM oldprogram WHERE airdate < "
                   "DATE_SUB(CURRENT_DATE, INTERVAL 320 DAY);");
@@ -417,9 +353,9 @@ bool ThemeUpdateTask::DoRun(void)
     }
     else
     {
-
+        static const QRegularExpression kVersionDateRE { "\\.[0-9]{8,}.*" };
         MythVersion = MYTH_BINARY_VERSION; // Example: 29.20161017-1
-        MythVersion.remove(QRegularExpression("\\.[0-9]{8,}.*"));
+        MythVersion.remove(kVersionDateRE);
         LOG(VB_GENERAL, LOG_INFO,
             QString("Loading themes for %1").arg(MythVersion));
         result |= LoadVersion(MythVersion, LOG_ERR);

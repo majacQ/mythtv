@@ -3,8 +3,8 @@
 
 #include <QStringList>
 
-#include "mythtvexp.h"
-#include "standardsettings.h"
+#include "libmythui/standardsettings.h"
+#include "libmythtv/mythtvexp.h"
 
 class ProgramInfo;
 
@@ -17,7 +17,7 @@ class MTV_PUBLIC PlayGroup
     static int GetSetting(const QString &name, const QString &field,
                           int defval);
     template <typename T>
-        static typename std::enable_if<std::chrono::__is_duration<T>::value, T>::type
+        static std::enable_if_t<std::chrono::__is_duration<T>::value, T>
         GetDurSetting(const QString &name, const QString &field, T defval)
     { return T(GetSetting(name, field, static_cast<int>(defval.count()))); }
 };

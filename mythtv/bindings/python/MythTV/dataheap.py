@@ -10,37 +10,30 @@ from MythTV.altdict import DictData, DictInvertCI
 from MythTV.database import *
 from MythTV.system import Grabber, InternetMetadata, VideoMetadata
 from MythTV.mythproto import ftopen, FileOps, Program
-from MythTV.utility import CMPRecord, CMPVideo, MARKUPLIST, datetime, ParseSet,\
-                           py23_repr
+from MythTV.utility import CMPRecord, CMPVideo, MARKUPLIST, datetime, ParseSet
 
 import re
 import locale
-
-# TODO: if Python 3.3+ is in use by all distributions, use ElementTree only.
-try:
-    import xml.etree.cElementTree as etree
-except ImportError:
-    import xml.etree.ElementTree as etree
-
+import xml.etree.ElementTree as etree
+from collections import UserString
 from datetime import date, time
 
 _default_datetime = datetime(1900,1,1, tzinfo=datetime.UTCTZ())
 
-# from builtins import str
-try:
-    from UserString import MutableString
-except ImportError:
-    from collections import UserString as MutableString
-    unicode = str
-    MutableString = str
 
-class Artwork( MutableString ):
+class Artwork( UserString ):
+    """A mutable string implementation for Artwork."""
+
     _types = {'coverart':   'Coverart',
               'coverfile':  'Coverart',
               'fanart':     'Fanart',
               'banner':     'Banners',
               'screenshot': 'ScreenShots',
               'trailer':    'Trailers'}
+
+    # We inherit object.__hash__, so we must deny this explicitly
+    # to prevent the usage as key in dicts
+    __hash__ = None
 
     @property
     def data(self):
@@ -74,17 +67,9 @@ class Artwork( MutableString ):
             # return a dumb string
             return str.__new__(str, attr)
         else:
-            try:
-                return super(Artwork, cls).__new__(cls, attr, parent, imagetype)
-            except TypeError:
-                return super(Artwork, cls).__new__(cls, attr)
+            return super(Artwork, cls).__new__(cls)
 
     def __init__(self, attr, parent=None, imagetype=None):
-        # replace standard MutableString init to not overwrite self.data
-        # from warnings import warnpy3k
-        # warnpy3k('the class UserString.MutableString has been removed in '
-        #             'Python 3.0', stacklevel=2)
-
         self.attr = attr
         if imagetype is None:
             imagetype = self._types[attr]
@@ -95,7 +80,7 @@ class Artwork( MutableString ):
             self.hostname = parent.get('hostname', parent.get('host', None))
 
     def __repr__(self):
-        return u"<{0.imagetype} '{0.data}'>".format(self)
+        return "<{0.imagetype} '{0.data}'>".format(self)
 
     def __get__(self, inst, owner):
         if inst is None:
@@ -107,6 +92,18 @@ class Artwork( MutableString ):
 
     def __delete__(self, inst):
         inst[self.attr] = inst._defaults.get(self.attr, "")
+
+    def __setitem__(self, index, sub):
+        if index < 0:
+            index += len(self.data)
+        if index < 0 or index >= len(self.data): raise IndexError
+        self.data = self.data[:index] + sub + self.data[index+1:]
+
+    def __delitem__(self, index):
+        if index < 0:
+            index += len(self.data)
+        if index < 0 or index >= len(self.data): raise IndexError
+        self.data = self.data[:index] + self.data[index+1:]
 
     @property
     def exists(self):
@@ -159,8 +156,8 @@ class Record( CMPRecord, DBDataWrite, RECTYPE ):
             cls._stored_templates[name] = data
         return cls._stored_templates[name]
 
-    _defaults = {'title':u'Unknown', 'subtitle':u'', 'description':u'',
-                 'category':u'', 'station':u'', 'seriesid':u'', 'inetref':u'',
+    _defaults = {'title':'Unknown', 'subtitle':'', 'description':'',
+                 'category':'', 'station':'', 'seriesid':'', 'inetref':'',
                  'season':0, 'episode':0, 'last_record':_default_datetime,
                  'next_record':_default_datetime,
                  'last_delete':_default_datetime}
@@ -168,12 +165,12 @@ class Record( CMPRecord, DBDataWrite, RECTYPE ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Record Rule at %s>" % hex(id(self))
-        return u"<Record Rule '%s', Type %d at %s>" \
+            return "<Uninitialized Record Rule at %s>" % hex(id(self))
+        return "<Record Rule '%s', Type %d at %s>" \
                                     % (self.title, self.type, hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __init__(self, data=None, db=None, template=None):
         DBDataWrite.__init__(self, data, db)
@@ -295,7 +292,7 @@ class Recorded( CMPRecord, DBDataWrite ):
             'data' is a tuple containing (chanid, storagegroup)
     """
     _key   = ['chanid','starttime']
-    _defaults = {'title':u'Unknown', 'subtitle':'',          'description':'',
+    _defaults = {'title':'Unknown', 'subtitle':'',          'description':'',
                  'category':'',      'hostname':'',          'bookmark':0,
                  'editing':0,        'cutlist':0,            'autoexpire':0,
                  'commflagged':0,    'recgroup':'Default',   'seriesid':'',
@@ -313,6 +310,14 @@ class Recorded( CMPRecord, DBDataWrite ):
         _table = ['recordedcredits','people']
         _ref = ['chanid','starttime']
         _cref = ['person']
+
+    class _Role(DBDataWrite):
+        _table = 'roles'
+        _key = ['name']
+
+    class _InverseRole(DBData):
+        _table = 'roles'
+        _key = ['roleid']
 
     class _Seek( DBDataRef, MARKUP ):
         _table = 'recordedseek'
@@ -336,12 +341,12 @@ class Recorded( CMPRecord, DBDataWrite ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Recorded at %s>" % hex(id(self))
-        return u"<Recorded '%s','%s' at %s>" % (self.title,
+            return "<Uninitialized Recorded at %s>" % hex(id(self))
+        return "<Recorded '%s','%s' at %s>" % (self.title,
                 self.starttime.isoformat(' '), hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __init__(self, data=None, db=None):
         if data is not None:
@@ -430,7 +435,7 @@ class Recorded( CMPRecord, DBDataWrite ):
                             ('R','description'), ('C','category'),
                             ('U','recgroup'), ('hn','hostname'),
                             ('c','chanid') ):
-            tmp = unicode(self[data]).replace('/','-')
+            tmp = str(self[data]).replace('/','-')
             path = path.replace('%'+tag, tmp)
         for (data, pre) in (   ('starttime','%'), ('endtime','%e'),
                                ('progstart','%p'),('progend','%pe') ):
@@ -488,21 +493,68 @@ class Recorded( CMPRecord, DBDataWrite ):
                 self[tagt] = metadata[tagf]
 
         # pull cast
-        trans = {'Author':'writer'}
+        if overwrite:
+            self.cast.clean()
+
+        trans = {'Author': 'writer'}
+        prio = 0
         for cast in metadata.people:
-            self.cast.append(unicode(cast.name),
-                             unicode(trans.get(cast.job,
-                                        cast.job.lower().replace(' ','_'))))
+            # priority starts with '1', zero is reserved
+            prio += 1
+            # use or create an entry in the 'Roles' table if character is given:
+            if hasattr(cast, "character"):
+                try:
+                    char = self._Role(cast.character, self._db)
+                    roleid = char.roleid
+                except MythError:
+                    char = self._Role(db=self._db).create({'name': cast.character})
+                    char.update()
+                    roleid = char.roleid
+                priority = prio
+            else:
+                roleid = 0
+                priority = 0
+
+            role = str(trans.get(cast.job, cast.job.lower().replace(' ', '_')))
+            # this avoids unnecessary commits of the same data:
+            if not hasattr(CAST_ROLES, role.upper()):
+                role = ''
+
+            # check if cast exists, update it
+            cast_item = None
+            for item in [x for x in list(self.cast) if cast.name == x.name]:
+                # this supports actors playing multiple characters:
+                if item.role == role and item.roleid in [0, roleid]:
+                    cast_item = item
+                    break
+
+            # only overwrite if 'roleid' needs an update
+            if cast_item:
+                if cast_item.roleid != roleid:
+                    self.cast.delete(*cast_item.values())
+                else:
+                    continue
+            self.cast.append(str(cast.name), role, priority, roleid)
 
         # pull images
+        founddict = { 'banner'  : False,
+                      'coverart': False,
+                      'fanart'  : False }
+
         for image in metadata.images:
             if not hasattr(self.artwork, image.type):
-                pass
-            if getattr(self.artwork, image.type, ''):
                 continue
-            setattr(self.artwork, image.type, image.filename)
+            # use only the first valid artwork when overwriting:
+            if (overwrite or not getattr(self.artwork, image.type, '')) \
+                    and not founddict[image.type]:
+                founddict[image.type] = True
+            else:
+                continue
+            filename = "%s_%s" % (self.inetref.replace('.', '_'), image.filename)
+            setattr(self.artwork, image.type, filename)
             getattr(self.artwork, image.type).downloadFrom(image.url)
 
+        self.artwork.update()
         self.update()
 
     def exportMetadata(self):
@@ -528,17 +580,40 @@ class Recorded( CMPRecord, DBDataWrite ):
                 metadata[tagt] = self[tagf]
 
         # pull cast
-        for member in self.cast:
-            name = member.name
-            role = ' '.join([word.capitalize() for word in member.role.split('_')])
-            if role=='Writer': role = 'Author'
-            metadata.people.append(OrdDict((('name',name), ('job',role))))
+        # sort cast according given priority, add character if available
+        prio_list = []
+        tmp_list = [x for x in self.cast if x.priority > 0]
+        tmp_list.sort(key=lambda k: (k.role, k.priority))
+        prio_list.extend(tmp_list)
+        tmp_list = [x for x in self.cast if x.priority == 0]
+        tmp_list.sort(key=lambda k: (k.role, k.name))
+        prio_list.extend(tmp_list)
 
-#        for arttype in ['coverart', 'fanart', 'banner']:
-#            art = getattr(self.artwork, arttype)
-#            if art:
-#                metadata.images.append(OrdDict((('type',arttype), ('filename',art))))
+        for pitem in prio_list:
+            character = None
+            name = pitem.name
+            if pitem.roleid:
+                character = self._InverseRole(pitem.roleid, self._db).name
+            role = ' '.join([word.capitalize() for word in pitem.role.split('_')])
+            if role == 'Writer': role = 'Author'
+            if character:
+                metadata.people.append(OrdDict((('name', name), ('job', role),
+                                                ('character', character))))
+            else:
+                metadata.people.append(OrdDict((('name', name), ('job', role))))
 
+        # pull artworks
+        for arttype in ['coverart', 'fanart', 'banner']:
+            try:
+                art = getattr(self.artwork, arttype)
+                if art:
+                    # process URI (myth://<group>@<host>[:<port>]/<path/to/file>)
+                    # should we use for hostname 'art.hostname' or 'localhost'?
+                    url = "myth://%s@%s/%s" % (art.imagetype, art.hostname, str(art))
+                    metadata.images.append \
+                        (OrdDict((('type', arttype), ('filename', str(art)), ('url', url))))
+            except MythError:
+                pass
         return metadata
 
     def __getstate__(self):
@@ -570,19 +645,19 @@ class RecordedFile( CMPRecord, DBDataWrite ):
     _defaults = {'filesize':0,          'width':0,        'height':0,
                  'fps':0.0,             'aspect':0.0,     'audio_sample_rate':0,
                  'audio_channels':0,    'audio_codec':'', 'video_codec':'',
-                 'comment':u'',         'hostname':'',    'storagegroup':'',
+                 'comment':'',         'hostname':'',    'storagegroup':'',
                  'container':'',        'total_bitrate':0,
                  'video_avg_bitrate':0, 'video_max_bitrate':0,
                  'audio_avg_bitrate':0, 'audio_max_bitrate':0}
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized RecordedFile at %s>" % hex(id(self))
-        return u"<RecordedFile '%s','%d' at %s>" % (self.basename,
+            return "<Uninitialized RecordedFile at %s>" % hex(id(self))
+        return "<RecordedFile '%s','%d' at %s>" % (self.basename,
                 self.recordedid, hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __init__(self, data=None, db=None):
         DBDataWrite.__init__(self, data, db)
@@ -603,21 +678,21 @@ class RecordedProgram( CMPRecord, DBDataWrite ):
                  'stars':0,      'previouslyshown':0,    'title_pronounce':'',
                  'stereo':0,     'subtitled':0,          'hdtv':0,
                  'partnumber':0, 'closecaptioned':0,     'parttotal':0,
-                 'seriesid':'',  'originalairdate':'',   'showtype':u'',
+                 'seriesid':'',  'originalairdate':'',   'showtype':'',
                  'colorcode':'', 'syndicatedepisodenumber':'',
                  'programid':'', 'manualid':0,           'generic':0,
                  'first':0,      'listingsource':0,      'last':0,
-                 'audioprop':u'','videoprop':u'',
-                 'subtitletypes':u'', 'inputname':u''}
+                 'audioprop':'','videoprop':'',
+                 'subtitletypes':'', 'inputname':''}
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized RecordedProgram at %s>" % hex(id(self))
-        return u"<RecordedProgram '%s','%s' at %s>" % (self.title,
+            return "<Uninitialized RecordedProgram at %s>" % hex(id(self))
+        return "<RecordedProgram '%s','%s' at %s>" % (self.title,
                 self.starttime.isoformat(' '), hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __init__(self, data=None, db=None):
         if data is not None:
@@ -650,12 +725,12 @@ class OldRecorded( CMPRecord, DBDataWrite, RECSTATUS ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized OldRecorded at %s>" % hex(id(self))
-        return u"<OldRecorded '%s','%s' at %s>" % (self.title,
+            return "<Uninitialized OldRecorded at %s>" % hex(id(self))
+        return "<OldRecorded '%s','%s' at %s>" % (self.title,
                 self.starttime.isoformat(' '), hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def __init__(self, data=None, db=None):
         if data is not None:
@@ -694,12 +769,12 @@ class RecordedArtwork( DBDataWrite ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Artwork at %s>" % hex(id(self))
-        return u"<RecordedArtwork '%s','%d' at %s>" % \
+            return "<Uninitialized Artwork at %s>" % hex(id(self))
+        return "<RecordedArtwork '%s','%d' at %s>" % \
                         (self.inetref, self.season, hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     coverart = Artwork('coverart')
     fanart   = Artwork('fanart')
@@ -717,11 +792,11 @@ class Job( DBDataWrite, JOBTYPE, JOBCMD, JOBFLAG, JOBSTATUS ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Job at %s>" % hex(id(self))
-        return u"<Job '%s' at %s>" % (self.id, hex(id(self)))
+            return "<Uninitialized Job at %s>" % hex(id(self))
+        return "<Job '%s' at %s>" % (self.id, hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def setComment(self,comment):
         """Job.setComment(comment) -> None, updates comment"""
@@ -775,10 +850,10 @@ class Job( DBDataWrite, JOBTYPE, JOBCMD, JOBFLAG, JOBSTATUS ):
 
 class Channel( DBDataWrite ):
     """Channel(chanid=None, db=None) -> Channel object"""
-    _defaults = {'icon':'none',          'videofilters':'',  'callsign':u'',
+    _defaults = {'icon':'none',          'videofilters':'',  'callsign':'',
                  'xmltvid':'',           'recpriority':0,    'contrast':32768,
                  'brightness':32768,     'colour':32768,     'hue':32768,
-                 'tvformat':u'Default',  'visible':1,        'outputfilters':'',
+                 'tvformat':'Default',  'visible':1,        'outputfilters':'',
                  'useonairguide':0,      'atsc_major_chan':0,
                  'tmoffset':0,           'default_authority':'',
                  'commmethod':-1,        'atsc_minor_chan':0,
@@ -787,12 +862,12 @@ class Channel( DBDataWrite ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Channel at %s>" % hex(id(self))
-        return u"<Channel '%s','%s' at %s>" % \
+            return "<Uninitialized Channel at %s>" % hex(id(self))
+        return "<Channel '%s','%s' at %s>" % \
                         (self.chanid, self.name, hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
 class Guide( CMPRecord, DBData ):
     """
@@ -804,12 +879,12 @@ class Guide( CMPRecord, DBData ):
 
     def __str__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Guide at %s>" % hex(id(self))
-        return u"<Guide '%s','%s' at %s>" % (self.title,
+            return "<Uninitialized Guide at %s>" % hex(id(self))
+        return "<Guide '%s','%s' at %s>" % (self.title,
                 self.starttime.isoformat(' '), hex(id(self)))
 
     def __repr__(self):
-        return py23_repr(str(self))
+        return str(self)
 
     def getRecStatus(self):
         be = FileOps(db=self._db)
@@ -872,14 +947,14 @@ class Guide( CMPRecord, DBData ):
 class Video( CMPVideo, VideoSchema, DBDataWrite ):
     """Video(id=None, db=None, raw=None) -> Video object"""
     _table = 'videometadata'
-    _defaults = {'subtitle':u'',             'director':u'Unknown',
-                 'rating':u'NR',             'inetref':u'00000000',
+    _defaults = {'subtitle':'',             'director':'Unknown',
+                 'rating':'NR',             'inetref':'00000000',
                  'year':1895,                'userrating':0.0,
                  'length':0,                 'showlevel':1,
-                 'coverfile':u'No Cover',    'host':u'',
-                 'homepage':u'',             'insertdate': datetime.now(),
+                 'coverfile':'No Cover',    'host':'',
+                 'homepage':'',             'insertdate': datetime.now(),
                  'watched':False,            'category':0,
-                 'browse':True,              'hash':u'',
+                 'browse':True,              'hash':'',
                  'season':0,                 'episode':0,
                  'releasedate':date(1,1,1),  'childid':-1}
     _cm_toid, _cm_toname = DictInvertCI.createPair({0:'none'})
@@ -948,13 +1023,13 @@ class Video( CMPVideo, VideoSchema, DBDataWrite ):
 
     def __repr__(self):
         if self._wheredat is None:
-            return u"<Uninitialized Video at %s>" % hex(id(self))
+            return "<Uninitialized Video at %s>" % hex(id(self))
         res = self.title
         if self.season and self.episode:
-            res += u' - %dx%02d' % (self.season, self.episode)
+            res += ' - %dx%02d' % (self.season, self.episode)
         if self.subtitle:
-            res += u' - '+self.subtitle
-        return py23_repr(u"<Video '%s' at %s>" % (res, hex(id(self))))
+            res += ' - '+self.subtitle
+        return ("<Video '%s' at %s>" % (res, hex(id(self))))
 
     def _postinit(self):
         self._fill_cm()
@@ -1111,11 +1186,11 @@ class Video( CMPVideo, VideoSchema, DBDataWrite ):
         # pull actors
         for actor in [person for person in metadata.people \
                                   if person.job=='Actor']:
-            self.cast.add(unicode(actor.name))
+            self.cast.add(str(actor.name))
 
         # pull genres
         for category in metadata.categories:
-            self.genre.add(unicode(category))
+            self.genre.add(str(category))
 
         # pull images (SG content only)
         if bool(self.host):
@@ -1167,10 +1242,14 @@ class Video( CMPVideo, VideoSchema, DBDataWrite ):
             metadata.countries.append(country.country)
 
         # pull images
-#        for arttype in ['coverart', 'fanart', 'banner', 'screenshot']:
-#            art = getattr(self, arttype)
-#            if art:
-#                metadata.images.append(OrdDict((('type',arttype), ('filename',art))))
+        for arttype in ['coverart', 'fanart', 'banner', 'screenshot']:
+            art = getattr(self, arttype)
+            if art:
+                # process URI (myth://<group>@<host>[:<port>]/<path/to/file>)
+                # should we use for hostname 'art.hostname' or 'localhost'?
+                url = "myth://%s@%s/%s" % (art.imagetype, art.hostname, str(art))
+                metadata.images.append \
+                    (OrdDict((('type', arttype), ('filename', str(art)), ('url', url))))
 
         return metadata
 
@@ -1226,7 +1305,7 @@ class VideoGrabber( Grabber ):
 
     def __init__(self, mode, lang='en', db=None):
         dbvalue = {'tv':'TelevisionGrabber', 'movie':'MovieGrabber'}
-        path = {'tv':'metadata/Television/ttvdb.py',
+        path = {'tv':'metadata/Television/ttvdb4.py',
                 'movie':'metadata/Movie/tmdb3.py'}
         self.mode = mode.lower()
         try:
@@ -1236,6 +1315,67 @@ class VideoGrabber( Grabber ):
         except KeyError:
             raise MythError('Invalid MythVideo grabber')
         self.append('-l',lang)
+
+
+class InetrefGrabber( Grabber ):
+    """
+    InetrefGrabber(inetref, lang='en', db=None) -> Grabber object
+            'inetref' holds the grabber name and the id
+    """
+    logmodule = 'Python Inetref Grabber'
+
+    cls = VideoMetadata
+
+    def __init__(self, inetref, season=None, episode=None, lang='en', db=None):
+        self.grabber = inetref.split('_')[0]
+        try:
+            self.iref = inetref.split('_')[1]
+        except IndexError as e:
+            raise MythError("MythTV interef error: '%s' !" % inetref)
+
+        self.season = season
+        self.episode = episode
+        relative_paths = ['share/mythtv/metadata/Movie',
+                          'share/mythtv/metadata/Television']
+        prefix = None
+        for path in relative_paths:
+            long_path = os.path.join(INSTALL_PREFIX, path)
+            grabber_path = os.path.join(long_path, self.grabber)
+            if os.path.isfile(grabber_path):
+                prefix = long_path
+                break
+        if not prefix:
+            raise MythError("Invalid MythTV grabber prefix!")
+        else:
+            try:
+                Grabber.__init__(self, setting=None, db=db, path=self.grabber, prefix=prefix)
+            except KeyError:
+                raise MythError('Invalid MythTV grabber')
+            self.append('-l', lang)
+
+    def grabMetadata(self, search_collection=False):
+        """
+        obj.grabMetadata(search_collection=False/True)  -> metadata object
+
+            Returns a direct search for a specific movie or episode based on
+            the 'inetref' entry.
+        """
+
+        if (self.season is not None) and (self.episode is not None):
+            args = (self.iref, self.season, self.episode)
+        else:
+            args = (self.iref,)
+
+        if search_collection:
+            mdata = next(self.command('-C', *args))
+        else:
+            mdata = next(self.command('-D', *args))
+
+        # extend inetref with the grabber prefix:
+        if mdata.get('inetref') and mdata.inetref:
+            mdata.inetref = "%s_%s" % (self.grabber, mdata.inetref)
+        return mdata
+
 
 #### MYTHNETVISION ####
 
@@ -1254,7 +1394,7 @@ class InternetSource( DictData ):
     @classmethod
     def fromEtree(cls, etree, xmlconn):
         dat = {}
-        for item in etree.getchildren():
+        for item in list(etree):
             dat[item.tag] = item.text
 
         raw = []

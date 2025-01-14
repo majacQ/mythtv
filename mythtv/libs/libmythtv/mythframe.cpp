@@ -1,7 +1,7 @@
 // MythTV
-#include "mythlogging.h"
-#include "mythvideoprofile.h"
+#include "libmythbase/mythlogging.h"
 #include "mythframe.h"
+#include "mythvideoprofile.h"
 
 // FFmpeg - for av_malloc/av_free
 extern "C" {
@@ -24,7 +24,7 @@ MythVideoFrame::~MythVideoFrame()
     if (m_buffer && HardwareFormat(m_type))
         LOG(VB_GENERAL, LOG_ERR, LOC + "Frame still contains a hardware buffer!");
     else if (m_buffer)
-        av_freep(&m_buffer);
+        av_freep(reinterpret_cast<void*>(&m_buffer));
 }
 
 MythVideoFrame::MythVideoFrame(VideoFrameType Type, int Width, int Height, const VideoFrameTypes* RenderFormats)
@@ -43,10 +43,10 @@ void MythVideoFrame::Init(VideoFrameType Type, int Width, int Height, const Vide
 {
     size_t   newsize   = 0;
     uint8_t* newbuffer = nullptr;
-    if ((Width > 0 && Height > 0) && !((Type == FMT_NONE) || HardwareFormat(Type)))
+    if ((Width > 0 && Height > 0) && (Type != FMT_NONE) && !HardwareFormat(Type))
     {
         newsize = GetBufferSize(Type, Width, Height);
-        bool reallocate = !((Width == m_width) && (Height == m_height) && (newsize == m_bufferSize) && (Type == m_type));
+        bool reallocate = (Width != m_width) || (Height != m_height) || (newsize != m_bufferSize) || (Type != m_type);
         newbuffer = reallocate ? GetAlignedBuffer(newsize) : m_buffer;
         newsize   = reallocate ? newsize : m_bufferSize;
     }
@@ -77,7 +77,7 @@ void MythVideoFrame::Init(VideoFrameType Type, uint8_t *Buffer, size_t BufferSiz
     if (m_buffer && (m_buffer != Buffer))
     {
         LOG(VB_GENERAL, LOG_DEBUG, LOC + "Deleting old frame buffer");
-        av_freep(&m_buffer);
+        av_freep(reinterpret_cast<void*>(&m_buffer));
     }
 
     m_type         = Type;
@@ -155,7 +155,7 @@ void MythVideoFrame::ClearMetadata()
     m_timecode            = 0ms;
     m_displayTimecode     = 0ms;
     m_priv                = { nullptr };
-    m_interlaced          = 0;
+    m_interlaced          = false;
     m_topFieldFirst       = true;
     m_interlacedReverse   = false;
     m_newGOP              = false;
@@ -190,7 +190,7 @@ void MythVideoFrame::CopyPlane(uint8_t *To, int ToPitch, const uint8_t *From, in
 {
     if ((ToPitch == PlaneWidth) && (FromPitch == PlaneWidth))
     {
-        memcpy(To, From, static_cast<size_t>(PlaneWidth * PlaneHeight));
+        memcpy(To, From, static_cast<size_t>(PlaneWidth) * PlaneHeight);
         return;
     }
 
@@ -218,14 +218,14 @@ void MythVideoFrame::ClearBufferToBlank()
     int uv = (1 << (ColorDepth(m_type) - 1)) - 1;
     if (FMT_YV12 == m_type || FMT_YUV422P == m_type || FMT_YUV444P == m_type)
     {
-        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0] * m_height));
-        memset(m_buffer + m_offsets[1], uv & 0xff, static_cast<size_t>(m_pitches[1] * uv_height));
-        memset(m_buffer + m_offsets[2], uv & 0xff, static_cast<size_t>(m_pitches[2] * uv_height));
+        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0]) * m_height);
+        memset(m_buffer + m_offsets[1], uv & 0xff, static_cast<size_t>(m_pitches[1]) * uv_height);
+        memset(m_buffer + m_offsets[2], uv & 0xff, static_cast<size_t>(m_pitches[2]) * uv_height);
     }
     else if ((FormatIs420(m_type) || FormatIs422(m_type) || FormatIs444(m_type)) &&
              (m_pitches[1] == m_pitches[2]))
     {
-        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0] * m_height));
+        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0]) * m_height);
         unsigned char uv1 = (uv & 0xff00) >> 8;
         unsigned char uv2 = (uv & 0x00ff);
         unsigned char* buf1 = m_buffer + m_offsets[1];
@@ -243,12 +243,12 @@ void MythVideoFrame::ClearBufferToBlank()
     }
     else if (FMT_NV12 == m_type)
     {
-        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0] * m_height));
-        memset(m_buffer + m_offsets[1], uv & 0xff, static_cast<size_t>(m_pitches[1] * uv_height));
+        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0]) * m_height);
+        memset(m_buffer + m_offsets[1], uv & 0xff, static_cast<size_t>(m_pitches[1]) * uv_height);
     }
     else if (FormatIsNV12(m_type))
     {
-        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0] * m_height));
+        memset(m_buffer + m_offsets[0], 0, static_cast<size_t>(m_pitches[0]) * m_height);
         unsigned char uv1 = (uv & 0xff00) >> 8;
         unsigned char uv2 = (uv & 0x00ff);
         unsigned char* buf3 = m_buffer + m_offsets[1];
@@ -290,14 +290,14 @@ bool MythVideoFrame::CopyFrame(MythVideoFrame *From)
         return false;
     }
 
-    if (!((m_width > 0) && (m_height > 0) &&
-          (m_width == From->m_width) && (m_height == From->m_height)))
+    if ((m_width <= 0) || (m_height <= 0) ||
+          (m_width != From->m_width) || (m_height != From->m_height))
     {
         LOG(VB_GENERAL, LOG_ERR, "Invalid frame sizes");
         return false;
     }
 
-    if (!(m_buffer && From->m_buffer && (m_buffer != From->m_buffer)))
+    if (!m_buffer || !From->m_buffer || (m_buffer == From->m_buffer))
     {
         LOG(VB_GENERAL, LOG_ERR, "Invalid frames for copying");
         return false;
@@ -424,7 +424,7 @@ size_t MythVideoFrame::GetBufferSize(VideoFrameType Type, int Width, int Height,
 
     // Calculate rounding as necessary.
     int remainder = (adj_w * adj_h * bpp) % bpb;
-    return static_cast<uint>((adj_w * adj_h * bpp) / bpb + (remainder ? 1 : 0));
+    return static_cast<uint>(((adj_w * adj_h * bpp) / bpb) + (remainder ? 1 : 0));
 }
 
 uint8_t *MythVideoFrame::GetAlignedBuffer(size_t Size)
@@ -530,7 +530,7 @@ QString MythVideoFrame::DeinterlacerName(MythDeintType Deint, bool DoubleRate, V
 QString MythVideoFrame::DeinterlacerPref(MythDeintType Deint)
 {
     if (DEINT_NONE == Deint)
-        return QString("None");
+        return {"None"};
     QString result;
     if (Deint & DEINT_BASIC)       result = "Basic";
     else if (Deint & DEINT_MEDIUM) result = "Medium";

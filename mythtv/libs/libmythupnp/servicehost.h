@@ -6,7 +6,7 @@
 //                                                                            
 // Copyright (c) 2010 David Blain <dblain@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -17,10 +17,11 @@
 #include <QMetaMethod>
 #include <QMap>
 
-#include "upnpexp.h"
-#include "upnp.h"
-#include "eventing.h"
-#include "service.h"
+#include "libmythservicecontracts/service.h"
+
+#include "libmythupnp/upnpexp.h"
+#include "libmythupnp/upnp.h"
+#include "libmythupnp/eventing.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -78,7 +79,7 @@ class UPNP_PUBLIC ServiceHost : public HttpServerExtension
 
                  ServiceHost( const QMetaObject &metaObject,
                               const QString     &sExtensionName,
-                              const QString     &sBaseUrl,
+                                    QString      sBaseUrl,
                               const QString     &sSharePath );
         ~ServiceHost() override = default;
 

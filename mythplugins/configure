@@ -261,12 +261,38 @@ int main(void){ $func(); }
 EOF
 }
 
+check_class_cxx(){
+    log check_class_cxx "$@"
+    class=$1
+    header=$2
+    shift 2
+    check_ld_cxx "$@" <<EOF
+#include <$header>
+int main(void){ $class; }
+EOF
+}
+
 check_lib_cxx(){
     log check_lib_cxx "$@"
     header="$1"
     func="$2"
     shift 2
     check_header_cxx $header && check_func_cxx $func $header "$@"
+}
+
+check_lib_cxx2(){
+    log check_lib_cxx2 "$@"
+    header="$1"
+    func="$2"
+    shift 2
+    check_header_cxx $header && check_class_cxx $func $header "$@"
+}
+
+cp_if_changed(){
+    cmp -s "$1" "$2" && { test "$quiet" != "yes" && echo "$2 is unchanged"; } && return
+    mkdir -p "$(dirname $2)"
+    cp -f "$1" "$2"
+    echo "Created $2"
 }
 
 #
@@ -291,11 +317,11 @@ flix
 
 CONFIG_LIST="
 opengl
-fftw
 exif
 newexif
 dcraw
 cdio
+musicbrainz
 "
 
 DEPEND_LIST="
@@ -349,8 +375,8 @@ MythGame related options:
 
 MythMusic related options:
   --enable-mythmusic       build the mythmusic plugin [$music]
-  --enable-fftw            enable fftw visualizers [$fftw]
   --enable-cdio            enable cd playback [$cdio]
+  --enable-musicbrainz     enable fetching cd metadata from musicbrainz [$musicbrainz]
 
 MythNetvision related options:
   --enable-mythnetvision   build the mythnetvision plugin [$netvision]
@@ -466,11 +492,23 @@ check_py_lib(){
     log check_py_lib "$@"
     lib=${1}
     check_cmd $python <<EOF
-from distutils.sysconfig import get_python_lib
 import sys
-for mythroot in '${mythroot}'.split(':'):
-    sys.path.append(get_python_lib(prefix=mythroot +'${prefix}'))
-sys.path.append(get_python_lib(prefix='${sysroot}${prefix}'))
+try:
+    from distutils.sysconfig import get_python_lib
+    for mythroot in '${mythroot}'.split(':'):
+        sys.path.append(get_python_lib(prefix=mythroot +'${prefix}'))
+        sys.path.append(get_python_lib(prefix=mythroot +'${prefix}/local'))
+    sys.path.append(get_python_lib(prefix='${sysroot}${prefix}'))
+    sys.path.append(get_python_lib(prefix='${sysroot}${prefix}/local'))
+except:
+    # python 3.12+
+    from sysconfig import get_path
+    for mroot in '${mythroot}'.split(':'):
+        sys.path.append(mroot + get_path('purelib'))
+    vars = {'base': '${sysroot}${prefix}', 'prefix': '${prefix}'}
+    sys.path.append(get_path('purelib', vars=vars, expand=True))
+    vars = {'base': '${sysroot}${prefix}', 'prefix': '${prefix}/local'}
+    sys.path.append(get_path('purelib', vars=vars, expand=True))
 try:
     import $lib
 except:
@@ -513,6 +551,7 @@ tmpfile TMPSH .sh
 tmpfile TMPCXX .cpp
 tmpfile TMPASM .asm
 tmpfile TMPMAK .mak
+tmpfile TMPPRO .pro
 
 unset -f mktemp
 
@@ -577,6 +616,11 @@ WEBKIT=$(cat mythconfig.mak | grep -e "^CONFIG_QTWEBKIT=yes")
 EXTRALIBS=$(cat mythconfig.mak | grep -e "^EXTRALIBS=")
 EXTRALIBS=${EXTRALIBS#EXTRALIBS=}
 
+MYTHTV_VERSION_MAJMIN=$(cat mythconfig.mak | grep -e "^MYTHTV_VERSION_MAJMIN=")
+MYTHTV_VERSION_MAJMIN=${MYTHTV_VERSION_MAJMIN#MYTHTV_VERSION_MAJMIN=}
+MYTHTV_LIBVERSION=$(cat mythconfig.mak | grep -e "^MYTHTV_LIBVERSION=")
+MYTHTV_LIBVERSION=${MYTHTV_LIBVERSION#MYTHTV_LIBVERSION=}
+
 QT_MIN_VERSION=$(cat mythconfig.mak | grep -e "^QT_MIN_VERSION=")
 QT_MIN_VERSION=${QT_MIN_VERSION#QT_MIN_VERSION=}
 QT_MIN_VERSION_STR=$(cat mythconfig.mak | grep -e "^QT_MIN_VERSION_STR=")
@@ -601,11 +645,6 @@ if enabled opengl && test "$OPENGLV" != "CONFIG_OPENGL_VIDEO=yes"; then
     disable opengl
 fi
 
-#Test if fftw_lib3 is available
-if enabled fftw &&! check_lib2 fftw3.h fftw_init_threads -lfftw3_threads -lfftw3f -lfftw3 ; then
-    disable fftw
-fi
-
 if ! check_lib libexif/exif-data.h exif_loader_new -lexif ; then
     disable exif
 fi
@@ -614,17 +653,6 @@ if enabled browser; then
     if test "$WEBKIT" != "CONFIG_QTWEBKIT=yes"; then
         disable browser
         echo "MythBrowser requires QtWebkit."
-    fi
-fi
-
-if enabled game; then
-    if check_lib unzip.h unzGetCurrentFileInfo -lminizip ; then
-        MINIZIP_PREFIX=
-    elif check_lib minizip/unzip.h unzGetCurrentFileInfo -lminizip ; then
-        MINIZIP_PREFIX="minizip/"
-    else
-        echo 'minizip required to compile mythgame'
-        disable game
     fi
 fi
 
@@ -640,8 +668,6 @@ if enabled netvision; then
     check_py_lib lxml    || disable_netvision "Python lxml library (lxml)"
     check_py_lib xml     || disable_netvision "Python XML library (xml)"
     check_py_lib urllib  || disable_netvision "Python URL library (urllib)"
-    check_py_lib urllib2 || disable_netvision "Python URL library 2 (urllib2)"
-    check_py_lib oauth   || disable_netvision "Python OAuth library (oauth)"
 
     disabled netvision && echo "Disabling MythNetvision due to missing dependencies."
 fi
@@ -686,13 +712,23 @@ if test x"$icc" != x ; then
     fi
 fi
 
-if enabled music ; then
-    if [ $qt_version -lt $(version2num "6.0.0") ]; then
-        if test "$WEBKIT" != "CONFIG_QTWEBKIT=yes"; then
-            disable music
-            echo "MythMusic requires QtWebkit."
-        fi
+libmusicbrainz_pc(){
+    if $(pkg-config libmusicbrainz5cc --exists) ; then
+        echo "libmusicbrainz5cc"
+    else
+        echo "libmusicbrainz5"
     fi
+}
+
+libcoverart_pc(){
+    if $(pkg-config libcoverartcc --exists) ; then
+        echo "libcoverartcc"
+    else
+        echo "libcoverart"
+    fi
+}
+
+if enabled music ; then
 
     if ! check_lib vorbis/codec.h vorbis_info_init -lvorbis || ! check_lib vorbis/vorbisenc.h vorbis_encode_setup_vbr -lvorbisenc -lvorbis -logg ; then
         disable vorbis
@@ -707,17 +743,30 @@ if enabled music ; then
     if enabled cdio ; then
         if ! check_lib cdio/cdio.h cdio_open -lcdio ; then
             disable cdio
-        # cd paranoia moved to sib-directory on latest debian based releases
+        # cd paranoia moved to sub-directory on latest debian based releases
         elif check_lib cdio/cdda.h cdio_cddap_open -lcdio_cdda && \
              check_lib cdio/paranoia.h cdio_paranoia_init -lcdio_paranoia ; then
             enable cdio; # nop
         elif check_lib cdio/paranoia/cdda.h cdio_cddap_open -lcdio_cdda && \
              check_lib cdio/paranoia/paranoia.h cdio_paranoia_init -lcdio_paranoia ; then
             enable cdio; # nop
-            enable cdparanoia_subdir
         else
             disable cdio
-	fi
+        fi
+    fi
+    if enabled musicbrainz ; then
+        if ! check_lib discid/discid.h discid_new -ldiscid ; then
+            disable musicbrainz
+            echo "MusicBrainz support requires libdiscid."
+        elif ! check_lib_cxx2 musicbrainz5/Query.h MusicBrainz5::CQuery\(\"test\"\) $(pkg-config $(libmusicbrainz_pc) --cflags --libs); then
+            disable musicbrainz
+            echo "MusicBrainz support requires libmusicbrainz5."
+        elif ! check_lib_cxx2 coverart/CoverArt.h CoverArtArchive::CCoverArt\(\"test\"\) $(pkg-config $(libcoverart_pc) --cflags --libs); then
+            disable musicbrainz
+            echo "MusicBrainz support requires libcoverart."
+        else
+            enable musicbrainz; # nop
+        fi
     fi
 
     if ! check_lib lame/lame.h lame_init -lmp3lame ; then
@@ -738,15 +787,13 @@ if enabled zoneminder ; then
     fi
 fi
 
-cat > $TMPC << EOF
-#include <stdint.h>
-int main( void ) { return 0; }
-EOF
-
-disable _stdint_h
-if $cc -o $TMPE $TMPC 2> /dev/null ; then
-  enable _stdint_h
-fi
+echo "Creating settings2.pro"
+echo "MYTHTV_VERSION_MAJMIN: ${MYTHTV_VERSION_MAJMIN}"
+echo "MYTHTV_LIBVERSION: ${MYTHTV_LIBVERSION}"
+sed -e "s/@MYTHTV_VERSION_MAJMIN@/${MYTHTV_VERSION_MAJMIN}/g" \
+    -e "s/@MYTHTV_LIBVERSION@/${MYTHTV_LIBVERSION}/g" \
+    settings2.pro.in > $TMPPRO
+cp_if_changed $TMPPRO settings2.pro
 
 ###########################################################
 #                                                         #
@@ -837,21 +884,6 @@ fi
 
 ###########################################################
 #                                                         #
-#   MythGame related configuration options                #
-#                                                         #
-###########################################################
-
-if enabled game ; then
-
-    echo "/*" >  ./mythgame/mythgame/config.h
-    echo "    Automatically generated by configure - do not modify" >> ./mythgame/mythgame/config.h
-    echo "*/" >> ./mythgame/mythgame/config.h
-    echo "#define MINIZIP_UNZIP_H \"${MINIZIP_PREFIX}unzip.h\"" >> ./mythgame/mythgame/config.h
-
-fi
-
-###########################################################
-#                                                         #
 #  MythMusic related configuration options                #
 #                                                         #
 ###########################################################
@@ -861,37 +893,31 @@ if enabled music ; then
     echo "/*" >  ./mythmusic/mythmusic/config.h
     echo "    Automatically generated by configure - do not modify" >> ./mythmusic/mythmusic/config.h
     echo "*/" >> ./mythmusic/mythmusic/config.h
+    echo "/* NOLINTBEGIN(cppcoreguidelines-macro-usage) */" >> ./mythmusic/mythmusic/config.h
 
     echo "#" > ./mythmusic/mythmusic/config.pro
     echo "#    Automatically generated by configure - modify only under penalty of death" >> ./mythmusic/mythmusic/config.pro
     echo "#" >> ./mythmusic/mythmusic/config.pro
 
-    if enabled _stdint_h ; then
-      echo "#define HAVE_STDINT_H 1" >> ./mythmusic/mythmusic/config.h
-    else
-      echo "#undef  HAVE_STDINT_H" >> ./mythmusic/mythmusic/config.h
-    fi
-
     if enabled cdio ; then
       echo "#define HAVE_CDIO 1" >> ./mythmusic/mythmusic/config.h
-      if enabled cdparanoia_subdir ; then
-        echo "#define HAVE_CDPARANOIA_SUBDIR 1" >> ./mythmusic/mythmusic/config.h
-      fi
       echo "CONFIG += cdio" >> ./mythmusic/mythmusic/config.pro
       echo "        libcdio        support will be included in MythMusic"
+      if enabled musicbrainz ; then
+        echo "#define HAVE_MUSICBRAINZ 1" >> ./mythmusic/mythmusic/config.h
+        echo "CONFIG += link_pkgconfig" >> ./mythmusic/mythmusic/config.pro
+        echo "CONFIG += musicbrainz" >> ./mythmusic/mythmusic/config.pro
+        echo "PKGCONFIG += libdiscid $(libmusicbrainz_pc) $(libcoverart_pc)" >> ./mythmusic/mythmusic/config.pro
+        echo "        musicbrainz    support will be included in MythMusic"
+      else
+        echo "#undef  HAVE_MUSICBRAINZ" >> ./mythmusic/mythmusic/config.h
+        echo "        musicbrainz    support will not be included in MythMusic"
+      fi
     else
       echo "#undef  HAVE_CDIO" >> ./mythmusic/mythmusic/config.h
       echo "        libcdio        support will not be included in MythMusic"
     fi
-
-    if enabled fftw; then
-        echo "        FFTW v.3       support will be included in MythMusic"
-        echo "#define FFTW3_SUPPORT 1" >> ./mythmusic/mythmusic/config.h
-        echo "LIBS += -lfftw3 -lm" >> \
-             ./mythmusic/mythmusic/config.pro
-    else
-        echo "        FFTW           support will not be included in MythMusic"
-    fi
+    echo "/* NOLINTEND(cppcoreguidelines-macro-usage) */" >> ./mythmusic/mythmusic/config.h
 fi
 
 ###########################################################

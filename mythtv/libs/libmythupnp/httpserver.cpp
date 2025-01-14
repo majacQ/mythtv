@@ -8,7 +8,7 @@
 // Copyright (c) 2005 David Blain <dblain@mythtv.org>
 //               2014 Stuart Morgan <smorgan@mythtv.org>
 //                                          
-// Licensed under the GPL v2 or later, see COPYING for details                    
+// Licensed under the GPL v2 or later, see LICENSE for details
 //
 //////////////////////////////////////////////////////////////////////////////
 
@@ -24,7 +24,9 @@
 #endif
 
 // Qt headers
+#if CONFIG_QTSCRIPT
 #include <QScriptEngine>
+#endif
 #include <QSslConfiguration>
 #include <QSslSocket>
 #include <QSslCipher>
@@ -32,14 +34,15 @@
 #include <QUuid>
 
 // MythTV headers
+#include "libmythbase/compat.h"
+#include "libmythbase/mythcorecontext.h"
+#include "libmythbase/mythdirs.h"
+#include "libmythbase/mythlogging.h"
+#include "libmythbase/mythversion.h"
+
 #include "upnputil.h"
 #include "upnp.h" // only needed for Config... remove once config is moved.
-#include "compat.h"
-#include "mythdirs.h"
-#include "mythlogging.h"
 #include "htmlserver.h"
-#include "mythversion.h"
-#include "mythcorecontext.h"
 
 #include "serviceHosts/rttiServiceHost.h"
 
@@ -295,7 +298,7 @@ QString HttpServer::GetServerVersion(void)
 //
 /////////////////////////////////////////////////////////////////////////////
 
-void HttpServer::newTcpConnection(qt_socket_fd_t socket)
+void HttpServer::newTcpConnection(qintptr socket)
 {
     PoolServerType type = kTCPServer;
     auto *server = qobject_cast<PrivTcpServer *>(QObject::sender());
@@ -327,9 +330,12 @@ void HttpServer::RegisterExtension( HttpServerExtension *pExtension )
 
         QStringList list = pExtension->GetBasePaths();
 
-        for( const QString& base : qAsConst(list))
+        for( const QString& base : std::as_const(list))
+        {
             m_basePaths.insert( base, pExtension );
-
+            LOG(VB_HTTP, LOG_INFO, QString("HttpServer: Registering %1 extension path %2")
+                .arg(pExtension->m_sName, base));
+        }
         m_rwlock.unlock();
     }
 }
@@ -346,7 +352,7 @@ void HttpServer::UnregisterExtension( HttpServerExtension *pExtension )
 
         QStringList list = pExtension->GetBasePaths();
 
-        for( const QString& base : qAsConst(list))
+        for( const QString& base : std::as_const(list))
             m_basePaths.remove( base, pExtension );
 
         m_extensions.removeAll(pExtension);
@@ -442,7 +448,7 @@ uint HttpServer::GetSocketTimeout(HTTPRequest* pRequest) const
 /////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
 
-HttpWorker::HttpWorker(HttpServer &httpServer, qt_socket_fd_t sock,
+HttpWorker::HttpWorker(HttpServer &httpServer, qintptr sock,
                        PoolServerType type
 #ifndef QT_NO_OPENSSL
                        , const QSslConfiguration& sslConfig
@@ -566,7 +572,7 @@ void HttpWorker::run(void)
                         m_socketTimeout = nTimeout; // Converts to milliseconds
 
                         // ------------------------------------------------------
-                        // Request Parsed... Pass on to Main HttpServer class to 
+                        // Request Parsed... Pass on to Main HttpServer class to
                         // delegate processing to HttpServerExtensions.
                         // ------------------------------------------------------
                         if ((pRequest->m_nResponseStatus != 400) &&
@@ -629,7 +635,7 @@ void HttpWorker::run(void)
     delete pRequest;
 
     if ((pSocket->error() != QAbstractSocket::UnknownSocketError) &&
-        !(bKeepAlive && pSocket->error() == QAbstractSocket::SocketTimeoutError)) // This 'error' isn't an error when keep-alive is active
+        (!bKeepAlive || pSocket->error() != QAbstractSocket::SocketTimeoutError)) // This 'error' isn't an error when keep-alive is active
     {
         LOG(VB_HTTP, LOG_WARNING, QString("HttpWorker(%1): Error %2 (%3)")
                                    .arg(m_socket)

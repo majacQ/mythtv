@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include <QTimeZone>
+
 #include "dvbtables.h"
 #include "dvbdescriptors.h"
 
@@ -332,11 +334,15 @@ QDateTime dvbdate2qt(const unsigned char *buf)
         (mjdf - 14956.0F - truncf(year * 365.25F) - truncf(month * 30.6001F)));
     int i     = (month == 14 || month == 15) ? 1 : 0;
 
-    QDate date(1900 + year + i, month - 1 - i * 12, day);
+    QDate date(1900 + year + i, month - 1 - (i * 12), day);
     QTime time(byteBCD2int(buf[2]), byteBCD2int(buf[3]),
                byteBCD2int(buf[4]));
 
-    return QDateTime(date, time, Qt::UTC);
+#if QT_VERSION < QT_VERSION_CHECK(6,5,0)
+    return {date, time, Qt::UTC};
+#else
+    return {date, time, QTimeZone(QTimeZone::UTC)};
+#endif
 }
 
 /** \fn dvbdate2unix(const unsigned char*)
